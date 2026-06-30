@@ -7,31 +7,99 @@
   <style>
     :root {
       --bg: #0e1117;
+      --bar: #11161d;
       --card: #161b22;
       --card-hover: #1f2630;
       --border: #283040;
       --text: #e6edf3;
       --muted: #8b949e;
       --accent: #3b82f6;
+      --accent-dim: #1d3a66;
+      --bar-h: 52px;
+      --tabs-h: 46px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
-      padding: 48px 24px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
-    header {
-      max-width: 1000px;
-      margin: 0 auto 40px;
-      text-align: center;
+
+    /* --- Верхняя панель --- */
+    .topbar {
+      height: var(--bar-h);
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 18px;
+      background: var(--bar);
+      border-bottom: 1px solid var(--border);
     }
-    header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-    header p { color: var(--muted); margin-top: 8px; font-size: 15px; }
+    .brand { font-weight: 700; font-size: 16px; letter-spacing: -0.3px; }
+    .brand .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+    .spacer { flex: 1; }
+    .popout-btn {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      background: var(--accent-dim);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .popout-btn:hover { border-color: var(--accent); }
+
+    /* --- Полоса вкладок --- */
+    .tabs {
+      height: var(--tabs-h);
+      flex: 0 0 auto;
+      display: flex;
+      align-items: stretch;
+      gap: 2px;
+      padding: 0 10px;
+      background: var(--bar);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 14px;
+      font-size: 13.5px;
+      color: var(--muted);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .tab .ext { font-size: 11px; opacity: .65; }
+
+    /* --- Контентная область --- */
+    .content { flex: 1 1 auto; position: relative; min-height: 0; }
+    .pane { position: absolute; inset: 0; display: none; }
+    .pane.active { display: block; }
+    iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+
+    /* --- Домашний экран с плитками --- */
+    .home { overflow-y: auto; padding: 36px 24px; }
+    .home h1 { font-size: 22px; font-weight: 700; text-align: center; }
+    .home p.lead { color: var(--muted); text-align: center; margin-top: 6px; font-size: 14px; }
     .grid {
       max-width: 1000px;
-      margin: 0 auto;
+      margin: 28px auto 0;
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       gap: 18px;
@@ -40,88 +108,172 @@
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 22px;
-      text-decoration: none;
-      color: inherit;
+      padding: 20px;
       display: flex;
       flex-direction: column;
       gap: 10px;
-      transition: background .15s ease, transform .15s ease, border-color .15s ease;
+      cursor: pointer;
+      position: relative;
+      transition: background .15s, transform .15s, border-color .15s;
     }
-    .tile:hover {
-      background: var(--card-hover);
-      transform: translateY(-2px);
-      border-color: var(--accent);
-    }
+    .tile:hover { background: var(--card-hover); transform: translateY(-2px); border-color: var(--accent); }
     .tile .top { display: flex; align-items: center; gap: 12px; }
-    .tile .ico {
-      width: 42px; height: 42px;
-      border-radius: 10px;
-      display: grid; place-items: center;
-      font-size: 20px; font-weight: 700;
-      background: #21262d;
-    }
-    .tile h2 { font-size: 17px; font-weight: 600; }
+    .tile .ico { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; font-size: 16px; font-weight: 700; background: #21262d; }
+    .tile h2 { font-size: 16px; font-weight: 600; }
     .tile .desc { color: var(--muted); font-size: 13px; line-height: 1.5; }
-    .tile .port {
-      margin-top: auto;
-      font-size: 12px;
-      color: var(--muted);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    .tile .meta { margin-top: auto; display: flex; justify-content: space-between; align-items: center; }
+    .tile .port { font-size: 12px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .tile .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; }
+    .tile .popout {
+      position: absolute; top: 12px; right: 12px;
+      width: 28px; height: 28px; border-radius: 7px;
+      display: grid; place-items: center;
+      background: #21262d; color: var(--muted);
+      border: 1px solid var(--border); font-size: 13px;
     }
-    footer {
-      max-width: 1000px;
-      margin: 40px auto 0;
-      text-align: center;
-      color: var(--muted);
-      font-size: 12px;
+    .tile .popout:hover { color: var(--text); border-color: var(--accent); }
+
+    /* --- Карточка-объяснение для new-tab-only приложений --- */
+    .notice { display: grid; place-items: center; height: 100%; padding: 24px; }
+    .notice .box {
+      max-width: 460px; text-align: center;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 14px; padding: 30px;
     }
+    .notice h2 { font-size: 18px; margin-bottom: 10px; }
+    .notice p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .notice button {
+      margin-top: 18px; background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; padding: 10px 18px; font-size: 14px; cursor: pointer;
+    }
+    .notice button:hover { filter: brightness(1.08); }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Единая панель</h1>
-    <p>6 приложений в одном контейнере. Плитка открывает приложение на своём порту.</p>
-  </header>
+  <div class="topbar">
+    <div class="brand">Единая панель <span class="sub" id="hostlabel"></span></div>
+    <div class="spacer"></div>
+    <a class="popout-btn" id="popout" target="_blank" rel="noopener">↗ Открыть в новой вкладке</a>
+  </div>
 
-  <main class="grid" id="grid"></main>
+  <nav class="tabs" id="tabs"></nav>
 
-  <footer>
-    Хост определяется автоматически — работает и по <code>localhost</code>, и по IP.
-  </footer>
+  <main class="content" id="content"></main>
 
   <script>
-    // Плитки. Каждое приложение реально слушает свой порт.
+    // --- Приложения. embed=false → только новая вкладка (Auth0/блокировка iframe). ---
     const APPS = [
-      { key: "cf",    name: "Cloudflare Panel", icon: "CF", port: 3331, path: "/",      desc: "Домены, SSL, DNS, токены Cloudflare." },
-      { key: "seo",   name: "SEO Dashboard",    icon: "SE", port: 3332, path: "/",      desc: "Google Search Console / SEO-метрики." },
-      { key: "ank",   name: "Генератор анкоров",icon: "AN", port: 3333, path: "/",      desc: "Анкоры (HubNero): проекты, стратегии." },
-      { key: "img",   name: "ImageGen",         icon: "IM", port: 3334, path: "/",      desc: "Мультимодельная генерация изображений." },
-      { key: "arc",   name: "Web Archive",      icon: "AR", port: 3335, path: "/",      desc: "Прогоны доменов по веб-архиву." },
-      { key: "skins", name: "Brandskins",       icon: "SK", port: 3336, path: "/admin", desc: "Шаблоны и темы брендов (панель /admin)." },
+      { key: "cf",    name: "Cloudflare Panel",  icon: "CF", port: 3331, path: "/",      embed: true,  desc: "Домены, SSL, DNS, токены Cloudflare." },
+      { key: "seo",   name: "SEO Dashboard",     icon: "SE", port: 3332, path: "/",      embed: false, desc: "GSC / SEO. Вход через Auth0 — только в новой вкладке." },
+      { key: "ank",   name: "Генератор анкоров", icon: "AN", port: 3333, path: "/",      embed: true,  desc: "Анкоры (HubNero): проекты, стратегии." },
+      { key: "img",   name: "ImageGen",          icon: "IM", port: 3334, path: "/",      embed: true,  desc: "Мультимодельная генерация изображений." },
+      { key: "arc",   name: "Web Archive",       icon: "AR", port: 3335, path: "/",      embed: true,  desc: "Прогоны доменов по веб-архиву." },
+      { key: "skins", name: "Brandskins",        icon: "SK", port: 3336, path: "/admin", embed: true,  desc: "Шаблоны и темы брендов (панель /admin)." },
     ];
 
-    // Хост берём из адресной строки (localhost / IP / поддомен).
-    const host = location.hostname;
+    const host  = location.hostname;
     const proto = location.protocol;
+    const urlFor = (app) => `${proto}//${host}:${app.port}${app.path}`;
 
-    const grid = document.getElementById("grid");
-    for (const app of APPS) {
-      const url = `${proto}//${host}:${app.port}${app.path}`;
-      const a = document.createElement("a");
-      a.className = "tile";
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.innerHTML = `
-        <div class="top">
-          <div class="ico">${app.icon}</div>
-          <h2>${app.name}</h2>
-        </div>
+    document.getElementById("hostlabel").textContent = `· ${host}`;
+
+    const tabsEl    = document.getElementById("tabs");
+    const contentEl = document.getElementById("content");
+    const popoutEl  = document.getElementById("popout");
+
+    const frames = {};   // key -> iframe pane (создаются лениво, переживают переключение)
+    let active = "home";
+
+    // --- Вкладки ---
+    function makeTab(key, label, external) {
+      const b = document.createElement("button");
+      b.className = "tab";
+      b.dataset.key = key;
+      b.innerHTML = label + (external ? ' <span class="ext">↗</span>' : "");
+      b.onclick = () => openApp(key);
+      tabsEl.appendChild(b);
+      return b;
+    }
+    makeTab("home", "▦ Дашборд", false);
+    APPS.forEach(a => makeTab(a.key, a.name, !a.embed));
+
+    // --- Домашняя плитка-сетка ---
+    const home = document.createElement("div");
+    home.className = "pane home active";
+    home.innerHTML = `
+      <h1>Рабочее пространство</h1>
+      <p class="lead">Вкладка открывает приложение прямо здесь. Кнопка ↗ — в отдельной вкладке браузера.</p>
+      <div class="grid" id="grid"></div>`;
+    contentEl.appendChild(home);
+
+    const grid = home.querySelector("#grid");
+    APPS.forEach(app => {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.onclick = () => openApp(app.key);
+      tile.innerHTML = `
+        <div class="popout" title="Открыть в новой вкладке">↗</div>
+        <div class="top"><div class="ico">${app.icon}</div><h2>${app.name}</h2></div>
         <div class="desc">${app.desc}</div>
-        <div class="port">${host}:${app.port}${app.path}</div>
-      `;
-      grid.appendChild(a);
+        <div class="meta">
+          <span class="port">:${app.port}${app.path}</span>
+          <span class="badge">${app.embed ? "встраивается" : "новая вкладка"}</span>
+        </div>`;
+      tile.querySelector(".popout").onclick = (e) => { e.stopPropagation(); openExternal(app); };
+      grid.appendChild(tile);
+    });
+
+    // --- Переключение ---
+    function setActiveTab(key) {
+      [...tabsEl.children].forEach(t => t.classList.toggle("active", t.dataset.key === key));
+    }
+    function showPane(el) {
+      [...contentEl.children].forEach(p => p.classList.remove("active"));
+      el.classList.add("active");
+    }
+    function updatePopout(app) {
+      if (app) { popoutEl.style.display = "flex"; popoutEl.href = urlFor(app); }
+      else popoutEl.style.display = "none";
+    }
+    function openExternal(app) { window.open(urlFor(app), "_blank", "noopener"); }
+
+    function openApp(key) {
+      if (key === "home") { active = "home"; setActiveTab("home"); showPane(home); updatePopout(null); return; }
+      const app = APPS.find(a => a.key === key);
+
+      if (!app.embed) {            // new-tab-only: открыть и показать пояснение
+        openExternal(app);
+        showNotice(app);
+        return;
+      }
+      if (!frames[key]) {          // ленивое создание iframe; затем живёт и хранит состояние
+        const f = document.createElement("iframe");
+        f.src = urlFor(app);
+        f.className = "pane";
+        contentEl.appendChild(f);
+        frames[key] = f;
+      }
+      active = key; setActiveTab(key); showPane(frames[key]); updatePopout(app);
+    }
+
+    // --- Пояснение для new-tab-only ---
+    let noticePane;
+    function showNotice(app) {
+      if (!noticePane) {
+        noticePane = document.createElement("div");
+        noticePane.className = "pane notice";
+        contentEl.appendChild(noticePane);
+      }
+      noticePane.innerHTML = `
+        <div class="box">
+          <h2>${app.name} открывается в отдельной вкладке</h2>
+          <p>${app.desc}<br><br>Это приложение блокирует встраивание в iframe
+          (вход через сторонний домен Auth0 и сторонние куки внутри iframe не работают),
+          поэтому оно открывается полноценно в новой вкладке браузера.</p>
+          <button id="reopen">↗ Открыть снова</button>
+        </div>`;
+      noticePane.querySelector("#reopen").onclick = () => openExternal(app);
+      active = app.key; setActiveTab(app.key); showPane(noticePane); updatePopout(app);
     }
   </script>
 </body>

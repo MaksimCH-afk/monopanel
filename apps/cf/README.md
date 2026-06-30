@@ -24,3 +24,7 @@
 
 - Apache слушает **3331** вместо 1000 (правка `ports.conf` в `Dockerfile`).
 - БД вынесена в том `/data/cf` через симлинк.
+- **Встраивание в дашборд:** подключён `docker/cf-frame.conf` (`a2enconf cf-frame`),
+  который снимает `X-Frame-Options`/`Content-Security-Policy`, иначе плитка-iframe
+  дашборда показала бы пустоту. Компромисс по clickjacking — приемлем для
+  локального single-user инструмента; см. комментарий в самом conf-файле.

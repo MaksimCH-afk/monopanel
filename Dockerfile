@@ -61,6 +61,10 @@ COPY . /srv/panel
 # --- cf: PHP в DocumentRoot Apache; БД через симлинк на /data/cf ---
 RUN rm -rf /var/www/html && cp -a /srv/panel/apps/cf /var/www/html
 
+# cf: снять блокировку фрейминга, чтобы плитка-iframe дашборда могла встроить cf
+COPY docker/cf-frame.conf /etc/apache2/conf-available/cf-frame.conf
+RUN a2enconf cf-frame
+
 # ----------------------------------------------------------------------------
 # 4. Python venv на КАЖДОЕ приложение (конфликт версий Flask: seo 2.3 / skins 3.1)
 # ----------------------------------------------------------------------------
