@@ -1,0 +1,37 @@
+# ============================================================================
+#  Единая панель — один контейнер, 6 приложений + дашборд
+#  Первая сборка долгая: ставятся 3 рантайма (PHP/Node/Python) + 2 Next-сборки.
+#      docker compose up --build
+#  Дашборд: http://localhost:333
+# ============================================================================
+
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: monopanel:latest
+    container_name: panel
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Дашборд (плитки). 333 — привилегированный порт; если демон откажет —
+      # поменяйте на 3330 здесь и в .env (PORT_DASHBOARD).
+      - "333:333"
+      - "3331:3331"   # cf    — Cloudflare Panel
+      - "3332:3332"   # seo   — GSC / SEO Dashboard
+      - "3333:3333"   # ank   — генератор анкоров
+      - "3334:3334"   # img   — ImageGen
+      - "3335:3335"   # arc   — Web Archive Checker
+      - "3336:3336"   # skins — Brandskins (/admin)
+      # 5001 (Flask-бэкенд seo) намеренно НЕ публикуется — служебный.
+    volumes:
+      # Постоянные данные: cf-БД (токены), ank-БД, картинки img.
+      # Папка ./data в .gitignore — секреты в репозиторий не идут.
+      - ./data/cf:/data/cf
+      - ./data/ank:/data/ank
+      - ./data/img:/data/img
+      # skins хранит состояние (выбранные темы) в своих файлах — монтируем,
+      # чтобы оно переживало пересборку образа.
+      - ./apps/skins/instance:/srv/panel/apps/skins/instance
