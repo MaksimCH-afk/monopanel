@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block page_title %}Внутренние страницы{% endblock %}
+{% block subtitle %}Справочник «тип страницы + язык → суффикс». Анкор = {бренд} {суффикс}.{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-title">Внутренние страницы проекта</div>
+    <form method="get" action="/suffixes" class="inline" style="margin-bottom:4px">
+        <div style="flex:0 1 420px">
+            <label>Проект</label>
+            <select name="project" onchange="this.form.submit()">
+                <option value="">— выберите проект —</option>
+                {% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if selected and selected.id==p.id }}>{{ p.url }}</option>{% endfor %}
+            </select>
+        </div>
+    </form>
+    {% if selected %}
+    <form method="post" action="/projects/{{ selected.id }}/internal" style="margin-top:14px">
+        <div class="grid grid-3">
+            <div class="field">
+                <label>Язык анкоров внутренних страниц</label>
+                <select name="internal_language">
+                    {% for lang in languages %}<option value="{{ lang }}" {{ 'selected' if selected.internal_language==lang }}>{{ lang }}</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+        <label>Тип страницы → URL-путь</label>
+        <div id="internal-pages">
+            {% for pt, path in selected_internal.items() %}
+            <div class="inline" style="margin-bottom:8px">
+                <input name="ip_type" list="page-types" value="{{ pt }}" placeholder="app">
+                <input name="ip_path" class="mono" value="{{ path }}" placeholder="/app/">
+                <button type="button" class="btn-danger btn-sm narrow" onclick="this.parentElement.remove()">✕</button>
+            </div>
+            {% endfor %}
+        </div>
+        <datalist id="page-types">{% for pt in page_types %}<option value="{{ pt }}">{% endfor %}</datalist>
+        <div class="row-actions"><button type="button" class="btn-sec btn-sm" onclick="addInternal()">+ Страница</button></div>
+        <hr>
+        <button type="submit">Сохранить внутренние страницы проекта</button>
+    </form>
+    {% else %}
+    <p class="help-text">Выберите проект, чтобы задать язык анкоров и пути вида <span class="mono">/app/</span>.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-title">Суффиксы анкоров — общий справочник</div>
+    <form method="post" action="/suffixes/save">
+        <div class="field" style="max-width:260px"><label>Тип страницы</label><input name="page_type" id="suf-pagetype" placeholder="app / login / bonus" required></div>
+        <div class="grid grid-3">
+            {% for lang in languages %}<div class="field"><label>{{ lang }}</label><input name="suffix_{{ lang }}" id="suf-{{ lang }}"></div>{% endfor %}
+        </div>
+        <button type="submit">Сохранить суффикс</button>
+    </form>
+</div>
+
+<div class="card flush">
+    <div class="table-wrap">
+    <table>
+        <thead><tr><th>Тип</th>{% for lang in languages %}<th>{{ lang }}</th>{% endfor %}<th></th></tr></thead>
+        <tbody>
+        {% for page_type, langs in grid.items() %}
+            <tr>
+                <td class="mono" style="color:var(--accent-2);font-weight:600">{{ page_type }}</td>
+                {% for lang in languages %}<td class="mono">{{ langs.get(lang, '') or '—' }}</td>{% endfor %}
+                <td class="num">
+                    <div class="row-actions" style="justify-content:flex-end">
+                        <button type="button" class="btn-sec btn-sm" onclick='editSuffix({{ page_type|tojson }}, {{ langs|tojson }})'>Изменить</button>
+                        <form method="post" action="/suffixes/{{ page_type }}/delete" style="display:inline"><button class="btn-danger btn-sm" type="submit">Удалить</button></form>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block help_text %}
+<p>Сверху для выбранного проекта задаётся язык анкоров и соответствие «тип страницы → URL-путь» (напр. <span class="mono">withdraw → /boni/</span>). Анкор внутренней страницы собирается как <b>{бренд} {суффикс}</b>.</p>
+<p>Ниже — общий справочник суффиксов по языкам (en/de/pl/tr/pt-br), едины для всех проектов. Пустые поля не сохраняются.</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LANGS = {{ languages|tojson }};
+function editSuffix(pt, langs){
+    document.getElementById('suf-pagetype').value=pt;
+    LANGS.forEach(l=>document.getElementById('suf-'+l).value=langs[l]||'');
+    window.scrollTo({top:0,behavior:'smooth'});
+}
+function addInternal(){
+    const wrap=document.getElementById('internal-pages'); if(!wrap) return;
+    const div=document.createElement('div'); div.className='inline'; div.style.marginBottom='8px';
+    div.innerHTML=`<input name="ip_type" list="page-types" placeholder="app">
+        <input name="ip_path" class="mono" placeholder="/app/">
+        <button type="button" class="btn-danger btn-sm narrow" onclick="this.parentElement.remove()">✕</button>`;
+    wrap.appendChild(div);
+}
+</script>
+{% endblock %}

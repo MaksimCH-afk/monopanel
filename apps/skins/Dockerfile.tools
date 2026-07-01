@@ -1,0 +1,8 @@
+# ============================================================
+#  Tooling-образ: окружение для tools/extract_brand.py
+#  (авто-определение цветов из скриншотов → brand.css).
+#  Запускать с примонтированным проектом, см. DOCKER.md.
+# ============================================================
+FROM python:3.12-slim
+RUN pip install --no-cache-dir pillow numpy scikit-learn
+WORKDIR /work

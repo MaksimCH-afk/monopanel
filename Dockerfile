@@ -1,101 +1,120 @@
 # ============================================================================
-#  Единая панель — единый образ для 6 приложений + дашборд
-#  База: php:8.1-apache (для cf). Поверх: Node 22, Python 3, Caddy, supervisor.
+#  Единая панель — единый образ для 6 РЕАЛЬНЫХ приложений + дашборд.
+#  База: php:8.1-apache (debian bookworm → python 3.11). Поверх: Node 22,
+#  Python venv на каждое py-приложение, tesseract, Caddy, supervisor.
 #
-#  ⚠️  Это первый рабочий каркас. Большой мульти-рантайм образ обычно требует
-#      1–2 точечных правок под конкретную машину (версии npm/pip пакетов).
-#      Падение на шаге сборки — ожидаемо и чинится здесь же.
+#  Приложения втянуты в apps/* как есть (см. каждый apps/<app>/README.md).
+#  ⚠️  Первая сборка тяжёлая и долгая (3 рантайма + 2 Next-сборки + Prisma).
+#      Возможны точечные правки версий под конкретную машину — это ожидаемо.
 # ============================================================================
 
 FROM php:8.1-apache
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
-    NODE_VERSION=22
+    NODE_VERSION=22 \
+    NEXT_TELEMETRY_DISABLED=1
 
 # ----------------------------------------------------------------------------
-# 1. Системные пакеты: Python, tesseract (OCR для img), утилиты, Caddy, Node 22
+# 1. Системные пакеты
+#    - python3 + venv/dev + build-essential  (ank/arc/seo/skins)
+#    - tesseract-ocr                         (skins: OCR логотипа; img: OCR)
+#    - lib*-dev                              (PHP-расширения cf: intl/curl/mbstring/sqlite)
+#    - openssl                               (Prisma в img)
 # ----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg git unzip supervisor \
         python3 python3-venv python3-pip python3-dev build-essential \
         tesseract-ocr libtesseract-dev \
-        sqlite3 libsqlite3-dev \
+        sqlite3 libsqlite3-dev libcurl4-openssl-dev libonig-dev libicu-dev \
+        openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# Node 22 (нужен для сборки Next.js приложений: seo и img)
+# Node 22 (сборка Next.js: seo и img)
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g npm@latest
+    && rm -rf /var/lib/apt/lists/*
 
-# Caddy (отдаёт статический дашборд на :333)
-RUN curl -fsSL https://github.com/caddyserver/caddy/releases/latest/download/caddy_linux_amd64 \
-        -o /usr/local/bin/caddy 2>/dev/null \
-    && chmod +x /usr/local/bin/caddy || \
-    (echo "Caddy: fallback на apt-репозиторий" && \
-     apt-get update && \
-     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https && \
-     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && \
-     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list && \
-     apt-get update && apt-get install -y caddy && \
-     rm -rf /var/lib/apt/lists/*)
+# Caddy (статический дашборд на :333)
+RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /usr/local/bin/caddy \
+    && chmod +x /usr/local/bin/caddy
 
 # ----------------------------------------------------------------------------
-# 2. PHP-расширения для cf (Cloudflare Panel: SQLite + Apache rewrite)
+# 2. PHP-расширения для cf (Cloudflare Panel)
+#    pdo_sqlite (БД), curl (API CF), mbstring, intl (idn_to_ascii)
 # ----------------------------------------------------------------------------
-RUN docker-php-ext-install pdo pdo_sqlite \
+RUN docker-php-ext-install -j"$(nproc)" pdo pdo_sqlite curl mbstring intl \
     && a2enmod rewrite headers
 
-# Apache (cf) слушает 3331 вместо исходного 1000
+# Apache (cf) слушает 3331 вместо исходного 1000; .htaccess разрешён (AllowOverride All)
 RUN sed -ri 's/^Listen 80$/Listen 3331/' /etc/apache2/ports.conf \
     && sed -ri 's!:80>!:3331>!' /etc/apache2/sites-available/000-default.conf \
-    && sed -ri 's!DocumentRoot /var/www/html!DocumentRoot /var/www/html!' /etc/apache2/sites-available/000-default.conf
+    && printf '<Directory /var/www/html>\n    Options Indexes FollowSymLinks\n    AllowOverride All\n    Require all granted\n</Directory>\n' \
+        > /etc/apache2/conf-available/app-override.conf \
+    && a2enconf app-override
 
 # ----------------------------------------------------------------------------
-# 3. Раскладка приложений
+# 3. Исходники
 # ----------------------------------------------------------------------------
 WORKDIR /srv/panel
 COPY . /srv/panel
 
-# --- cf: PHP в DocumentRoot Apache; БД через симлинк на /data/cf ---
-RUN rm -rf /var/www/html && cp -a /srv/panel/apps/cf /var/www/html
-
-# cf: снять блокировку фрейминга, чтобы плитка-iframe дашборда могла встроить cf
+# --- cf: PHP в DocumentRoot Apache (БД cloudflare_panel.db — через симлинк на /data/cf) ---
+RUN rm -rf /var/www/html && cp -a /srv/panel/apps/cf /var/www/html \
+    && chown -R www-data:www-data /var/www/html
+# cf: снять X-Frame-Options/CSP, чтобы плитка-iframe дашборда могла встроить cf
 COPY docker/cf-frame.conf /etc/apache2/conf-available/cf-frame.conf
 RUN a2enconf cf-frame
 
 # ----------------------------------------------------------------------------
 # 4. Python venv на КАЖДОЕ приложение (конфликт версий Flask: seo 2.3 / skins 3.1)
 # ----------------------------------------------------------------------------
-RUN for app in ank arc seo skins; do \
-        python3 -m venv /venv/$app; \
-        if [ -f /srv/panel/apps/$app/requirements.txt ]; then \
-            /venv/$app/bin/pip install --upgrade pip && \
-            /venv/$app/bin/pip install -r /srv/panel/apps/$app/requirements.txt; \
-        fi; \
-    done
+# ank — FastAPI (requirements.txt)
+RUN python3 -m venv /venv/ank \
+    && /venv/ank/bin/pip install --upgrade pip \
+    && /venv/ank/bin/pip install -r /srv/panel/apps/ank/requirements.txt
+
+# arc — webarhive, устанавливается как пакет (pyproject); тянет templates/static как package-data
+RUN python3 -m venv /venv/arc \
+    && /venv/arc/bin/pip install --upgrade pip \
+    && cd /srv/panel/apps/arc && /venv/arc/bin/pip install .
+
+# seo — Flask-бэкенд (backend_requirements.txt: flask 2.3.3, google-api-*, pandas, openai)
+RUN python3 -m venv /venv/seo \
+    && /venv/seo/bin/pip install --upgrade pip \
+    && /venv/seo/bin/pip install -r /srv/panel/apps/seo/backend_requirements.txt
+
+# skins — Flask 3.1 + gunicorn + Pillow/numpy/scikit-learn/pytesseract
+RUN python3 -m venv /venv/skins \
+    && /venv/skins/bin/pip install --upgrade pip \
+    && /venv/skins/bin/pip install -r /srv/panel/apps/skins/requirements.txt
 
 # ----------------------------------------------------------------------------
-# 5. Next.js сборки (seo и img) — выполняются если есть package.json
+# 5. Next.js сборки (devDeps нужны для сборки — НЕ ставим NODE_ENV=production здесь)
 # ----------------------------------------------------------------------------
-RUN for app in seo img; do \
-        if [ -f /srv/panel/apps/$app/package.json ]; then \
-            cd /srv/panel/apps/$app && npm ci && npm run build || \
-            echo "WARN: сборка $app не прошла — поправьте apps/$app"; \
-        fi; \
-    done
+# img — Next + Prisma. postinstall запускает `prisma generate` (нужен prisma/schema.prisma).
+ENV DATABASE_URL=file:/data/img/imagegen.db
+RUN cd /srv/panel/apps/img \
+    && npm install \
+    && npx prisma generate \
+    && npm run build
+
+# seo — Next 15. Auth0 читается в рантайме; если сборка упадёт из-за окружения —
+# не валим весь образ, seo просто не будет предсобран (см. README, раздел seo).
+RUN cd /srv/panel/apps/seo \
+    && npm install \
+    && (npm run build || echo "WARN: сборка seo не прошла — поправьте apps/seo (вероятно Auth0/окружение)")
 
 # ----------------------------------------------------------------------------
-# 6. Caddy-конфиг дашборда и supervisor
+# 6. Caddy-конфиг дашборда, supervisor, entrypoint
 # ----------------------------------------------------------------------------
 COPY dashboard/Caddyfile /etc/caddy/Caddyfile
 COPY docker/supervisord.conf /etc/supervisor/conf.d/panel.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Порты: 333 дашборд + 3331..3336 приложения (5001 seo-flask — внутренний)
-EXPOSE 333 3331 3332 3333 3334 3335 3336
+# Порты: 333 дашборд + 3331..3336 приложения + 5001 (seo-flask, нужен браузеру)
+EXPOSE 333 3331 3332 3333 3334 3335 3336 5001
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

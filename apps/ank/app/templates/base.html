@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}HubNero · Генератор анкоров{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar">
+        <a class="logo" href="/" title="На главную">
+            <span class="logo-mark">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M5 4v16M19 4v16M5 12h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+            </span>
+            <span class="logo-text">HubNero</span>
+        </a>
+
+        <div class="nav-section">Генератор</div>
+        <a href="/" class="nav-link {{ 'on' if active=='dashboard' }}"><span class="nav-dot"></span>Проекты</a>
+        <a href="/generate" class="nav-link {{ 'on' if active=='generate' }}"><span class="nav-dot"></span>Генерация</a>
+        <a href="/history" class="nav-link {{ 'on' if active=='history' }}"><span class="nav-dot"></span>История</a>
+
+        <div class="nav-section">Справочники</div>
+        <a href="/strategies" class="nav-link {{ 'on' if active=='strategies' }}"><span class="nav-dot"></span>Стратегии</a>
+        <a href="/profiles" class="nav-link {{ 'on' if active=='profiles' }}"><span class="nav-dot"></span>Безанкорные профили</a>
+        <a href="/suffixes" class="nav-link {{ 'on' if active=='suffixes' }}"><span class="nav-dot"></span>Внутренние страницы</a>
+
+        <div class="nav-section">Система</div>
+        <a href="/anchors" class="nav-link {{ 'on' if active=='anchors' }}"><span class="nav-dot"></span>Стоп-анкоры</a>
+        <a href="/logs" class="nav-link {{ 'on' if active=='logs' }}"><span class="nav-dot"></span>Логи</a>
+    </aside>
+
+    <div class="main-wrap">
+        <header class="topbar">
+            <button class="hamburger" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Меню">☰</button>
+            <div class="topbar-title">{% block page_title %}HubNero{% endblock %}</div>
+            <div class="joke" title="Шутка про SEO">
+                <span class="joke-tag">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M8.5 14c.8 1.2 2 2 3.5 2s2.7-.8 3.5-2M9 9.5h.01M15 9.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    Шутка про SEO
+                </span>
+                <span class="joke-sep"></span>
+                <span class="joke-text" id="joke-text">…</span>
+                <button class="joke-refresh" id="joke-refresh" title="Ещё одну" aria-label="Ещё одну">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="content">
+            <div class="content-inner">
+                {% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+                {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+                <div class="screen-head">
+                    <div>
+                        <h1>{% block head_title %}{{ self.page_title() }}{% endblock %}</h1>
+                        <div class="screen-sub">{% block subtitle %}{% endblock %}</div>
+                    </div>
+                    {% block head_actions %}
+                    <button class="btn btn-sec" type="button" onclick="document.getElementById('help-box').classList.toggle('open')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M9.5 9.2c.3-1 1.2-1.7 2.5-1.7 1.4 0 2.4.8 2.4 2 0 1.1-.7 1.6-1.6 2.1-.7.4-1.3.8-1.3 1.7M12 16.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        Справка
+                    </button>
+                    {% endblock %}
+                </div>
+
+                <div class="help-box" id="help-box">
+                    <div class="help-box-title">Справка: {{ self.page_title() }}</div>
+                    {% block help_text %}{% endblock %}
+                </div>
+
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+
+        {% block action_bar %}{% endblock %}
+    </div>
+</div>
+
+<script>
+// Fetch a fresh joke on every page load (so it changes when you switch tabs)
+// and on the refresh button. The server dedupes (no repeats) and answers
+// instantly, so this is cheap. We show the cached joke first to avoid a flicker
+// while the new one loads.
+function loadJoke() {
+    const box = document.getElementById('joke-text');
+    if (!box) return;
+    const cached = sessionStorage.getItem('seo_joke');
+    box.textContent = cached || 'Думаем над шуткой…';
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    fetch('/api/joke', { signal: ctrl.signal }).then(r => r.json())
+        .then(d => { const j = d.joke || cached || '…'; box.textContent = j; sessionStorage.setItem('seo_joke', j); })
+        .catch(() => { if (!cached) box.textContent = 'SEO-шутка на переиндексации 🙂'; })
+        .finally(() => clearTimeout(t));
+}
+document.addEventListener('DOMContentLoaded', loadJoke);
+var jr = document.getElementById('joke-refresh');
+if (jr) jr.addEventListener('click', loadJoke);
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, legend %}
+{% block page_title %}Безанкорные профили{% endblock %}
+{% block subtitle %}Как доля безанкора дробится между голым URL и голым доменом.{% endblock %}
+
+{% block content %}
+<div class="row-actions" style="margin-bottom:18px">
+    <button type="button" onclick="newProfile()">＋ Создать профиль</button>
+</div>
+
+<div class="card" id="profile-card" style="display:none">
+    <div class="card-title">Создать / редактировать профиль</div>
+    <form method="post" action="/profiles/save" id="profile-form">
+        <input type="hidden" name="id" id="profile-id">
+        <div class="field" style="max-width:420px"><label>Название</label><input name="name" id="profile-name" required></div>
+        <label>Форматы</label>
+        <div id="items"></div>
+        <div class="spacer"></div>
+        <div class="row-actions">
+            <button type="button" class="btn-sec btn-sm" onclick="addItem()">+ Формат</button>
+            <button type="button" class="btn-ghost btn-sm" onclick="addItem('Голый URL','{url}',60)">+ Голый URL</button>
+            <button type="button" class="btn-ghost btn-sm" onclick="addItem('Голый домен','{domain}',15)">+ Голый домен</button>
+        </div>
+        <hr>
+        <div class="row-actions">
+            <button type="submit">Сохранить</button>
+            <button type="button" class="btn-ghost" onclick="document.getElementById('profile-card').style.display='none'">Отмена</button>
+        </div>
+    </form>
+</div>
+
+<div class="stack">
+    {% for p in profiles %}
+    <div class="card">
+        <div class="row-actions" style="justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+            <div style="min-width:0">
+                <div class="row-actions" style="gap:9px;margin-bottom:4px">
+                    <span style="font-size:17px;font-weight:700;color:var(--text)">{{ p.obj.name }}</span>
+                    {% if p.obj.is_builtin %}<span class="badge gray">базовый</span>{% endif %}
+                </div>
+                <div style="font-size:12.5px;color:var(--muted-2)">Пример на 100 безанкорных ссылок (домен site.com)</div>
+            </div>
+            <div class="row-actions" style="flex:none">
+                <button type="button" class="btn-sec btn-sm"
+                    onclick='editProfile({{ p.obj.id }}, {{ p.obj.name|tojson }}, {{ p.formats|tojson }})'>Изменить</button>
+                <form method="post" action="/profiles/{{ p.obj.id }}/delete" style="display:inline" onsubmit="return confirm('Удалить профиль?')">
+                    <button class="btn-danger btn-sm" type="submit">Удалить</button>
+                </form>
+            </div>
+        </div>
+        {{ bar(p.segments, lg=true) }}
+        {{ legend(p.segments, show_sample=true) }}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block help_text %}
+<p>Профиль задаёт, в каком виде показываются безанкорные ссылки — <b>голый URL</b> (<span class="mono">https://site.com/</span>) или <b>голый домен</b> (<span class="mono">site.com</span>) — и в какой пропорции. Полоса и пример показывают результат сразу.</p>
+<p>Проценты — относительные веса (60 и 15 → пропорция 60:15). Профиль выбирается внутри стратегии. Базовые профили можно менять.</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function itemRow(name, tpl, percent){
+    const div=document.createElement('div'); div.className='inline'; div.style.marginBottom='8px';
+    div.innerHTML=`<input name="item_name" placeholder="название" value="${name||''}">
+        <input name="item_template" class="mono" placeholder="{url} или {domain}" value="${tpl||''}">
+        <input class="narrow" name="item_percent" type="number" step="0.1" placeholder="%" value="${percent!==undefined?percent:''}">
+        <button type="button" class="btn-danger btn-sm narrow" onclick="this.parentElement.remove()">✕</button>`;
+    return div;
+}
+function addItem(name, tpl, percent){ document.getElementById('items').appendChild(itemRow(name, tpl, percent)); }
+function newProfile(){
+    document.getElementById('profile-id').value='';
+    document.getElementById('profile-name').value='';
+    document.getElementById('items').innerHTML='';
+    addItem('Голый URL','{url}',100);
+    const c=document.getElementById('profile-card'); c.style.display='block'; c.scrollIntoView({behavior:'smooth'});
+}
+function editProfile(id, name, items){
+    document.getElementById('profile-id').value=id;
+    document.getElementById('profile-name').value=name;
+    document.getElementById('items').innerHTML='';
+    items.forEach(i=>addItem(i.name, i.template, i.percent));
+    const c=document.getElementById('profile-card'); c.style.display='block'; c.scrollIntoView({behavior:'smooth'});
+}
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+services:
+  cfpanel:
+    build: .
+    image: cf-panel:latest          # имя образа в Docker Desktop
+    container_name: cf-panel        # имя контейнера
+    ports:
+      - "1000:1000"                 # ХОСТ:КОНТЕЙНЕР (Apache внутри тоже слушает 1000)
+    volumes:
+      # Живой код + персист SQLite-БД на хосте (обновляется git pull без пересборки)
+      - ./:/var/www/html
+    restart: unless-stopped

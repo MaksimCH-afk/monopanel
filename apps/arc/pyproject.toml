@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webarhive"
+version = "3.0.0"
+description = "Web Archive Checker: domain history & cleanliness checker over Internet Archive Wayback Machine + LLM (OpenAI / OpenRouter)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx[http2]>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "aiosqlite>=0.19",
+    "asyncpg>=0.29",
+    "selectolax>=0.3.21",
+    "charset-normalizer>=3.3",
+    "tldextract>=5.1",
+    "openpyxl>=3.1",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "tenacity>=8.2",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-httpx>=0.30",
+    "ruff>=0.3",
+]
+
+[project.scripts]
+webarhive = "webarhive.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Non-Python data files that must travel with the installed package.
+# Without this, `pip install` copies only .py files and the FastAPI app
+# crashes on startup looking for /usr/.../webarhive/web/static.
+[tool.setuptools.package-data]
+webarhive = [
+    "web/templates/*.html",
+    "web/static/**/*",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]

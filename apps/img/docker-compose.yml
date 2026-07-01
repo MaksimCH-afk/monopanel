@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "file:/data/imagegen.db"
+      DATA_DIR: "/data"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_APP_URL: "${OPENROUTER_APP_URL:-http://localhost:3000}"
+      OPENROUTER_APP_TITLE: "${OPENROUTER_APP_TITLE:-ImageGen Dashboard}"
+      # Per-model OpenRouter keys (used by prisma/seed.ts on first run)
+      OR_KEY_FLUX2_PRO: "${OR_KEY_FLUX2_PRO:-}"
+      OR_KEY_FLUX2_MAX: "${OR_KEY_FLUX2_MAX:-}"
+      OR_KEY_SEEDREAM: "${OR_KEY_SEEDREAM:-}"
+      OR_KEY_GROK_IMAGINE: "${OR_KEY_GROK_IMAGINE:-}"
+      OR_KEY_RECRAFT: "${OR_KEY_RECRAFT:-}"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      # Persist db + generated images across container restarts.
+      - imagegen-data:/data
+
+volumes:
+  imagegen-data:

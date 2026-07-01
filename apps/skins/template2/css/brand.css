@@ -1,0 +1,46 @@
+/* ============================================================
+   BRAND THEME · Cowboyspin (gold-on-deep-green, Wild West)
+   Формат — единый контракт переменных (как у шаблона 1),
+   поэтому тема применима к обоим шаблонам.
+   ============================================================ */
+:root {
+  /* — акцент — */
+  --gold:            #e9c84a;
+  --gold-hi:         #f2d666;
+  --gold-deep:       #b58f1e;
+  --accent-rgb:      233,200,74;
+  --c-accent:        #e9c84a;
+  --c-list-marker:   #e9c84a;
+
+  /* — меню — */
+  --c-menu:          #9fb1a4;
+  --c-menu-active:   #e9c84a;
+
+  /* — кнопки / CTA — */
+  --c-cta:           #e9c84a;
+  --c-cta-hi:        #f2d666;
+  --c-cta-2:         #b58f1e;
+  --c-cta-text:      #1c1606;
+
+  /* — вторичная / success — */
+  --c-secondary:     #2dbb6b;
+  --c-secondary-2:   #1f7d49;
+  --c-secondary-text:#eafff2;
+  --secondary-rgb:   45,187,107;
+
+  /* — текст — */
+  --c-heading:       #ffffff;
+  --c-text:          #9fb1a4;
+  --muted:           #9fb1a4;
+
+  /* — ссылки — */
+  --c-link:          #e9c84a;
+  --c-link-hover:    #f2d666;
+
+  /* — фон + поверхности — */
+  --c-bg:            #0e1a14;
+  --bg:              #0e1a14;
+  --bg-elev:         #091310;
+  --surface:         #17251f;
+  --surface-2:       #13211a;
+}

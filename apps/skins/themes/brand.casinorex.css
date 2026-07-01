@@ -1,0 +1,64 @@
+/* ============================================================
+   BRAND THEME · ПРИМЕР: CasinoRex  (ручное заполнение)
+   меню #FFFFFF · кнопки #ECCBA2 · заголовки #F3D1A6 ·
+   текст #868EB0 · пикеры #EECDA3 · фон #1C1D27
+   Применить: переименовать в brand.css или переключить <link>.
+   ============================================================ */
+:root {
+  /* акцентная палитра (рамки, eyebrow, цифры, табы, свечение) */
+  --gold:            #eecda3;
+  --gold-hi:         #f5e0c2;
+  --gold-deep:       #c9a87e;
+  --accent-rgb:      238,205,163;
+  --c-accent:        #eecda3;
+  --c-list-marker:   #eecda3;   /* пикеры #EECDA3 */
+
+  /* меню */
+  --c-menu:          #ffffff;   /* меню #FFFFFF */
+  --c-menu-active:   #eccba2;
+
+  /* кнопки / CTA #ECCBA2 */
+  --c-cta:           #eccba2;
+  --c-cta-hi:        #f7dcc0;
+  --c-cta-2:         #c9a87e;
+  --c-cta-text:      #1c1d27;
+
+  /* вторичная кнопка (нет фирменного green — берём тёплый беж) */
+  --c-secondary:     #f3d1a6;
+  --c-secondary-2:   #c9a87e;
+  --c-secondary-text:#1c1d27;
+  --secondary-rgb:   243,209,166;
+
+  /* заголовки #F3D1A6 */
+  --c-heading:       #f3d1a6;
+
+  /* текст #868EB0 */
+  --c-text:          #868eb0;
+  --muted:           #868eb0;
+
+  /* ссылки */
+  --c-link:          #eecda3;
+  --c-link-hover:    #f5e0c2;
+
+  /* фон #1C1D27 + поверхности */
+  --c-bg:            #1c1d27;
+  --bg:              #1c1d27;
+  --bg-elev:         #23242f;
+  --surface:         #2a2b37;
+  --surface-2:       #313343;
+
+  /* типографика */
+  --fs-content:      16px;
+  --fs-menu:         14px;
+  --fs-h1:           clamp(30px, 5vw, 52px);
+  --fs-h2:           clamp(26px, 4vw, 40px);
+  --fs-h3:           20px;
+
+  /* форма: у CasinoRex кнопки слегка скруглённые */
+  --radius:          12px;
+  --radius-sm:       8px;
+  --radius-lg:       16px;
+  --btn-radius:      8px;
+  --cta-radius:      8px;
+  --cta-shadow:      0 8px 20px -12px rgba(0,0,0,0.6);
+}

@@ -1,0 +1,61 @@
+/* ============================================================
+   BRAND THEME · Fraga  (АВТО-СГЕНЕРИРОВАНО)
+   Источники: Снимок_экрана_2026-05-20_в_14_08_30.png, Снимок_экрана_2026-05-20_в_14_08_38.png, Снимок_экрана_2026-05-20_в_14_08_41.png, Снимок_экрана_2026-05-20_в_14_09_05.png, generated-image.png
+   tools/extract_brand.py — цвета и контраст определены автоматически.
+   Проверьте акцент/CTA (см. отчёт), типографику задайте по референсу.
+   Подключается ПОСЛЕ css/styles.css.
+   ============================================================ */
+:root {
+  /* акцентная палитра (рамки, eyebrow, цифры, табы, свечение) */
+  --gold:            #e27f7e;
+  --gold-hi:         #edb0af;
+  --gold-deep:       #d33d3b;
+  --accent-rgb:      226,127,126;
+  --c-accent:        #e27f7e;
+  --c-list-marker:   #e27f7e;
+
+  /* меню */
+  --c-menu:          #eeeced;
+  --c-menu-active:   #d74d4c;
+
+  /* кнопки / CTA */
+  --c-cta:           #d74d4c;
+  --c-cta-hi:        #e27f7e;
+  --c-cta-2:         #b32a28;
+  --c-cta-text:      #000000;
+
+  /* вторичная / success-кнопка */
+  --c-secondary:     #d74d4c;
+  --c-secondary-2:   #b32a28;
+  --c-secondary-text:#14151a;
+  --secondary-rgb:   215,77,76;
+
+  /* заголовки / текст / ссылки */
+  --c-heading:       #eeeced;
+  --c-text:          #eeeced;
+  --muted:           #8b8a8b;
+  --c-link:          #e27f7e;
+  --c-link-hover:    #edb0af;
+
+  /* фон + поверхности */
+  --c-bg:            #111113;
+  --bg:              #111113;
+  --bg-elev:         #18181b;
+  --surface:         #1d1d20;
+  --surface-2:       #252528;
+
+  /* типографика (размеры/шрифт — поправьте по референсу) */
+  --fs-content:      16px;
+  --fs-menu:         14.5px;
+  --fs-h1:           clamp(30px, 5vw, 56px);
+  --fs-h2:           clamp(28px, 4vw, 44px);
+  --fs-h3:           20px;
+
+  /* форма */
+  --radius:          16px;
+  --radius-sm:       10px;
+  --radius-lg:       24px;
+  --btn-radius:      999px;
+  --cta-radius:      999px;
+  --cta-shadow:      0 10px 26px -12px rgba(214,77,75,0.55);
+}

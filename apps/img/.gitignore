@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+build/
+*.log
+npm-debug.log*
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# local env & data
+.env
+.env.local
+/data/
+*.db
+*.db-journal
+prisma/dev.db*
+
+# OS
+.DS_Store

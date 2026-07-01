@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+Allow: /css/
+Allow: /js/
+Allow: /assets/
+
+Disallow: /dev/
+Disallow: /cdn-cgi/
+
+Sitemap: https://www.example.com/sitemap.xml

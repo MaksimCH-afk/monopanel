@@ -1,0 +1,13 @@
+# Образ панели управления Brandskins: отдаёт сайт + дашборд на порту 8888.
+# Репозиторий монтируется внутрь как том (/site) — см. docker-compose.yml.
+FROM python:3.13-slim
+ENV PYTHONUNBUFFERED=1 SITE_ROOT=/site
+# tesseract-ocr нужен для распознавания названия бренда с логотипа
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+EXPOSE 8888
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8888", "--timeout", "300", "app:app"]

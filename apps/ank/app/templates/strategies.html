@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, legend %}
+{% block page_title %}Стратегии{% endblock %}
+{% block subtitle %}Профиль анкоров: процент безанкора + роли ключей. Сумма весов = 100%.{% endblock %}
+
+{% block content %}
+<div class="row-actions" style="margin-bottom:18px">
+    <button type="button" onclick="newStrategy()">＋ Создать стратегию</button>
+</div>
+
+<div class="card" id="strategy-card" style="display:none">
+    <div class="card-title">Создать / редактировать стратегию</div>
+    <form method="post" action="/strategies/save" id="strategy-form">
+        <input type="hidden" name="id" id="strategy-id">
+        <div class="grid grid-3">
+            <div class="field"><label>Название</label><input name="name" id="strategy-name" required></div>
+            <div class="field"><label>Безанкор, %</label><input name="anchorless_percent" id="strategy-anchorless" type="number" step="0.1" value="70" oninput="recalcSum()"></div>
+            <div class="field">
+                <label>Вид безанкора (профиль)</label>
+                <select name="anchorless_profile_id" id="strategy-profile">
+                    <option value="">По умолчанию (100% голый URL)</option>
+                    {% for ap in anchorless_profiles %}<option value="{{ ap.id }}">{{ ap.name }}</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+        <label>Роли ключей</label>
+        <div id="roles"></div>
+        <div class="spacer"></div>
+        <div class="row-actions">
+            <button type="button" class="btn-sec btn-sm" onclick="addRole()">+ Добавить роль</button>
+            <span class="muted">Сумма: <span id="sum-badge" class="sum-badge">—</span></span>
+        </div>
+        <hr>
+        <div class="row-actions">
+            <button type="submit">Сохранить</button>
+            <button type="button" class="btn-ghost" onclick="document.getElementById('strategy-card').style.display='none'">Отмена</button>
+        </div>
+    </form>
+</div>
+
+<div class="stack">
+    {% for s in strategies %}
+    <div class="card">
+        <div class="row-actions" style="justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <div style="min-width:0">
+                <div class="row-actions" style="gap:9px;margin-bottom:7px">
+                    <span style="font-size:17px;font-weight:700;color:var(--text)">{{ s.obj.name }}</span>
+                    {% if s.obj.is_builtin %}<span class="badge gray">базовая</span>{% endif %}
+                </div>
+                <div class="row-actions" style="gap:8px;font-size:12.5px;color:var(--muted)">
+                    <span class="badge purple">профиль: {{ s.profile_name }}</span>
+                    <span>·</span><span>безанкор {{ s.obj.anchorless_percent }}% · сумма 100%</span>
+                </div>
+            </div>
+            <div class="row-actions" style="flex:none">
+                <button type="button" class="btn-sec btn-sm"
+                    onclick='editStrategy({{ s.obj.id }}, {{ s.obj.name|tojson }}, {{ s.obj.anchorless_percent }}, {{ s.roles|tojson }}, {{ (s.obj.anchorless_profile_id or "")|tojson }})'>Изменить</button>
+                <form method="post" action="/strategies/{{ s.obj.id }}/delete" style="display:inline" onsubmit="return confirm('Удалить стратегию?')">
+                    <button class="btn-danger btn-sm" type="submit">Удалить</button>
+                </form>
+            </div>
+        </div>
+        {{ bar(s.segments, lg=true) }}
+        {{ legend(s.segments) }}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block help_text %}
+<p>Стратегия — профиль анкоров: процент безанкора + роли ключей по убыванию частотности (самый частый ключ → «основной 1» и т.д.). Полоса показывает доли наглядно; сумма всегда 100%.</p>
+<p>Вид безанкора (голый URL / голый домен) задаётся <b>профилем прямо в стратегии</b>. Тип кампании определяется стратегией: со ролями → «Прогоны», 100% безанкор → «Крауд+сабмиты». Базовые стратегии можно редактировать.</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function roleRow(name, percent){
+    const div=document.createElement('div'); div.className='inline'; div.style.marginBottom='8px';
+    div.innerHTML=`<input name="role_name" placeholder="напр. основной 1" value="${name||''}">
+        <input class="narrow" name="role_percent" type="number" step="0.1" placeholder="%" value="${percent!==undefined?percent:''}" oninput="recalcSum()">
+        <button type="button" class="btn-danger btn-sm narrow" onclick="this.parentElement.remove();recalcSum()">✕</button>`;
+    return div;
+}
+function addRole(name, percent){ document.getElementById('roles').appendChild(roleRow(name, percent)); }
+function recalcSum(){
+    let sum=parseFloat(document.getElementById('strategy-anchorless').value)||0;
+    document.querySelectorAll('input[name="role_percent"]').forEach(i=>sum+=parseFloat(i.value)||0);
+    const b=document.getElementById('sum-badge');
+    b.textContent=sum.toFixed(1).replace(/\.0$/,'')+'%';
+    b.className='sum-badge '+(Math.abs(sum-100)<0.01?'sum-ok':'sum-bad');
+}
+function newStrategy(){
+    document.getElementById('strategy-id').value='';
+    document.getElementById('strategy-name').value='';
+    document.getElementById('strategy-anchorless').value=70;
+    document.getElementById('strategy-profile').value='';
+    document.getElementById('roles').innerHTML='';
+    addRole('основной 1',12); addRole('основной 2',9); addRole('добавочный 1',5); addRole('добавочный 2',4);
+    recalcSum();
+    const c=document.getElementById('strategy-card'); c.style.display='block'; c.scrollIntoView({behavior:'smooth'});
+}
+function editStrategy(id, name, anchorless, roles, profileId){
+    document.getElementById('strategy-id').value=id;
+    document.getElementById('strategy-name').value=name;
+    document.getElementById('strategy-anchorless').value=anchorless;
+    document.getElementById('strategy-profile').value=profileId?String(profileId):'';
+    document.getElementById('roles').innerHTML='';
+    roles.forEach(r=>addRole(r.name, r.percent));
+    recalcSum();
+    const c=document.getElementById('strategy-card'); c.style.display='block'; c.scrollIntoView({behavior:'smooth'});
+}
+</script>
+{% endblock %}

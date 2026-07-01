@@ -1,0 +1,94 @@
+// ImageGen Dashboard — data model.
+// SQLite for zero-config local development. JSON-shaped fields are stored as
+// stringified JSON (SQLite has no native JSON/array/enum types in Prisma).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A connected image-generation model. The whole UI parameter panel is rendered
+// from `paramsSchemaJson`, so a new model is added purely through config.
+model ModelAdapter {
+  id          String   @id @default(cuid())
+  name        String
+  provider    String   @default("openrouter") // adapter type / driver
+  modelId     String // provider-specific model identifier, e.g. "google/gemini-..."
+  apiKey      String? // optional per-model key override; falls back to global setting/env
+  color       String // unique accent color (hex) used across tag / card / progress
+  enabled     Boolean  @default(true)
+  aspectRatio String   @default("1:1") // hint for card framing
+  // JSON schema describing tunable params -> dashboard renders the panel from this.
+  paramsSchemaJson  String @default("[]")
+  defaultParamsJson String @default("{}")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  results Result[]
+}
+
+// One generation run. May contain several prompts (A/B) and several models.
+model Session {
+  id           String    @id @default(cuid())
+  promptsJson  String // string[] — one or more prompts (A/B mode)
+  configJson   String    @default("{}") // { seedSync, batchSize, presetId, blindMode, seed }
+  status       String    @default("pending") // pending | running | done | error
+  webhookUrl   String?
+  webhookFiredAt DateTime?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  results Result[]
+}
+
+// One generated image cell in the grid: (model x prompt x batch-index).
+model Result {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  modelId     String
+  model       ModelAdapter @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  modelName   String // snapshot at generation time
+  modelColor  String // snapshot
+  promptIndex Int      @default(0)
+  batchIndex  Int      @default(0)
+  status      String   @default("pending") // pending | running | done | error
+  error       String?
+  imagePath   String? // path on disk under DATA_DIR/images
+  latencyMs   Int?
+  seed        Int?
+  paramsJson  String   @default("{}")
+  rating      Int      @default(0) // 0..5 stars
+  pinned      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([modelId])
+}
+
+model Preset {
+  id         String   @id @default(cuid())
+  name       String
+  configJson String   @default("{}")
+  createdAt  DateTime @default(now())
+}
+
+model PromptHistory {
+  id        String   @id @default(cuid())
+  text      String
+  useCount  Int      @default(1)
+  lastUsedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([lastUsedAt])
+}
+
+// Global key/value config (OpenRouter API key, default webhook URL, ...).
+model Setting {
+  key   String @id
+  value String
+}

@@ -1,0 +1,6 @@
+.git
+.github
+.claude
+*.db
+credentials.txt
+node_modules

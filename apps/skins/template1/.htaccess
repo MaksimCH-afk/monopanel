@@ -1,0 +1,19 @@
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # /index.html -> /
+  RewriteCond %{THE_REQUEST} \s/+index\.html[\s?] [NC]
+  RewriteRule ^index\.html$ / [R=301,L,NE]
+
+  # /section/index.html -> /section/
+  RewriteCond %{THE_REQUEST} \s/+(.+?/)index\.html[\s?] [NC]
+  RewriteRule ^ %1 [R=301,L,NE]
+
+  # standalone .html files -> extensionless URL
+  RewriteCond %{THE_REQUEST} \s/+(.+?)\.html[\s?] [NC]
+  RewriteRule ^ %1 [R=301,L,NE]
+</IfModule>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block page_title %}Превью{% endblock %}
+{% block head_title %}Превью: {{ project.url }}{% endblock %}
+{% block subtitle %}Предпросмотр строк по вкладкам.{% if not include_language %} Язык статьи исключён из выгрузки.{% endif %}{% endblock %}
+{% block head_actions %}
+<div class="row-actions">
+    <a class="btn btn-sec" href="/projects/{{ project.id }}">← К проекту</a>
+    <a class="btn" href="/generate">К генерации</a>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if not sheets %}
+<div class="card"><p class="muted">Нет данных. Задайте стратегию/объём и загрузите частотку.</p></div>
+{% endif %}
+
+{% for name, rows in sheets.items() %}
+<div class="card flush">
+    <div class="card-head"><div class="card-title" style="margin:0">{{ name }} <span class="badge purple">всего ссылок: {{ totals[name] }}</span></div></div>
+    <div class="table-wrap">
+    <table>
+        <thead><tr><th class="num">Link Q-ty</th><th>URL</th><th>Anchor</th>{% if include_language %}<th>Article Language</th>{% endif %}<th>Keyword</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                <td class="num">{{ r.link_qty }}</td>
+                <td class="mono">{{ r.url }}</td>
+                <td>{{ r.anchor }}</td>
+                {% if include_language %}<td>{{ r.article_language }}</td>{% endif %}
+                <td class="mono">{{ r.keyword }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block help_text %}
+<p>Предпросмотр распределения по вкладкам: основная («Прогоны» или «Крауд+сабмиты» — по стратегии) и «Внутренние страницы». Здесь показано компактно с количеством; в самом Excel одна строка = одна ссылка (или группировка с Link Q-ty, если выбрано на генерации).</p>
+<p>Проверьте, что суммы совпадают с объёмом, и переходите к генерации.</p>
+{% endblock %}

@@ -1,0 +1,13 @@
+# не кладём в образ сайта служебное/сборочное
+.git
+.gitignore
+.dockerignore
+Dockerfile
+Dockerfile.tools
+docker-compose.yml
+DOCKER.md
+README.md
+BRANDING.md
+tools
+out
+refs

@@ -1,0 +1,21 @@
+# ============================================================
+#  Brandskins — локальный запуск с дашбордом управления.
+#  Поднять:    docker compose up --build
+#  Дашборд:    http://localhost:8888/admin
+#  Сайт:       http://localhost:8888/
+#  Остановить: Ctrl+C   (или: docker compose down)
+# ============================================================
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    image: brandskins-dashboard
+    container_name: brandskins
+    ports:
+      - "8888:8888"          # хост:контейнер
+    volumes:
+      - ./:/site             # весь репозиторий внутрь; смена тем пишется в реальные файлы
+    environment:
+      - SITE_ROOT=/site
+    restart: unless-stopped

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Справка — Web Archive Checker{% endblock %}
+{% block content %}
+
+<div class="col gap-4" style="max-width:880px;margin:0 auto">
+
+<div class="card">
+  <div class="card__head">{{ icon("Book", 16, "var(--text-2)") }}<span class="card__title">Справка</span></div>
+  <div class="card__body col gap-5" style="font-size:14px;line-height:1.6">
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Возраст ≠ дата регистрации</div>
+      <p style="margin:0">За «возраст» принимается дата <b>первой активности домена в архиве Wayback Machine</b>. Это не дата регистрации домена в реестре — Wayback её не знает.</p>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Вердикты</div>
+      <div class="row gap-2" style="flex-wrap:wrap;margin-bottom:8px">
+        <span class="badge badge--clean">{{ icon("Check", 12) }}чистый</span>
+        <span class="muted">— однородная тематика, без рисковых эпох и подозрительных редиректов.</span>
+      </div>
+      <div class="row gap-2" style="flex-wrap:wrap;margin-bottom:8px">
+        <span class="badge badge--nuance">{{ icon("AlertTriangle", 12) }}есть нюансы</span>
+        <span class="muted">— флаги «обратить внимание» по редиректам, длительная парковка, один-два разрыва без явной рисковой тематики.</span>
+      </div>
+      <div class="row gap-2" style="flex-wrap:wrap">
+        <span class="badge badge--dirty">{{ icon("Octagon", 12) }}грязный</span>
+        <span class="muted">— рисковые категории в любую эпоху, редирект-перехват, множественные дропы со сменой тематики.</span>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Категории тематики</div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px">
+        {% for c in CATEGORIES %}
+        <div class="row gap-2" style="align-items:flex-start;padding:4px 0">
+          <span class="cat-ico {% if c.group.value == 'risky' %}cat-ico--risk{% elif c.group.value == 'service' %}cat-ico--util{% endif %}">{{ icon(c.icon, 13) }}</span>
+          <div>
+            <div style="font-weight:500">{{ c.label_ru }} <span class="muted" style="font-size:11px">{{ c.group.value }}</span></div>
+            <div class="muted" style="font-size:12px">{{ c.description }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="muted" style="margin:10px 0 0;font-size:12px">При наличии и нейтрального, и рискового контента — выбирается рисковое.</p>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Лента эпох</div>
+      <p>Горизонтальная полоса «период → категория». Каждый блок — это эпоха, в которую тематика не менялась. Рисковые эпохи помечены красноватым цветом и иконкой (что именно). Длительные «мёртвые» промежутки сжимаются.</p>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Редиректы и «обратить внимание»</div>
+      <ul style="margin:0;padding-left:22px">
+        <li><b>Технический</b> — внутри того же домена (например, <code>www</code> → корень). В карточку сворачивается под раздел.</li>
+        <li><b>Тот же сайт</b> — то же имя, другая зона / поддомен.</li>
+        <li><b>Переезд компании</b> — другой домен, но та же компания по контенту/бренду.</li>
+        <li><b>Обратить внимание</b> — при сомнении уходит сюда. Всегда есть ссылка-слепок на Wayback для ручной проверки.</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Предполагаемые дропы</div>
+      <p>В архиве нет прямого флага дропа. Выводим по эвристике: длинный разрыв (год+) + смена тематики после возобновления. Подаётся <b>как предположение</b>, не как факт. При включённом <code>ENABLE_SMART_DROP</code> разрывы дополнительно проверяются LLM.</p>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">Полотно без LLM-вердикта</div>
+      <p>Если выключен <code>ENABLE_VERDICT</code>, колонка вердикта пустая. Ориентируйтесь на флаги: рисковые иконки и «обратить внимание». Строки с флагами подсвечиваются на полотне.</p>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">LLM-провайдер и модели</div>
+      <p>В <a class="help-link" href="/settings">/settings</a> выбирается провайдер (<code>LLM_PROVIDER</code>) и модель для каждой роли. Поддерживаются:</p>
+      <ul style="margin:0;padding-left:22px">
+        <li><b>OpenRouter</b> (по умолчанию) — единый шлюз ко множеству провайдеров. Формат модели: <code>провайдер/модель</code> (например <code>openai/gpt-4o-mini</code>, <code>anthropic/claude-sonnet-4.5</code>, <code>google/gemini-2.0-flash-001</code>). Каталог: <a class="help-link" href="https://openrouter.ai/models" target="_blank" rel="noopener">openrouter.ai/models {{ icon("ExternalLink", 11) }}</a></li>
+        <li><b>OpenAI (direct)</b> — напрямую к <code>api.openai.com</code>. Формат модели: голое имя (<code>gpt-4o-mini</code>, <code>gpt-4o</code>, <code>gpt-4.1-mini</code>, <code>o3-mini</code>). Каталог: <a class="help-link" href="https://platform.openai.com/docs/models" target="_blank" rel="noopener">platform.openai.com/docs/models {{ icon("ExternalLink", 11) }}</a></li>
+      </ul>
+      <p style="margin-top:8px">Тарифная сетка с ценами за 1M токенов — на странице <a class="help-link" href="/settings">/settings</a> в секции «Модели по ролям». Помогает не запустить случайно дорогой прогон.</p>
+      <p style="margin-top:4px"><b>Правило большого пальца:</b> <code>classification</code> вызывается до 40× на домен — экономьте (например <code>gpt-4o-mini</code> ~$0.15/1M). <code>verdict</code> вызывается 1× на домен — можно ставить умную модель.</p>
+    </section>
+
+    <section>
+      <div class="section-title" style="margin:0 0 8px">FAQ</div>
+      <p><b>Прогон долго идёт.</b> Это нормально: Internet Archive троттлит. Прогресс-бар и счётчики живые. Прерывать только если совсем встало.</p>
+      <p><b>Прервался посередине.</b> На странице прогона есть кнопка «повторить» — создаст новый прогон с теми же доменами и настройками.</p>
+      <p><b>Домен «нет данных».</b> Его нет в архиве Wayback. Это не ошибка — это диагноз.</p>
+      <p><b>Прогон с включёнными LLM-ролями встал.</b> Скорее всего на одном из доменов очень много REVIEW-редиректов на мёртвые цели; per-domain timeout (30 мин по умолчанию) его прервёт.</p>
+      <p><b>Не вижу обновлённую версию после деплоя.</b> Проверьте бейдж <code>vX.Y</code> в шапке справа. Если показывает старую — Docker не пересобрал образ. Перезапустите с <code>docker compose build --no-cache webarhive</code>.</p>
+    </section>
+
+  </div>
+</div>
+</div>
+{% endblock %}
