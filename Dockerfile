@@ -99,11 +99,12 @@ RUN cd /srv/panel/apps/img \
     && npx prisma generate \
     && npm run build
 
-# seo — Next 15. Auth0 читается в рантайме; если сборка упадёт из-за окружения —
-# не валим весь образ, seo просто не будет предсобран (см. README, раздел seo).
+# seo — Next 15. Конфликт peer-deps (@tremor/react хочет React 18, проект на 19) →
+# ставим с --legacy-peer-deps. Auth0 читается в рантайме; если install/build упадёт —
+# не валим весь образ (|| WARN), seo просто не будет предсобран (см. README, раздел seo).
 RUN cd /srv/panel/apps/seo \
-    && npm install \
-    && (npm run build || echo "WARN: сборка seo не прошла — поправьте apps/seo (вероятно Auth0/окружение)")
+    && (npm install --legacy-peer-deps && npm run build \
+        || echo "WARN: сборка seo не прошла — поправьте apps/seo (вероятно Auth0/окружение)")
 
 # ----------------------------------------------------------------------------
 # 6. Caddy-конфиг дашборда, supervisor, entrypoint
