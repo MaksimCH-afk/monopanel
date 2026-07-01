@@ -34,10 +34,12 @@
     Header set X-AI-Usage "opt-out"
     
     # Prevent content embedding
-    Header set X-Frame-Options "DENY"
-    
+    # [monopanel] Разрешаем встраивание в iframe дашборда — X-Frame-Options снят.
+    # Header set X-Frame-Options "DENY"
+
     # Content Security Policy
-    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' cdn.jsdelivr.net cdnjs.cloudflare.com code.jquery.com; style-src 'self' 'unsafe-inline' cdn.jsdelivr.net cdnjs.cloudflare.com fonts.googleapis.com; font-src 'self' cdnjs.cloudflare.com fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none';"
+    # [monopanel] Убран `frame-ancestors 'none'`, иначе плитка-iframe дашборда пуста.
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' cdn.jsdelivr.net cdnjs.cloudflare.com code.jquery.com; style-src 'self' 'unsafe-inline' cdn.jsdelivr.net cdnjs.cloudflare.com fonts.googleapis.com; font-src 'self' cdnjs.cloudflare.com fonts.gstatic.com; img-src 'self' data:;"
     
     # Referrer Policy - no information leak
     Header set Referrer-Policy "no-referrer"

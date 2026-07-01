@@ -362,7 +362,8 @@ class BotProtection {
         if (!headers_sent()) {
             header('X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex');
             header('X-Content-Type-Options: nosniff');
-            header('X-Frame-Options: DENY');
+            // [monopanel] Снято, чтобы cf встраивался в iframe дашборда.
+            // header('X-Frame-Options: DENY');
             header('Referrer-Policy: no-referrer');
         }
     }

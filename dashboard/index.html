@@ -22,6 +22,9 @@
     </a>
     <span class="topbar__sub" id="hostlabel"></span>
 
+    <!-- Вкладки — в одной строке с логотипом -->
+    <nav class="tabs" id="tabs"></nav>
+
     <div class="topbar__actions">
       <a class="btn btn--ghost btn--sm" id="popout" target="_blank" rel="noopener" style="display:none">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -37,9 +40,6 @@
       </div>
     </div>
   </header>
-
-  <!-- ===== Вкладки ===== -->
-  <nav class="tabs" id="tabs"></nav>
 
   <!-- ===== Контент ===== -->
   <main class="content" id="content"></main>
@@ -114,7 +114,10 @@
 
     // ---- Переключение ----
     const setActiveTab = (key) => [...tabsEl.children].forEach(t => t.classList.toggle("active", t.dataset.key === key));
-    const showPane = (el) => { [...contentEl.children].forEach(p => p.classList.remove("active")); el.classList.add("active"); };
+    const showPane = (el) => {
+      [...contentEl.children].forEach(p => { p.classList.remove("active"); p.style.display = "none"; });
+      el.classList.add("active"); el.style.display = "block";
+    };
     const updatePopout = (app) => { if (app) { popoutEl.style.display = "inline-flex"; popoutEl.href = urlFor(app); } else popoutEl.style.display = "none"; };
     const openExternal = (app) => window.open(urlFor(app), "_blank", "noopener");
 
