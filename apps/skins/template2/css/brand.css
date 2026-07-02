@@ -1,26 +1,30 @@
 /* ============================================================
-   BRAND THEME · Cowboyspin (gold-on-deep-green, Wild West)
+   BRAND THEME · css/brand.css
+   ------------------------------------------------------------
+   ЕДИНАЯ ТОЧКА КАСТОМИЗАЦИИ под конкретный бренд.
+   Подключается ПОСЛЕ css/styles.css. Значения ниже — «стоковый»
+   нейтральный вид шаблона (замените под свой бренд).
    Формат — единый контракт переменных (как у шаблона 1),
    поэтому тема применима к обоим шаблонам.
    ============================================================ */
 :root {
-  /* — акцент — */
-  --gold:            #e9c84a;
-  --gold-hi:         #f2d666;
-  --gold-deep:       #b58f1e;
-  --accent-rgb:      233,200,74;
-  --c-accent:        #e9c84a;
-  --c-list-marker:   #e9c84a;
+  /* — акцент — (eyebrow-метки, рамки, цифры, активные табы, маркеры) */
+  --gold:            #e8b84b;
+  --gold-hi:         #f7d579;
+  --gold-deep:       #b6862c;
+  --accent-rgb:      232,184,75;
+  --c-accent:        #e8b84b;
+  --c-list-marker:   #e8b84b;
 
   /* — меню — */
-  --c-menu:          #9fb1a4;
-  --c-menu-active:   #e9c84a;
+  --c-menu:          #94a698;
+  --c-menu-active:   #e8b84b;
 
   /* — кнопки / CTA — */
-  --c-cta:           #e9c84a;
-  --c-cta-hi:        #f2d666;
-  --c-cta-2:         #b58f1e;
-  --c-cta-text:      #1c1606;
+  --c-cta:           #e8b84b;
+  --c-cta-hi:        #f7d579;
+  --c-cta-2:         #b6862c;
+  --c-cta-text:      #2a1c05;
 
   /* — вторичная / success — */
   --c-secondary:     #2dbb6b;
@@ -29,18 +33,18 @@
   --secondary-rgb:   45,187,107;
 
   /* — текст — */
-  --c-heading:       #ffffff;
-  --c-text:          #9fb1a4;
-  --muted:           #9fb1a4;
+  --c-heading:       #f1efe5;
+  --c-text:          #94a698;
+  --muted:           #94a698;
 
   /* — ссылки — */
-  --c-link:          #e9c84a;
-  --c-link-hover:    #f2d666;
+  --c-link:          #e8b84b;
+  --c-link-hover:    #f7d579;
 
   /* — фон + поверхности — */
-  --c-bg:            #0e1a14;
-  --bg:              #0e1a14;
-  --bg-elev:         #091310;
-  --surface:         #17251f;
-  --surface-2:       #13211a;
+  --c-bg:            #0a120d;
+  --bg:              #0a120d;
+  --bg-elev:         #0e1812;
+  --surface:         #121d16;
+  --surface-2:       #16241c;
 }
