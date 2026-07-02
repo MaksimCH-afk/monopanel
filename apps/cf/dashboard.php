@@ -961,8 +961,8 @@ async function reissueDomainToken(domainId, domainName) {
             '<div class="modal fade" id="reissueTokenModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">' +
             '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-key me-2 text-warning"></i>Перевыпустить токен — <span id="reissueDomainName"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
             '<div class="modal-body">' +
-            '<p class="text-muted small">Панель создаст новый дочерний токен выбранным мастер-токеном и <b>перепривяжет домен</b> к нему. Это чинит «недостаточно прав / неверный токен» (домен мог остаться на старом отозванном токене).</p>' +
-            '<label class="form-label small">Мастер-токен (должен быть живой)</label>' +
+            '<p class="text-muted small"><b>Авто</b> — панель найдёт среди сохранённых аккаунтов тот, что реально управляет доменом, и перепривяжет к нему (новый токен не создаётся). Или выберите конкретный <b>мастер-токен</b> — тогда создастся новый дочерний токен. Панель перепривяжет домен <b>только если токен реально видит зону</b>.</p>' +
+            '<label class="form-label small">Источник токена</label>' +
             '<select id="reissueMasterSelect" class="form-select mb-2"></select>' +
             '<div id="reissueOut" class="small"></div>' +
             '</div>' +
@@ -979,26 +979,26 @@ async function reissueDomainToken(domainId, domainName) {
     _reissueModal.show();
     try {
         const r = await fetch('master_token_api.php?action=list_masters').then(r => r.json());
-        if (!r.success || !r.masters || !r.masters.length) {
-            sel.innerHTML = '<option value="">нет сохранённых мастер-токенов</option>';
-            document.getElementById('reissueOut').innerHTML = '<span class="text-danger">Сначала сохраните рабочий мастер-токен на вкладке «Мастер-токен».</span>';
-            return;
-        }
-        sel.innerHTML = r.masters.map(m => `<option value="${m.id}">${(m.label || ('#' + m.id))}${m.email ? (' (' + m.email + ')') : ''}</option>`).join('');
-    } catch (e) { sel.innerHTML = '<option value="">ошибка загрузки</option>'; }
+        const autoOpt = '<option value="__auto__">🔍 Авто — найти среди аккаунтов (рекомендуется)</option>';
+        const masterOpts = (r.success && r.masters) ? r.masters.map(m => `<option value="${m.id}">мастер: ${(m.label || ('#' + m.id))}${m.email ? (' (' + m.email + ')') : ''}</option>`).join('') : '';
+        sel.innerHTML = autoOpt + masterOpts;
+    } catch (e) { sel.innerHTML = '<option value="__auto__">🔍 Авто — найти среди аккаунтов</option>'; }
     const btn = document.getElementById('reissueConfirmBtn');
     btn.onclick = async function () {
-        const mid = sel.value;
-        if (!mid) { showToast('Выберите мастер-токен', 'warning'); return; }
-        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Перевыпускаю…';
+        const val = sel.value;
+        if (!val) { showToast('Выберите источник токена', 'warning'); return; }
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>' + (val === '__auto__' ? 'Ищу аккаунт…' : 'Перевыпускаю…');
         document.getElementById('reissueOut').innerHTML = '';
         try {
-            const fd = new URLSearchParams({ action: 'reissue_domain_token', domain_id: domainId, master_id: mid });
+            const fd = new URLSearchParams(val === '__auto__'
+                ? { action: 'reissue_domain_token', domain_id: domainId, mode: 'auto' }
+                : { action: 'reissue_domain_token', domain_id: domainId, master_id: val });
             const res = await fetch('master_token_api.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd }).then(r => r.json());
             if (res.success) {
-                showToast('Токен перевыпущен для ' + res.domain, res.dns_ok ? 'success' : 'warning');
-                document.getElementById('reissueOut').innerHTML = '<span class="' + (res.dns_ok ? 'text-success' : 'text-warning') + '">Готово: ' + res.masked + '. Зона: ' + (res.zone_ok ? 'найдена' : 'не найдена') + ', DNS доступ: ' + (res.dns_ok ? 'есть ✓' : 'нет') + '.</span>';
-                if (res.dns_ok) setTimeout(function () { _reissueModal.hide(); location.reload(); }, 1300);
+                const how = res.mode === 'auto' ? ('привязан к аккаунту ' + (res.via || '')) : ('новый токен ' + (res.masked || ''));
+                showToast('Домен ' + res.domain + ': DNS доступ восстановлен', 'success');
+                document.getElementById('reissueOut').innerHTML = '<span class="text-success">Готово — ' + how + '. DNS доступ: есть ✓. Обновляю…</span>';
+                setTimeout(function () { _reissueModal.hide(); location.reload(); }, 1300);
             } else {
                 showToast('Ошибка: ' + (res.error || ''), 'error');
                 document.getElementById('reissueOut').innerHTML = '<span class="text-danger">' + (res.error || 'ошибка') + '</span>';

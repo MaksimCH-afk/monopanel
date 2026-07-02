@@ -121,16 +121,20 @@
     const updatePopout = (app) => { if (app) { popoutEl.style.display = "inline-flex"; popoutEl.href = urlFor(app); } else popoutEl.style.display = "none"; };
     const openExternal = (app) => window.open(urlFor(app), "_blank", "noopener");
 
+    // Запоминаем активную вкладку в URL (#key), чтобы Cmd+R не сбрасывал на дашборд.
+    const rememberTab = (key) => { try { history.replaceState(null, "", key === "home" ? location.pathname + location.search : "#" + key); } catch (e) {} };
+
     function openApp(key) {
-      if (key === "home") { setActiveTab("home"); showPane(home); updatePopout(null); return; }
+      if (key === "home") { setActiveTab("home"); showPane(home); updatePopout(null); rememberTab("home"); return; }
       const app = APPS.find(a => a.key === key);
-      if (!app.embed) { openExternal(app); showNotice(app); return; }
+      if (!app) { setActiveTab("home"); showPane(home); updatePopout(null); return; }
+      if (!app.embed) { openExternal(app); showNotice(app); rememberTab(key); return; }
       if (!frames[key]) {
         const f = document.createElement("iframe");
         f.src = urlFor(app); f.className = "pane";
         contentEl.appendChild(f); frames[key] = f;
       }
-      setActiveTab(key); showPane(frames[key]); updatePopout(app);
+      setActiveTab(key); showPane(frames[key]); updatePopout(app); rememberTab(key);
     }
 
     // ---- Пояснение для new-tab-only ----
@@ -209,6 +213,15 @@
       document.addEventListener("click", (ev) => {
         if (!document.getElementById("themePicker").contains(ev.target)) { menu.style.display = "none"; btn.setAttribute("aria-expanded", "false"); }
       });
+    })();
+
+    // ---- Восстановление активной вкладки после перезагрузки (Cmd+R) ----
+    (function restoreTab() {
+      const k = (location.hash || "").replace(/^#/, "");
+      const app = APPS.find(a => a.key === k);
+      if (app && app.embed) { openApp(k); }               // встраиваемое — открыть iframe-вкладку
+      else if (app && !app.embed) { showNotice(app); }    // new-tab-only — показать пояснение, без авто-открытия вкладки
+      else { setActiveTab("home"); }                      // по умолчанию — дашборд
     })();
   </script>
 </body>

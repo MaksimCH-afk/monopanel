@@ -310,13 +310,55 @@ try {
             $st->execute([$domainId, $userId]);
             $dom = $st->fetch();
             if (!$dom) throw new Exception('Домен не найден');
+            $domName = $dom['domain'];
+            $mode = $_POST['mode'] ?? '';
+
+            // --- Режим АВТО: перебрать уже сохранённые токен-аккаунты панели и найти тот,
+            //     который реально управляет этой зоной. Новый токен не создаём. ---
+            if ($mode === 'auto') {
+                $creds = $pdo->query("SELECT id, email, api_key FROM cloudflare_credentials WHERE user_id = $userId AND COALESCE(auth_type,'') = 'token'")->fetchAll();
+                $bound = null;
+                foreach ($creds as $c) {
+                    $z = cfMasterApi($c['api_key'], 'GET', 'zones?name=' . rawurlencode($domName));
+                    if (empty($z['success']) || empty($z['result'][0]['id'])) continue;
+                    $zoneId = $z['result'][0]['id'];
+                    $chk = cfMasterApi($c['api_key'], 'GET', "zones/$zoneId/dns_records?per_page=1");
+                    if (empty($chk['success'])) continue;
+                    $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$c['id'], $zoneId, $domainId, $userId]);
+                    $bound = $c;
+                    break;
+                }
+                if ($bound) {
+                    logAction($pdo, $userId, 'Перевыпущен токен домена', "{$domName}: авто-привязка к аккаунту {$bound['email']}");
+                    echo json_encode(['success' => true, 'domain' => $domName, 'zone_ok' => true, 'dns_ok' => true, 'via' => $bound['email'], 'mode' => 'auto']);
+                } else {
+                    echo json_encode(['success' => false, 'error' => 'Среди сохранённых токен-аккаунтов панели ни один не управляет доменом ' . $domName . '. Добавьте мастер-токен того аккаунта Cloudflare, где заведён домен, и выберите его вместо «Авто».']);
+                }
+                break;
+            }
+
+            // --- Режим МАСТЕР: создать дочерний токен выбранным мастером ---
             $master = resolveMasterToken($pdo);
-            if ($master === '') throw new Exception('Выберите мастер-токен');
+            if ($master === '') throw new Exception('Выберите мастер-токен или режим «Авто»');
             $r = mtCreateToken($master, 'panel-token-' . date('Ymd-His'), array_column(masterTokenPreset(), 'key'));
             if (empty($r['ok'])) throw new Exception('Не удалось создать токен: ' . ($r['error'] ?? 'неизвестно'));
             $tok = $r['token'];
             if (!$tok) throw new Exception('Cloudflare не вернул значение токена');
-            // upsert креденшла (как save_as_account)
+            // Проверяем, что этот токен ВИДИТ зону (иначе мастер из другого аккаунта — не привязываем).
+            $zoneId = '';
+            $z = cfMasterApi($tok, 'GET', 'zones?name=' . rawurlencode($domName));
+            if (!empty($z['success']) && !empty($z['result'][0]['id'])) $zoneId = $z['result'][0]['id'];
+            if ($zoneId === '') {
+                logAction($pdo, $userId, 'Перевыпуск токена: мимо', "{$domName}: выбранный мастер не управляет доменом (зона не найдена)");
+                echo json_encode(['success' => false, 'error' => 'Выбранный мастер-токен НЕ из того аккаунта Cloudflare — домен ' . $domName . ' в нём не найден. Выберите мастер аккаунта, где заведён домен, или режим «Авто». (Домен не тронут.)']);
+                break;
+            }
+            $chk = cfMasterApi($tok, 'GET', "zones/$zoneId/dns_records?per_page=1");
+            if (empty($chk['success'])) {
+                echo json_encode(['success' => false, 'error' => 'Токен создан, но нет доступа к DNS зоны — проверьте право DNS:Edit у мастера. Домен не перепривязан.']);
+                break;
+            }
+            // upsert креденшла (как save_as_account) и ПЕРЕПРИВЯЗКА
             $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
             $ex->execute([$userId, $tok]);
             $credId = (int)($ex->fetchColumn() ?: 0);
@@ -335,24 +377,9 @@ try {
                 $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
                 $credId = (int)$pdo->lastInsertId();
             }
-            // свежий zone_id новым токеном
-            $zoneId = '';
-            $z = cfMasterApi($tok, 'GET', 'zones?name=' . rawurlencode($dom['domain']));
-            if (!empty($z['success']) && !empty($z['result'][0]['id'])) $zoneId = $z['result'][0]['id'];
-            // ПЕРЕПРИВЯЗКА домена к живому креденшлу
-            if ($zoneId !== '') {
-                $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $zoneId, $domainId, $userId]);
-            } else {
-                $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $domainId, $userId]);
-            }
-            // контроль: видит ли новый токен DNS зоны
-            $dnsOk = false;
-            if ($zoneId !== '') {
-                $chk = cfMasterApi($tok, 'GET', "zones/$zoneId/dns_records?per_page=1");
-                $dnsOk = !empty($chk['success']);
-            }
-            logAction($pdo, $userId, 'Перевыпущен токен домена', "{$dom['domain']}: зона " . ($zoneId ?: 'не найдена') . ", DNS доступ: " . ($dnsOk ? 'да' : 'нет'));
-            echo json_encode(['success' => true, 'domain' => $dom['domain'], 'zone_ok' => $zoneId !== '', 'dns_ok' => $dnsOk, 'masked' => mb_substr($tok, 0, 10) . '…' . mb_substr($tok, -4)]);
+            $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $zoneId, $domainId, $userId]);
+            logAction($pdo, $userId, 'Перевыпущен токен домена', "{$domName}: новый токен, зона {$zoneId}, DNS доступ: да");
+            echo json_encode(['success' => true, 'domain' => $domName, 'zone_ok' => true, 'dns_ok' => true, 'masked' => mb_substr($tok, 0, 10) . '…' . mb_substr($tok, -4)]);
             break;
 
         case 'import_empty':
