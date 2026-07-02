@@ -1,5 +1,5 @@
 # ============================================================================
-#  Единая панель — единый образ для 6 РЕАЛЬНЫХ приложений + дашборд.
+#  Единая панель — единый образ для 7 РЕАЛЬНЫХ приложений + дашборд.
 #  База: php:8.1-apache (debian bookworm → python 3.11). Поверх: Node 22,
 #  Python venv на каждое py-приложение, tesseract, Caddy, supervisor.
 #
@@ -106,6 +106,10 @@ RUN cd /srv/panel/apps/seo \
     && (npm install --legacy-peer-deps && npm run build \
         || echo "WARN: сборка seo не прошла — поправьте apps/seo (вероятно Auth0/окружение)")
 
+# content — Node/Express (единственная зависимость express; HTTP через native fetch).
+# Без ключей работает в mock-режиме; статику отдаёт сам сервер. Только прод-зависимости.
+RUN cd /srv/panel/apps/content && npm install --omit=dev
+
 # ----------------------------------------------------------------------------
 # 6. Caddy-конфиг дашборда, supervisor, entrypoint
 # ----------------------------------------------------------------------------
@@ -114,8 +118,8 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/panel.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Порты: 333 дашборд + 3331..3336 приложения + 5001 (seo-flask, нужен браузеру)
-EXPOSE 333 3331 3332 3333 3334 3335 3336 5001
+# Порты: 333 дашборд + 3331..3337 приложения + 5001 (seo-flask, нужен браузеру)
+EXPOSE 333 3331 3332 3333 3334 3335 3336 3337 5001
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

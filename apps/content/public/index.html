@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Анализатор контентного gap</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <h1>Анализатор контентного gap</h1>
+      <p class="sub">Сравнение вашей страницы с конкурентами по сущностям и интенту.
+        <span id="mockBadge" class="badge badge-mock" hidden>demo / mock-режим</span>
+      </p>
+    </header>
+
+    <!-- ─── Input ─────────────────────────────────────────────── -->
+    <section id="inputCard" class="card">
+      <form id="analyzeForm" novalidate>
+        <label class="field">
+          <span class="lbl">Поисковый запрос <em>*</em></span>
+          <input id="query" name="query" type="text" placeholder="напр. casino brand review" autocomplete="off" />
+        </label>
+
+        <label class="field">
+          <span class="lbl">Моя страница <em>*</em></span>
+          <textarea id="target" rows="7" placeholder="Вставьте основной текст вашей страницы…"></textarea>
+        </label>
+
+        <div class="field">
+          <span class="lbl">Конкуренты <em>*</em> <small id="compCount"></small></span>
+          <div id="competitors"></div>
+          <button type="button" id="addComp" class="btn btn-ghost">+ добавить конкурента</button>
+        </div>
+
+        <p class="hint">Вставляйте основной текст страницы без меню, футера и блоков «похожее» —
+          они искажают профиль сущностей.</p>
+
+        <div class="actions">
+          <button type="submit" id="submitBtn" class="btn btn-primary" disabled>Анализировать</button>
+          <span id="formError" class="form-error" role="alert"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- ─── Loading ───────────────────────────────────────────── -->
+    <section id="loading" class="card loading" hidden>
+      <div class="spinner"></div>
+      <p>Анализируем контент и строим дифф сущностей…</p>
+      <small>Обычно несколько секунд — зависит от объёма и числа конкурентов.</small>
+    </section>
+
+    <!-- ─── Result ────────────────────────────────────────────── -->
+    <section id="result" hidden></section>
+  </main>
+
+  <template id="compTemplate">
+    <div class="comp">
+      <div class="comp-head">
+        <input class="comp-label" type="text" placeholder="URL или имя (необязательно)" autocomplete="off" />
+        <button type="button" class="btn btn-remove" title="Удалить">✕</button>
+      </div>
+      <textarea class="comp-text" rows="5" placeholder="Текст страницы конкурента…"></textarea>
+    </div>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>
