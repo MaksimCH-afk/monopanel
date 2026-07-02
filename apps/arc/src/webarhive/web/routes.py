@@ -198,6 +198,58 @@ async def domain_card(request: Request, domain_id: int):
         llm_calls = (await s.execute(select(LlmCall).where(LlmCall.domain_id == domain_id)
                                      .order_by(LlmCall.created_at))).scalars().all()
         run = await s.get(Run, d.run_id)
+
+    # Агрегация внешних редиректов по целевому домену (spec §7) — чтобы
+    # «весь сайт 301 → newsite.com» показывался ОДНОЙ строкой «N страниц»,
+    # а не полотном из сотен внутренних URL. Технические (свой домен/схема/
+    # www/маркетплейсы) сворачиваются отдельно.
+    from webarhive.analysis.redirects import _MARKETPLACE_ROOTS
+
+    def _effective_cls(r) -> str:
+        # Старые прогоны (до появления класса marketplace) могли сохранить
+        # редирект на dropcatch/godaddy как review/technical — подменяем на
+        # display-уровне, чтобы и они показывались зелёным «маркетплейс».
+        if r.target_domain and r.target_domain in _MARKETPLACE_ROOTS:
+            return "marketplace"
+        return r.classification
+
+    ext_redirects = [r for r in redirects
+                     if _effective_cls(r) not in ("technical",)]
+    tech_redirects = [r for r in redirects
+                      if _effective_cls(r) == "technical"]
+    _cls_priority = {"review": 0, "company_move": 1, "same_site": 2, "marketplace": 3}
+
+    def _group_redirects(items):
+        groups: dict[str, dict] = {}
+        for r in items:
+            key = r.target_domain or "—"
+            g = groups.get(key)
+            if g is None:
+                g = {"target": key, "count": 0, "classes": set(),
+                     "first": r.captured_at, "last": r.captured_at,
+                     "reason": r.reason, "snapshot_url": r.snapshot_url,
+                     "members": []}
+                groups[key] = g
+            g["count"] += 1
+            g["classes"].add(_effective_cls(r))
+            if r.captured_at and (g["first"] is None or r.captured_at < g["first"]):
+                g["first"] = r.captured_at
+            if r.captured_at and (g["last"] is None or r.captured_at > g["last"]):
+                g["last"] = r.captured_at
+            if not g["snapshot_url"] and r.snapshot_url:
+                g["snapshot_url"] = r.snapshot_url
+            g["members"].append(r)
+        out = []
+        for g in groups.values():
+            g["cls"] = sorted(g["classes"], key=lambda c: _cls_priority.get(c, 9))[0]
+            g["mixed"] = len(g["classes"]) > 1
+            out.append(g)
+        # Сначала самые «громкие» (review), затем по числу страниц.
+        out.sort(key=lambda g: (_cls_priority.get(g["cls"], 9), -g["count"]))
+        return out
+
+    redirect_groups = _group_redirects(ext_redirects)
+
     crumbs = [
         {"label": f"Прогон #{run.id}",
          "sub": run.started_at.strftime('%Y-%m-%d %H:%M'),
@@ -208,6 +260,9 @@ async def domain_card(request: Request, domain_id: int):
         request,
         "card.html",
         {"domain": d, "epochs": epochs, "redirects": redirects,
+         "redirect_groups": redirect_groups,
+         "ext_redirect_count": len(ext_redirects),
+         "tech_redirect_count": len(tech_redirects),
          "drops": drops, "llm_calls": llm_calls, "run": run, "crumbs": crumbs},
     )
 
@@ -223,6 +278,72 @@ async def run_log(run_id: int):
         text = await aggregate_run_log(s, run_id)
     headers = {"Content-Disposition": f'attachment; filename="run_{run_id}.log.txt"'}
     return PlainTextResponse(text or "(пусто)", headers=headers)
+
+
+@html_router.get("/runs/{run_id}/all_logs.txt", response_class=PlainTextResponse)
+async def run_all_logs(run_id: int):
+    """Один файл со ВСЕМ по прогону: шапка + полный snapshot настроек,
+    применённых именно к этому прогону + сводка по доменам + трасса
+    каждого домена + объединённый лог. Для отправки/архива одной кнопкой.
+    """
+    from webarhive.db.repo import aggregate_run_log
+
+    async with get_session() as s:
+        run = await s.get(Run, run_id)
+        if run is None:
+            raise HTTPException(404)
+        domains = (await s.execute(
+            select(Domain).where(Domain.run_id == run_id).order_by(Domain.id)
+        )).scalars().all()
+        merged_log = await aggregate_run_log(s, run_id)
+
+    SEP = "=" * 78
+
+    def section(title: str) -> str:
+        return f"\n{SEP}\n{title}\n{SEP}\n"
+
+    parts: list[str] = []
+    parts.append(SEP)
+    parts.append(f"WEBARHIVE — ПОЛНЫЙ ОТЧЁТ ПРОГОНА #{run.id}")
+    parts.append(SEP)
+    parts.append(f"Старт:    {run.started_at.strftime('%Y-%m-%d %H:%M:%S') if run.started_at else '—'}")
+    parts.append(f"Финиш:    {run.finished_at.strftime('%Y-%m-%d %H:%M:%S') if run.finished_at else '—'}")
+    parts.append(f"Статус:   {run.status}")
+    parts.append(f"Доменов:  {run.total_domains} (обработано {run.processed_domains})")
+    parts.append(
+        f"Вердикты: чистых {run.clean_count} · нюансов {run.nuanced_count} · "
+        f"грязных {run.dirty_count} · ошибок {run.error_count}"
+    )
+    parts.append(f"Заметка:  {run.note or '—'}")
+
+    parts.append(section("НАСТРОЙКИ ПРОГОНА (snapshot — применялись именно к этому прогону)"))
+    parts.append(json.dumps(run.settings_snapshot or {}, ensure_ascii=False, indent=2, sort_keys=True))
+
+    parts.append(section("ДОМЕНЫ — СВОДКА"))
+    parts.append(f"{'домен':<40} {'статус':<9} {'вердикт':<9} {'возраст':>8} {'версий':>7} {'флаги':>6}")
+    parts.append("-" * 78)
+    for d in domains:
+        age = f"{d.age_days}д" if d.age_days is not None else "—"
+        flags = d.risky_flag_count + d.review_flag_count
+        parts.append(
+            f"{d.domain[:39]:<40} {d.status:<9} {(d.verdict or '—'):<9} "
+            f"{age:>8} {d.total_versions:>7} {flags:>6}"
+        )
+        if d.error_message:
+            parts.append(f"    ↳ ошибка: {d.error_message}")
+
+    for d in domains:
+        parts.append(section(f"ТРАССА ДОМЕНА: {d.domain}  [{d.status}]"))
+        if d.error_message:
+            parts.append(f"ОШИБКА: {d.error_message}\n")
+        parts.append(d.trace or "(трасса пуста)")
+
+    parts.append(section("ОБЪЕДИНЁННЫЙ ЛОГ ПРОГОНА (все домены, по времени)"))
+    parts.append(merged_log or "(пусто)")
+
+    text = "\n".join(parts) + "\n"
+    headers = {"Content-Disposition": f'attachment; filename="run_{run_id}_all_logs.txt"'}
+    return PlainTextResponse(text, headers=headers)
 
 
 @api_router.get("/runs/{run_id}/log", response_class=PlainTextResponse)
@@ -267,7 +388,7 @@ _BOOL_FIELDS = {
     "enable_verdict", "enable_smart_drop", "enable_redirect_llm",
     "check_subdomains",
     "whois_enabled",
-    "enable_best_snapshot", "enable_best_snapshot_content_llm",
+    "enable_best_snapshot",
     "cdx_cache_enabled",
 }
 _INT_FIELDS = {
@@ -282,7 +403,7 @@ _INT_FIELDS = {
     "cdx_cache_ttl_hours",
 }
 _FLOAT_FIELDS = {
-    "cost_budget_per_domain", "ia_rate_limit", "ia_backoff",
+    "ia_rate_limit", "ia_backoff",
     "whois_rate_limit",
 }
 # Свободные строки (модели, API-ключи).
@@ -534,6 +655,29 @@ async def api_export_csv(
         headers={"Content-Disposition": f'attachment; filename="run_{run_id}.csv"',
                  "Content-Type": "text/csv; charset=utf-8"},
     )
+
+
+@api_router.post("/llm/check")
+async def api_llm_check(
+    provider: Annotated[str, Form()] = "",
+    api_key: Annotated[str, Form()] = "",
+):
+    """Проверить валидность LLM-ключа без расхода токенов.
+
+    Если оператор ничего не ввёл в поле ключа (api_key пустой) — берём
+    сохранённый ключ выбранного провайдера. Так кнопка работает и для
+    «только что введённого, ещё не сохранённого» ключа, и для уже
+    сохранённого ранее.
+    """
+    from webarhive.llm.client import check_api_key
+
+    s = get_settings()
+    prov = (provider or s.llm_provider or "openrouter").strip().lower()
+    key = api_key.strip() or (
+        s.openai_api_key if prov == "openai" else s.openrouter_api_key
+    )
+    ok, message = await check_api_key(provider=prov, api_key=key)
+    return JSONResponse({"ok": ok, "message": message})
 
 
 @api_router.get("/llm_calls/{call_id}/input.txt", response_class=PlainTextResponse)

@@ -110,8 +110,8 @@
           <tbody>
           {% for e in epochs %}
             <tr>
-              <td class="mono">{{ e.period_from.strftime('%Y-%m-%d') }}</td>
-              <td class="mono">{{ e.period_to.strftime('%Y-%m-%d') }}</td>
+              <td class="mono">{{ e.period_from.strftime('%d.%m.%Y') }}</td>
+              <td class="mono">{{ e.period_to.strftime('%d.%m.%Y') }}</td>
               <td>{{ category_chip(e.category, CATEGORY_BY_KEY) }}</td>
               <td class="mono" style="color:var(--text-2)">{% if e.confidence %}{{ '%.2f'|format(e.confidence) }}{% else %}—{% endif %}</td>
               <td class="mono" style="color:var(--text-2)">{{ e.versions_in_epoch or '—' }}</td>
@@ -129,45 +129,69 @@
   </div>
 </div>
 
-{#- ===== Редиректы ===== -#}
-{% set ext_redirects = redirects|rejectattr('classification','equalto','technical')|list %}
-{% set tech_redirects = redirects|selectattr('classification','equalto','technical')|list %}
-<details class="card" {% if ext_redirects %}open{% endif %}>
+{#- ===== Редиректы (агрегированы по целевому домену) ===== -#}
+<details class="card" {% if redirect_groups %}open{% endif %}>
   <summary class="collapse-head" style="list-style:none">
     {{ icon("ChevronRight", 14, "var(--text-3)") }}
     <span class="collapse-head__title">Редиректы</span>
-    <span class="muted" style="font-size:12.5px">· всего {{ redirects|length }}, внешних: {{ ext_redirects|length }}</span>
+    <span class="muted" style="font-size:12.5px">· внешних целей: {{ redirect_groups|length }} · страниц: {{ ext_redirect_count }}{% if tech_redirect_count %} · технических: {{ tech_redirect_count }}{% endif %}</span>
   </summary>
   <div class="card__body" style="border-top:1px solid var(--divider)">
-    {% if ext_redirects %}
+    {% if redirect_groups %}
+    <div class="muted" style="font-size:12px;margin-bottom:8px">
+      Сгруппировано по целевому домену: одна строка = «все эти страницы редиректят на N». Разверните строку, чтобы увидеть конкретные URL.
+    </div>
     <table class="tbl">
       <thead>
         <tr>
-          <th style="width:110px">дата</th>
-          <th>откуда</th>
-          <th>куда</th>
-          <th style="width:130px">цель</th>
+          <th>цель редиректа</th>
           <th style="width:170px">классификация</th>
+          <th style="width:90px">страниц</th>
+          <th style="width:180px">период</th>
           <th>причина</th>
           <th style="width:100px">слепок</th>
         </tr>
       </thead>
       <tbody>
-      {% for r in ext_redirects %}
-        <tr class="{% if r.classification == 'review' %}row--alert{% endif %}">
-          <td class="mono">{{ r.captured_at.strftime('%Y-%m-%d') }}</td>
-          <td class="mono" style="color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.from_url }}</td>
-          <td class="mono" style="color:var(--text-2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.to_url or '—' }}</td>
-          <td class="mono">{{ r.target_domain or '—' }}</td>
+      {% for g in redirect_groups %}
+        <tr class="{% if g.cls == 'review' %}row--alert{% endif %}">
+          <td class="mono">{{ g.target }}</td>
           <td>
-            {% if r.classification == 'same_site' %}<span class="badge badge--clean">{{ icon("Check", 11) }}тот же сайт</span>
-            {% elif r.classification == 'company_move' %}<span class="badge badge--clean">{{ icon("Check", 11) }}переезд</span>
-            {% elif r.classification == 'review' %}<span class="badge badge--nuance">{{ icon("AlertTriangle", 11) }}обратить внимание</span>
-            {% else %}<span class="badge badge--neutral">{{ r.classification }}</span>{% endif %}
+            {% if g.cls == 'same_site' %}<span class="badge badge--clean">{{ icon("Check", 11) }}тот же сайт</span>
+            {% elif g.cls == 'company_move' %}<span class="badge badge--clean">{{ icon("Check", 11) }}переезд</span>
+            {% elif g.cls == 'marketplace' %}<span class="badge badge--clean">{{ icon("ShoppingCart", 11) }}маркетплейс доменов</span>
+            {% elif g.cls == 'review' %}<span class="badge badge--nuance">{{ icon("AlertTriangle", 11) }}обратить внимание</span>
+            {% else %}<span class="badge badge--neutral">{{ g.cls }}</span>{% endif %}
+            {% if g.mixed %}<span class="muted" style="font-size:11px"> (смешанная)</span>{% endif %}
           </td>
-          <td style="color:var(--text-2);font-size:12.5px">{{ r.reason or '' }}</td>
-          <td>{% if r.snapshot_url %}<a class="help-link" href="{{ r.snapshot_url }}" target="_blank" rel="noopener">открыть {{ icon("ExternalLink", 11) }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="mono"><b>{{ g.count }}</b>{% if g.count > 1 %} стр.{% endif %}</td>
+          <td class="mono" style="color:var(--text-2);font-size:12px">{{ g.first.strftime('%d.%m.%Y') }}{% if g.last != g.first %} → {{ g.last.strftime('%d.%m.%Y') }}{% endif %}</td>
+          <td style="color:var(--text-2);font-size:12.5px">{{ g.reason or '' }}</td>
+          <td>{% if g.snapshot_url %}<a class="help-link" href="{{ g.snapshot_url }}" target="_blank" rel="noopener">открыть {{ icon("ExternalLink", 11) }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
         </tr>
+        {% if g.count > 1 %}
+        <tr>
+          <td colspan="6" style="padding:0 10px 8px">
+            <details>
+              <summary style="cursor:pointer;color:var(--text-3);font-size:12px;padding:4px 0">▸ показать {{ g.count }} страниц(ы)</summary>
+              <div style="max-height:240px;overflow:auto;border:1px solid var(--divider);border-radius:6px;margin-top:4px">
+                <table class="tbl" style="margin:0">
+                  <thead><tr><th style="width:110px">дата</th><th>откуда</th><th>куда</th></tr></thead>
+                  <tbody>
+                  {% for r in g.members %}
+                    <tr>
+                      <td class="mono" style="font-size:11.5px">{{ r.captured_at.strftime('%d.%m.%Y') }}</td>
+                      <td class="mono" style="color:var(--text-2);font-size:11.5px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.from_url }}">{{ r.from_url }}</td>
+                      <td class="mono" style="color:var(--text-2);font-size:11.5px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.to_url or '' }}">{{ r.to_url or '—' }}</td>
+                    </tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </td>
+        </tr>
+        {% endif %}
       {% endfor %}
       </tbody>
     </table>
@@ -175,10 +199,10 @@
     <div class="muted" style="font-size:13px">внешних редиректов нет</div>
     {% endif %}
 
-    {% if tech_redirects %}
+    {% if tech_redirect_count %}
     <details style="margin-top:12px">
       <summary style="cursor:pointer;padding:8px 0;color:var(--text-2);font-size:13px">
-        ▸ Технические редиректы (свой домен / схема / www) — {{ tech_redirects|length }}
+        ▸ Технические редиректы (свой домен / схема / www) — {{ tech_redirect_count }}
       </summary>
       <div class="muted" style="padding:8px 0;font-size:12.5px">
         Внутренние: http→https, www→корень, корень↔www. Не несут смысла для вердикта.
@@ -196,20 +220,20 @@
   </div>
   <div class="card__body">
     <div class="kv" style="grid-template-columns:repeat(3,minmax(0,1fr));column-gap:28px">
-      <div class="kv__row"><span class="kv__k">возраст в архиве</span><span class="kv__v kv__v--mono">{{ domain.age_days or 0 }} дн</span></div>
+      <div class="kv__row"><span class="kv__k">возраст в архиве</span><span class="kv__v kv__v--mono" title="{{ domain.age_days or 0 }} дн">{{ domain.age_days|age_human }}</span></div>
       <div class="kv__row"><span class="kv__k">всего захватов</span><span class="kv__v kv__v--mono">{{ domain.total_captures or 0 }}</span></div>
       <div class="kv__row"><span class="kv__k">статус прогона</span><span class="kv__v">{{ status_pill(domain.status) }}</span></div>
-      <div class="kv__row"><span class="kv__k">первый захват</span><span class="kv__v kv__v--mono">{{ domain.first_capture_at.strftime('%Y-%m-%d') if domain.first_capture_at else '—' }}</span></div>
+      <div class="kv__row"><span class="kv__k">первый захват</span><span class="kv__v kv__v--mono">{{ domain.first_capture_at.strftime('%d.%m.%Y') if domain.first_capture_at else '—' }}</span></div>
       <div class="kv__row"><span class="kv__k">версий после схлопывания</span><span class="kv__v kv__v--mono">{{ domain.total_versions or 0 }}</span></div>
       <div class="kv__row"><span class="kv__k">флагов</span><span class="kv__v">{{ (domain.risky_flag_count or 0) + (domain.review_flag_count or 0) }}</span></div>
-      <div class="kv__row"><span class="kv__k">последний захват</span><span class="kv__v kv__v--mono">{{ domain.last_capture_at.strftime('%Y-%m-%d') if domain.last_capture_at else '—' }}</span></div>
+      <div class="kv__row"><span class="kv__k">последний захват</span><span class="kv__v kv__v--mono">{{ domain.last_capture_at.strftime('%d.%m.%Y') if domain.last_capture_at else '—' }}</span></div>
       <div class="kv__row"><span class="kv__k">эпох</span><span class="kv__v">{{ epochs|length }}</span></div>
-      <div class="kv__row"><span class="kv__k">внешних редиректов</span><span class="kv__v">{{ ext_redirects|length }}</span></div>
+      <div class="kv__row"><span class="kv__k">внешних редиректов</span><span class="kv__v">{{ ext_redirect_count }}</span></div>
       <div class="kv__row">
         <span class="kv__k">регистрация (WHOIS)</span>
         <span class="kv__v kv__v--mono">
           {%- if domain.whois_registration_date -%}
-            {{ domain.whois_registration_date.strftime('%Y-%m-%d') }}
+            {{ domain.whois_registration_date.strftime('%d.%m.%Y') }}
             {%- if domain.whois_status == "from_cache" %} <span class="muted" style="font-size:11px">· из кэша</span>{% endif -%}
           {%- elif domain.whois_status == "limit" -%}
             <span class="muted">не получено · лимит</span>
@@ -265,8 +289,8 @@
       <tbody>
       {% for d in drops %}
         <tr>
-          <td class="mono">{{ d.gap_from.strftime('%Y-%m-%d') }}</td>
-          <td class="mono">{{ d.gap_to.strftime('%Y-%m-%d') }}</td>
+          <td class="mono">{{ d.gap_from.strftime('%d.%m.%Y') }}</td>
+          <td class="mono">{{ d.gap_to.strftime('%d.%m.%Y') }}</td>
           <td class="mono">{{ d.gap_days }}</td>
           <td>{{ category_chip(d.category_before, CATEGORY_BY_KEY) }}</td>
           <td>{{ category_chip(d.category_after, CATEGORY_BY_KEY) }}</td>
@@ -314,7 +338,7 @@
           <td class="mono">#{{ loop.index }}</td>
           <td>
             <div class="mono small" style="color:var(--text-2)">
-              {{ e.period_from.strftime('%Y-%m-%d') }} → {{ e.period_to.strftime('%Y-%m-%d') }}
+              {{ e.period_from.strftime('%d.%m.%Y') }} → {{ e.period_to.strftime('%d.%m.%Y') }}
             </div>
             <div class="small">{{ e.category|category_label }}</div>
           </td>
@@ -353,7 +377,7 @@
         <tr>
           <td class="mono">#{{ loop.index + has_any_best|length }}</td>
           <td>
-            <div class="mono small" style="color:var(--text-2)">{{ e.period_from.strftime('%Y-%m-%d') }} → {{ e.period_to.strftime('%Y-%m-%d') }}</div>
+            <div class="mono small" style="color:var(--text-2)">{{ e.period_from.strftime('%d.%m.%Y') }} → {{ e.period_to.strftime('%d.%m.%Y') }}</div>
             <div class="small">{{ e.category|category_label }}</div>
           </td>
           <td colspan="5" class="muted small">лучший слепок недоступен (нет рабочей главной в эпоху)</td>

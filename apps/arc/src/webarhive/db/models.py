@@ -63,6 +63,7 @@ class RedirectClass(str, enum.Enum):
     TECHNICAL = "technical"          # www↔root, http↔https — uninteresting
     SAME_SITE = "same_site"          # same root name, topic matches
     COMPANY_MOVE = "company_move"    # different name, brand evidence
+    MARKETPLACE = "marketplace"      # дроп/продажа: dropcatch, godaddy, sedo…
     REVIEW = "review"                # «обратить внимание» (spec §7)
 
 

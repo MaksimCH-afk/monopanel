@@ -140,8 +140,12 @@ class CdxClient:
                         resp.status_code,
                         url_for_log,
                     )
+                    kind = "троттлинг IA (429)" if resp.status_code == 429 \
+                        else f"сбой сервера IA ({resp.status_code})"
                     raise httpx.HTTPStatusError(
-                        "retryable", request=resp.request, response=resp
+                        f"CDX: {kind} — исчерпаны ретраи. "
+                        f"Снизьте ia_rate_limit / concurrency в настройках.",
+                        request=resp.request, response=resp,
                     )
                 # 4xx → permanent. raise_for_status fires a non-retryable
                 # HTTPStatusError that propagates up the call chain.

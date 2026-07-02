@@ -4,6 +4,50 @@
 {% block title %}Настройки — Web Archive Checker{% endblock %}
 {% block content %}
 
+<style>
+  .adv-summary {
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent);
+    user-select: none;
+    padding: 4px 0;
+    list-style: none;
+  }
+  .adv-summary::-webkit-details-marker { display: none; }
+  .adv-summary::before { content: "▸ "; }
+  details[open] > .adv-summary::before { content: "▾ "; }
+  .adv-summary:hover { color: var(--accent-2); }
+
+  /* Каждая группа настроек — отдельный визуальный контейнер-карточка
+     (как блоки на странице прогона), чтобы при раскрытии нескольких
+     спойлеров группы не сливались. */
+  .settings-form { display: flex; flex-direction: column; gap: 16px; }
+  .settings-form > section {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 16px 18px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .settings-form > section > .section-title,
+  .settings-form > section > .row:first-child {
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--divider);
+    margin-bottom: 2px;
+  }
+  .settings-save {
+    position: sticky;
+    bottom: 12px;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 12px 16px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.10);
+  }
+</style>
+
 <div class="col gap-4" style="max-width:980px;margin:0 auto">
 
 {% if saved %}
@@ -13,41 +57,51 @@
 </div>
 {% endif %}
 
-<div class="card">
-  <div class="card__head">
-    {{ icon("Settings", 16, "var(--text-2)") }}
-    <span class="card__title">Настройки</span>
-    <span class="muted" style="font-size:12.5px;margin-left:4px">· глобальные, копируются снимком в каждый прогон</span>
-  </div>
+<div class="row gap-2" style="align-items:center;padding:2px 2px 0">
+  {{ icon("Settings", 18, "var(--text-2)") }}
+  <span style="font-size:16px;font-weight:700">Настройки</span>
+  <span class="muted" style="font-size:12.5px">· глобальные, копируются снимком в каждый прогон</span>
+</div>
 
-  <form method="post" action="/settings" class="card__body col gap-5">
+  <form method="post" action="/settings" class="settings-form">
 
     {#- LLM-провайдер и API-ключи -#}
     <section class="col gap-3">
       <div class="section-title" style="margin:0">LLM-провайдер и API-ключи</div>
+      <div class="muted" style="font-size:12px">
+        Сначала выберите провайдер — ниже останется поле ключа <b>только для него</b>.
+        «openrouter» — единый шлюз ко множеству моделей (один ключ на всех: OpenAI, Anthropic, Google…).
+        «openai» — напрямую к api.openai.com (нужен именно ключ OpenAI).
+      </div>
       <div class="form-grid">
         <div class="field">
-          <label class="field__lbl">LLM_PROVIDER{{ help_dot("Куда отправлять запросы. «openrouter» — единый шлюз ко множеству провайдеров (OpenAI, Anthropic, Google, локальные). «openai» — напрямую к api.openai.com. Используется ключ из соответствующего поля ниже.") }}</label>
-          <select class="select" name="llm_provider">
+          <label class="field__lbl">LLM_PROVIDER{{ help_dot("Куда отправлять запросы. «openrouter» — единый шлюз ко множеству провайдеров (OpenAI, Anthropic, Google, локальные). «openai» — напрямую к api.openai.com. Поле ключа ниже подстраивается под этот выбор.") }}</label>
+          <select class="select" name="llm_provider" id="llmProvider">
             <option value="openrouter" {% if fields.llm_provider == 'openrouter' or not fields.llm_provider %}selected{% endif %}>openrouter</option>
             <option value="openai" {% if fields.llm_provider == 'openai' %}selected{% endif %}>openai (direct)</option>
           </select>
+        </div>
+        <div class="field" data-key-field="openrouter">
+          <label class="field__lbl">OPENROUTER_API_KEY{{ help_dot("Ключ openrouter.ai/keys. Используется когда LLM_PROVIDER=openrouter. Если поле оставить пустым — сохранённый ранее ключ не затрётся.") }}</label>
+          <input class="input" type="password" name="openrouter_api_key" id="keyOpenrouter" autocomplete="off"
+                 placeholder="{% if settings.openrouter_api_key %}✓ задан ({{ settings.openrouter_api_key[:6] }}…){% else %}sk-or-v1-...{% endif %}">
+        </div>
+        <div class="field" data-key-field="openai">
+          <label class="field__lbl">OPENAI_API_KEY{{ help_dot("Ключ platform.openai.com/api-keys. Используется когда LLM_PROVIDER=openai. Формат sk-... или sk-proj-... Если поле оставить пустым — сохранённый ранее ключ не затрётся.") }}</label>
+          <input class="input" type="password" name="openai_api_key" id="keyOpenai" autocomplete="off"
+                 placeholder="{% if settings.openai_api_key %}✓ задан ({{ settings.openai_api_key[:6] }}…){% else %}sk-proj-... или sk-...{% endif %}">
         </div>
         <div class="field">
           <label class="field__lbl">WHOIS_API_KEY{{ help_dot("Ключ WhoisJSON — для получения реальной даты регистрации домена. Бесплатный план: 1000 запросов/мес, 20/мин. Получить: whoisjson.com. Оставить пустым — сохранённый ключ не затрётся.") }}</label>
           <input class="input" type="password" name="whois_api_key" autocomplete="off"
                  placeholder="{% if settings.whois_api_key %}✓ задан ({{ settings.whois_api_key[:6] }}…){% else %}токен из whoisjson.com{% endif %}">
         </div>
-        <div class="field">
-          <label class="field__lbl">OPENROUTER_API_KEY{{ help_dot("Ключ openrouter.ai/keys. Используется когда LLM_PROVIDER=openrouter. Если поле оставить пустым — сохранённый ранее ключ не затрётся.") }}</label>
-          <input class="input" type="password" name="openrouter_api_key" autocomplete="off"
-                 placeholder="{% if settings.openrouter_api_key %}✓ задан ({{ settings.openrouter_api_key[:6] }}…){% else %}sk-or-v1-...{% endif %}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">OPENAI_API_KEY{{ help_dot("Ключ platform.openai.com/api-keys. Используется когда LLM_PROVIDER=openai. Формат sk-... или sk-proj-... Если поле оставить пустым — сохранённый ранее ключ не затрётся.") }}</label>
-          <input class="input" type="password" name="openai_api_key" autocomplete="off"
-                 placeholder="{% if settings.openai_api_key %}✓ задан ({{ settings.openai_api_key[:6] }}…){% else %}sk-proj-... или sk-...{% endif %}">
-        </div>
+      </div>
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn" id="checkKeyBtn">{{ icon("ShieldCheck", 13) }} проверить ключ</button>
+        <span id="checkKeyResult" class="muted" style="font-size:12.5px">
+          проверка дёргает провайдера без расхода токенов: введённый ключ (или, если поле пустое, сохранённый)
+        </span>
       </div>
     </section>
 
@@ -61,23 +115,48 @@
           см. справку ниже
         </span>
       </div>
+      <div class="muted" style="font-size:12px;margin-top:-4px">
+        Выберите модель из списка. Список показывает <b>все</b> модели под выбранный провайдер;
+        чтобы вписать свою — выберите «✏️ другая модель…».
+      </div>
+      <div class="report-bar" style="font-size:12px;align-items:flex-start">
+        {{ icon("HelpCircle", 14, "var(--accent)") }}
+        <span>
+          Сейчас активен провайдер <b>openrouter</b> → используется <b>ваш ключ OpenRouter</b>
+          (один на все 4 роли; отдельного ключа на модель нет).<br>
+          <code>openai/gpt-4o-mini</code> здесь = «модель gpt-4o-mini, полученная <b>через OpenRouter</b>».
+          Префикс <code>openai/</code> / <code>anthropic/</code> / <code>google/</code> — это просто
+          <b>вендор</b> модели в каталоге, а <b>не</b> требование ключа OpenAI.<br>
+          💰 <b>Платите вы только OpenRouter</b> — пополняете баланс на openrouter.ai, и он сам
+          рассчитывается с OpenAI / Anthropic / Google за модель (как доставка платит ресторану).
+          <b>Аккаунт и ключ OpenAI вам при этом не нужны.</b><br>
+          Ключ OpenAI нужен <b>только</b> при провайдере <b>openai (direct)</b> — тогда модели пишутся
+          без префикса (<code>gpt-4o-mini</code>) и платите вы напрямую OpenAI.
+        </span>
+      </div>
+
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn btn--sm" id="recModelsBtn">✦ проставить рекомендуемые</button>
+        <span class="muted" style="font-size:12px">
+          classification/smart_drop/redirect — дёшево (вызываются часто), verdict — умнее (1 вызов на домен)
+        </span>
+      </div>
+
+      {%- macro model_field(fname, value, label, help_text) -%}
+        <div class="field">
+          <label class="field__lbl">{{ label }}{{ help_dot(help_text) }}</label>
+          <select class="select model-pick" data-for="{{ fname }}"></select>
+          <input class="input model-custom" name="{{ fname }}" value="{{ value }}"
+                 autocomplete="off" placeholder="provider/model или голое имя"
+                 style="display:none;margin-top:6px">
+        </div>
+      {%- endmacro -%}
+
       <div class="form-grid">
-        <div class="field">
-          <label class="field__lbl">classification (основная){{ help_dot("Определяет тематику каждой версии (200-снапшота). Вызывается чаще всех — лучше дешёвая и быстрая модель: openai/gpt-4o-mini или google/gemini-2.0-flash-001.") }}</label>
-          <input class="input" name="model_classification" value="{{ fields.model_classification }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">verdict{{ help_dot("Финальный вердикт по домену (чистый/нюансы/грязный) поверх всей собранной картины. Один вызов на домен. Можно ставить умную модель: anthropic/claude-sonnet-4.5.") }}</label>
-          <input class="input" name="model_verdict" value="{{ fields.model_verdict }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">smart_drop{{ help_dot("Оценивает подозрительные разрывы в истории — дроп или эволюция того же сайта. Вызывается только на найденных гэпах.") }}</label>
-          <input class="input" name="model_smart_drop" value="{{ fields.model_smart_drop }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">redirect{{ help_dot("Уточняет «свой/переезд/перехват» для пограничных редиректов на основе тематики обеих сторон. Дополнительно фетчит цель — может ускорять расход бюджета.") }}</label>
-          <input class="input" name="model_redirect" value="{{ fields.model_redirect }}">
-        </div>
+        {{ model_field("model_classification", fields.model_classification, "classification (основная)", "Определяет тематику каждой версии (200-снапшота). Вызывается чаще всех — лучше дешёвая и быстрая модель: openai/gpt-4o-mini или google/gemini-2.5-flash-lite.") }}
+        {{ model_field("model_verdict", fields.model_verdict, "verdict", "Финальный вердикт по домену (чистый/нюансы/грязный) поверх всей собранной картины. Один вызов на домен. Можно ставить умную модель: anthropic/claude-sonnet-4.5.") }}
+        {{ model_field("model_smart_drop", fields.model_smart_drop, "smart_drop", "Оценивает подозрительные разрывы в истории — дроп или эволюция того же сайта. Вызывается только на найденных гэпах.") }}
+        {{ model_field("model_redirect", fields.model_redirect, "redirect", "Уточняет «свой/переезд/перехват» для пограничных редиректов на основе тематики обеих сторон. Дополнительно фетчит цель — может ускорять расход бюджета.") }}
       </div>
       <details class="muted" style="font-size:12px" open>
         <summary style="cursor:pointer">тарифная сетка — на глаз, до запуска</summary>
@@ -111,26 +190,11 @@
           ⚠ <b>classification</b> вызывается до 40 раз на домен — экономьте. <b>verdict / smart_drop / redirect</b> — по 1-3 вызова, можно ставить дорогую.
         </div>
       </details>
-      <details class="muted" style="font-size:12px">
-        <summary style="cursor:pointer">примеры моделей OpenRouter (full ID)</summary>
-        <ul style="margin:6px 0 0 22px;padding:0">
-          <li><code>openai/gpt-4o-mini</code>, <code>openai/gpt-4o</code>, <code>openai/gpt-4.1-mini</code></li>
-          <li><code>anthropic/claude-3.5-haiku</code>, <code>anthropic/claude-sonnet-4.5</code></li>
-          <li><code>google/gemini-2.0-flash-001</code></li>
-          <li><code>meta-llama/llama-3.1-8b-instruct:free</code> — бесплатная (медленнее, ниже качество)</li>
-        </ul>
-        Полный каталог с актуальными ценами: <a class="help-link" href="https://openrouter.ai/models" target="_blank" rel="noopener">openrouter.ai/models {{ icon("ExternalLink", 11) }}</a>
-      </details>
-      <details class="muted" style="font-size:12px">
-        <summary style="cursor:pointer">примеры моделей OpenAI (direct, голое имя)</summary>
-        <ul style="margin:6px 0 0 22px;padding:0">
-          <li><code>gpt-4o-mini</code>, <code>gpt-4o</code></li>
-          <li><code>gpt-4.1-mini</code>, <code>gpt-4.1</code></li>
-          <li><code>o3-mini</code>, <code>o4-mini</code></li>
-          <li><code>gpt-3.5-turbo</code></li>
-        </ul>
-        Полный каталог с актуальными ценами: <a class="help-link" href="https://platform.openai.com/docs/models" target="_blank" rel="noopener">platform.openai.com/docs/models {{ icon("ExternalLink", 11) }}</a>
-      </details>
+      <div class="muted" style="font-size:12px">
+        Список в выпадашке курирован и сверен с каталогами. Полные каталоги с ценами:
+        <a class="help-link" href="https://openrouter.ai/models" target="_blank" rel="noopener">openrouter.ai/models {{ icon("ExternalLink", 11) }}</a> ·
+        <a class="help-link" href="https://platform.openai.com/docs/models" target="_blank" rel="noopener">platform.openai.com/docs/models {{ icon("ExternalLink", 11) }}</a>
+      </div>
     </section>
 
     {#- Роли LLM -#}
@@ -163,35 +227,36 @@
           <label class="field__lbl">max_llm_calls_per_domain{{ help_dot("Потолок вызовов LLM на один домен. Если у домена аномально много версий — упрёмся в лимит, проверка помечается «частично». Без лимита один домен с тысячей версий может съесть весь бюджет.") }}</label>
           <input class="input" type="number" min="1" max="500" name="max_llm_calls_per_domain" value="{{ fields.max_llm_calls_per_domain }}">
         </div>
-        <div class="field">
-          <label class="field__lbl">cost_budget_per_domain ($){{ help_dot("Грубый счётчик стоимости — справочное значение, на жёсткую остановку не влияет (этим занимается лимит вызовов).") }}</label>
-          <input class="input" type="number" step="any" name="cost_budget_per_domain" value="{{ fields.cost_budget_per_domain }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">text_limit (тело страницы){{ help_dot("Сколько символов значимого текста страницы отправлять в LLM на классификацию (после очистки от навигации/футера). title, description и h1 идут сверх этого лимита.") }}</label>
-          <input class="input" type="number" min="200" max="20000" name="text_limit" value="{{ fields.text_limit }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">title_shift_threshold{{ help_dot("Версия идёт в LLM, только если в title+description+h1 поменялось БОЛЬШЕ N значимых слов (стоп-слова и порядок игнорируются). Дефолт 2 — экономит вызовы на косметических правках.") }}</label>
-          <input class="input" type="number" min="0" max="20" name="title_shift_threshold" value="{{ fields.title_shift_threshold }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">light_fetch_cap{{ help_dot("На доменах с 1500+ сохранёнными версиями делать light fetch на каждую — нереалистично (часы при rate=4 req/s). Сэмплируем равномерно по времени до этого числа. Версии вне сэмпла наследуют категорию из соседних. Дефолт 120 — баланс полноты и скорости. Поставьте 999 если хотите фетчить ВСЁ.") }}</label>
-          <input class="input" type="number" min="20" max="5000" name="light_fetch_cap" value="{{ fields.light_fetch_cap }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">redirect_cap{{ help_dot("Сколько 3xx-снапшотов реально фетчить и классифицировать. На доменах с 2000+ редиректами (типично для UTM-кампаний) фетч каждого через троттл IA = десятки минут. Сэмплируем равномерно по времени. Дефолт 150.") }}</label>
-          <input class="input" type="number" min="20" max="5000" name="redirect_cap" value="{{ fields.redirect_cap }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">redirect_llm_review_cap{{ help_dot("Сверх скольких REVIEW-редиректов LLM-уточнение работает в лёгком режиме (без CDX-обогащения цели). Только при ENABLE_REDIRECT_LLM. Дефолт 30.") }}</label>
-          <input class="input" type="number" min="0" max="500" name="redirect_llm_review_cap" value="{{ fields.redirect_llm_review_cap }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">llm_parallelism{{ help_dot("Сколько LLM-вызовов классификации летят параллельно на одном домене. Точки сдвига независимы — раньше шли последовательно (40 × 6с = 4 минуты), теперь скользящее окно. Дефолт 16. Снижайте, если OpenRouter упирается в RPM-лимит вашего тарифа.") }}</label>
-          <input class="input" type="number" min="1" max="64" name="llm_parallelism" value="{{ fields.llm_parallelism }}">
-        </div>
       </div>
+      <details>
+        <summary class="adv-summary">⚙ тонкая настройка · 6 параметров</summary>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label class="field__lbl">text_limit (тело страницы){{ help_dot("Сколько символов значимого текста страницы отправлять в LLM на классификацию (после очистки от навигации/футера). title, description и h1 идут сверх этого лимита.") }}</label>
+            <input class="input" type="number" min="200" max="20000" name="text_limit" value="{{ fields.text_limit }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">title_shift_threshold{{ help_dot("Версия идёт в LLM, только если в title+description+h1 поменялось БОЛЬШЕ N значимых слов (стоп-слова и порядок игнорируются). Дефолт 2 — экономит вызовы на косметических правках.") }}</label>
+            <input class="input" type="number" min="0" max="20" name="title_shift_threshold" value="{{ fields.title_shift_threshold }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">light_fetch_cap{{ help_dot("На доменах с 1500+ сохранёнными версиями делать light fetch на каждую — нереалистично (часы при rate=4 req/s). Сэмплируем равномерно по времени до этого числа. Версии вне сэмпла наследуют категорию из соседних. Дефолт 120 — баланс полноты и скорости. Поставьте 999 если хотите фетчить ВСЁ.") }}</label>
+            <input class="input" type="number" min="20" max="5000" name="light_fetch_cap" value="{{ fields.light_fetch_cap }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">redirect_cap{{ help_dot("Сколько 3xx-снапшотов реально фетчить и классифицировать. На доменах с 2000+ редиректами (типично для UTM-кампаний) фетч каждого через троттл IA = десятки минут. Сэмплируем равномерно по времени. Дефолт 150.") }}</label>
+            <input class="input" type="number" min="20" max="5000" name="redirect_cap" value="{{ fields.redirect_cap }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">redirect_llm_review_cap{{ help_dot("Сверх скольких REVIEW-редиректов LLM-уточнение работает в лёгком режиме (без CDX-обогащения цели). Только при ENABLE_REDIRECT_LLM. Дефолт 30.") }}</label>
+            <input class="input" type="number" min="0" max="500" name="redirect_llm_review_cap" value="{{ fields.redirect_llm_review_cap }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">llm_parallelism{{ help_dot("Сколько LLM-вызовов классификации летят параллельно на одном домене. Точки сдвига независимы — раньше шли последовательно (40 × 6с = 4 минуты), теперь скользящее окно. Дефолт 16. Снижайте, если OpenRouter упирается в RPM-лимит вашего тарифа.") }}</label>
+            <input class="input" type="number" min="1" max="64" name="llm_parallelism" value="{{ fields.llm_parallelism }}">
+          </div>
+        </div>
+      </details>
     </section>
 
     {#- CDX cache -#}
@@ -202,12 +267,15 @@
         <span class="toggle__box"></span><span>кэшировать CDX-результаты между прогонами</span>
         {{ help_dot("На повторных прогонах того же домена в течение TTL фаза CDX = 0 секунд — переиспользуем сохранённый список захватов из таблицы cdx_cache. Полезно когда тестите настройки или перезапускаете обработку. Не влияет на свежие домены — для первого прогона всегда идёт реальный CDX-запрос.") }}
       </label>
-      <div class="form-grid">
-        <div class="field">
-          <label class="field__lbl">cdx_cache_ttl_hours{{ help_dot("Сколько часов запись в cdx_cache считается свежей. Дефолт 24 — за сутки IA редко обновляет индекс на доменах, у которых не было новых захватов. Хотите всегда тянуть свежий — поставьте 0.") }}</label>
-          <input class="input" type="number" min="0" max="720" name="cdx_cache_ttl_hours" value="{{ fields.cdx_cache_ttl_hours }}">
+      <details>
+        <summary class="adv-summary">⚙ тонкая настройка · 1 параметр</summary>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label class="field__lbl">cdx_cache_ttl_hours{{ help_dot("Сколько часов запись в cdx_cache считается свежей. Дефолт 24 — за сутки IA редко обновляет индекс на доменах, у которых не было новых захватов. Хотите всегда тянуть свежий — поставьте 0.") }}</label>
+            <input class="input" type="number" min="0" max="720" name="cdx_cache_ttl_hours" value="{{ fields.cdx_cache_ttl_hours }}">
+          </div>
         </div>
-      </div>
+      </details>
     </section>
 
     {#- Параллелизм + троттлинг -#}
@@ -222,19 +290,24 @@
           <label class="field__lbl">ia_rate_limit (req/sec){{ help_dot("Общий вентиль на ВСЕ запросы к Internet Archive (CDX + снапшоты) суммарно по всем параллельным доменам. Если ловите 429 — уменьшите.") }}</label>
           <input class="input" type="number" step="any" name="ia_rate_limit" value="{{ fields.ia_rate_limit }}">
         </div>
-        <div class="field">
-          <label class="field__lbl">ia_backoff (сек, база){{ help_dot("База экспоненциального backoff между ретраями к IA при 429/5xx. Реальные задержки: 2·base, 4·base, 8·base, 16·base, 32·base (capped до 60).") }}</label>
-          <input class="input" type="number" step="any" name="ia_backoff" value="{{ fields.ia_backoff }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">ia_max_retries{{ help_dot("Сколько раз пытаться повторить запрос к IA при transient ошибке. 4xx (кроме 429) не ретраятся — пропускаются сразу.") }}</label>
-          <input class="input" type="number" min="0" max="20" name="ia_max_retries" value="{{ fields.ia_max_retries }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">per_domain_timeout_sec{{ help_dot("Жёсткий потолок времени на ОДИН домен (в секундах). При превышении воркер помечает домен ERROR и пишет в trace, на каком шаге оборвалось. Дефолт 1800 (30 мин). На очень крупных архивах с включёнными всеми LLM-ролями ставьте 3600.") }}</label>
-          <input class="input" type="number" min="60" max="14400" name="per_domain_timeout_sec" value="{{ fields.per_domain_timeout_sec }}">
-        </div>
       </div>
+      <details>
+        <summary class="adv-summary">⚙ тонкая настройка · 3 параметра</summary>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label class="field__lbl">ia_backoff (сек, база){{ help_dot("База экспоненциального backoff между ретраями к IA при 429/5xx. Реальные задержки: 2·base, 4·base, 8·base, 16·base, 32·base (capped до 60).") }}</label>
+            <input class="input" type="number" step="any" name="ia_backoff" value="{{ fields.ia_backoff }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">ia_max_retries{{ help_dot("Сколько раз пытаться повторить запрос к IA при transient ошибке. 4xx (кроме 429) не ретраятся — пропускаются сразу.") }}</label>
+            <input class="input" type="number" min="0" max="20" name="ia_max_retries" value="{{ fields.ia_max_retries }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">per_domain_timeout_sec{{ help_dot("Жёсткий потолок времени на ОДИН домен (в секундах). При превышении воркер помечает домен ERROR и пишет в trace, на каком шаге оборвалось. Дефолт 1800 (30 мин). На очень крупных архивах с включёнными всеми LLM-ролями ставьте 3600.") }}</label>
+            <input class="input" type="number" min="60" max="14400" name="per_domain_timeout_sec" value="{{ fields.per_domain_timeout_sec }}">
+          </div>
+        </div>
+      </details>
     </section>
 
     {#- Вход -#}
@@ -253,22 +326,25 @@
       <label class="toggle {% if fields.whois_enabled %}toggle--on{% endif %}">
         <input type="checkbox" name="whois_enabled" value="true" {% if fields.whois_enabled %}checked{% endif %} style="display:none" onchange="this.parentNode.classList.toggle('toggle--on', this.checked)">
         <span class="toggle__box"></span><span>получать дату регистрации через WhoisJSON</span>
-        {{ help_dot("Реальная дата регистрации домена (не та, что первая активность в архиве). Бесплатный план — 1000 запросов/мес, 20/мин. Кэш на стороне дашборда (см. TTL ниже) экономит лимит.") }}
+        {{ help_dot("Реальная дата регистрации домена (не та, что первая активность в архиве). Бесплатный план — 1000 запросов/мес, 20/мин. Кэш на стороне дашборда (см. TTL ниже) экономит лимит. Ключ WhoisJSON задаётся выше в секции API-ключей.") }}
       </label>
-      <div class="form-grid">
-        <div class="field">
-          <label class="field__lbl">whois_cache_ttl_days{{ help_dot("Сколько дней хранить дату регистрации в кэше домена. Дата регистрации почти не меняется — дефолт 90 дней. Кэш на уровне ДОМЕНА, не прогона — переиспользуется между запусками.") }}</label>
-          <input class="input" type="number" min="1" max="365" name="whois_cache_ttl_days" value="{{ fields.whois_cache_ttl_days }}">
+      <details>
+        <summary class="adv-summary">⚙ тонкая настройка · 3 параметра</summary>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label class="field__lbl">whois_cache_ttl_days{{ help_dot("Сколько дней хранить дату регистрации в кэше домена. Дата регистрации почти не меняется — дефолт 90 дней. Кэш на уровне ДОМЕНА, не прогона — переиспользуется между запусками.") }}</label>
+            <input class="input" type="number" min="1" max="365" name="whois_cache_ttl_days" value="{{ fields.whois_cache_ttl_days }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">whois_rate_limit (req/sec){{ help_dot("Бесплатный план WhoisJSON разрешает 20 запросов/мин. Дефолт 0.33 req/sec = 20/мин с запасом.") }}</label>
+            <input class="input" type="number" step="any" min="0.05" max="5" name="whois_rate_limit" value="{{ fields.whois_rate_limit|round(2) }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">whois_monthly_floor{{ help_dot("Если месячный остаток лимита (заголовок Remaining-Requests) опустился ниже этого порога — перестаём дёргать API на этом прогоне. Защищает от 429 и сохраняет лимит для других прогонов в месяце.") }}</label>
+            <input class="input" type="number" min="0" max="1000" name="whois_monthly_floor" value="{{ fields.whois_monthly_floor }}">
+          </div>
         </div>
-        <div class="field">
-          <label class="field__lbl">whois_rate_limit (req/sec){{ help_dot("Бесплатный план WhoisJSON разрешает 20 запросов/мин. Дефолт 0.33 req/sec = 20/мин с запасом.") }}</label>
-          <input class="input" type="number" step="any" min="0.05" max="5" name="whois_rate_limit" value="{{ fields.whois_rate_limit|round(2) }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">whois_monthly_floor{{ help_dot("Если месячный остаток лимита (заголовок Remaining-Requests) опустился ниже этого порога — перестаём дёргать API на этом прогоне. Защищает от 429 и сохраняет лимит для других прогонов в месяце.") }}</label>
-          <input class="input" type="number" min="0" max="1000" name="whois_monthly_floor" value="{{ fields.whois_monthly_floor }}">
-        </div>
-      </div>
+      </details>
     </section>
 
     {#- Best snapshot -#}
@@ -279,47 +355,43 @@
         <span class="toggle__box"></span><span>искать лучший слепок главной страницы для каждой эпохи</span>
         {{ help_dot("На каждую тематическую эпоху выбирается самый полный сохранённый снимок главной страницы — по доле сохранённых ресурсов (CSS/JS/изображения), целостности HTML и временной согласованности. Полезно если потом нужно восстановить сайт.") }}
       </label>
-      <div class="form-grid">
-        <div class="field">
-          <label class="field__lbl">best_snapshot_top_n{{ help_dot("Сколько кандидатов главной страницы внутри эпохи проверять на полноту ресурсов. Каждый кандидат = HTML-фетч + Availability API на ресурсы. Дефолт 3 — берёт первый, средний и последний.") }}</label>
-          <input class="input" type="number" min="1" max="50" name="best_snapshot_top_n" value="{{ fields.best_snapshot_top_n }}">
+      <details>
+        <summary class="adv-summary">⚙ тонкая настройка · 6 параметров</summary>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label class="field__lbl">best_snapshot_top_n{{ help_dot("Сколько кандидатов главной страницы внутри эпохи проверять на полноту ресурсов. Каждый кандидат = HTML-фетч + Availability API на ресурсы. Дефолт 3 — берёт первый, средний и последний.") }}</label>
+            <input class="input" type="number" min="1" max="50" name="best_snapshot_top_n" value="{{ fields.best_snapshot_top_n }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">best_snapshot_max_resources{{ help_dot("Сколько ресурсов (CSS/JS/img) проверять у одного кандидата. Если страница тащит 80 ассетов — берём представительный сэмпл. Дефолт 8.") }}</label>
+            <input class="input" type="number" min="1" max="50" name="best_snapshot_max_resources" value="{{ fields.best_snapshot_max_resources }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">best_snapshot_per_epoch_timeout_sec{{ help_dot("Жёсткий потолок на одну эпоху best-snapshot. При превышении эпоха пропускается, остальные продолжают. Дефолт 90 секунд.") }}</label>
+            <input class="input" type="number" min="10" max="600" name="best_snapshot_per_epoch_timeout_sec" value="{{ fields.best_snapshot_per_epoch_timeout_sec }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">best_snapshot_epoch_parallelism{{ help_dot("Сколько эпох best-snapshot обрабатываются параллельно. Общий IA-троттл всё равно лимитирует rate, но пока одна эпоха ждёт availability-чек, другая может уже фетчить HTML. Дефолт 3.") }}</label>
+            <input class="input" type="number" min="1" max="10" name="best_snapshot_epoch_parallelism" value="{{ fields.best_snapshot_epoch_parallelism }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">best_snapshot_min_epoch_days{{ help_dot("Эпохи короче этого числа дней пропускаются для best-snapshot. У блогов title главной меняется с каждым постом → генерирует 30+ микро-эпох по 1-2 недели. Искать «лучший слепок» для них бессмысленно. Дефолт 30 дней.") }}</label>
+            <input class="input" type="number" min="0" max="365" name="best_snapshot_min_epoch_days" value="{{ fields.best_snapshot_min_epoch_days }}">
+          </div>
+          <div class="field">
+            <label class="field__lbl">best_snapshot_max_epochs{{ help_dot("Жёсткий потолок на число эпох в обработке best-snapshot. Если получилось больше — берём N самых длинных. Защита от 25-минутных прогонов на блогах. Дефолт 10.") }}</label>
+            <input class="input" type="number" min="1" max="50" name="best_snapshot_max_epochs" value="{{ fields.best_snapshot_max_epochs }}">
+          </div>
         </div>
-        <div class="field">
-          <label class="field__lbl">best_snapshot_max_resources{{ help_dot("Сколько ресурсов (CSS/JS/img) проверять у одного кандидата. Если страница тащит 80 ассетов — берём представительный сэмпл. Дефолт 8.") }}</label>
-          <input class="input" type="number" min="1" max="50" name="best_snapshot_max_resources" value="{{ fields.best_snapshot_max_resources }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">best_snapshot_per_epoch_timeout_sec{{ help_dot("Жёсткий потолок на одну эпоху best-snapshot. При превышении эпоха пропускается, остальные продолжают. Дефолт 90 секунд.") }}</label>
-          <input class="input" type="number" min="10" max="600" name="best_snapshot_per_epoch_timeout_sec" value="{{ fields.best_snapshot_per_epoch_timeout_sec }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">best_snapshot_epoch_parallelism{{ help_dot("Сколько эпох best-snapshot обрабатываются параллельно. Общий IA-троттл всё равно лимитирует rate, но пока одна эпоха ждёт availability-чек, другая может уже фетчить HTML. Дефолт 3.") }}</label>
-          <input class="input" type="number" min="1" max="10" name="best_snapshot_epoch_parallelism" value="{{ fields.best_snapshot_epoch_parallelism }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">best_snapshot_min_epoch_days{{ help_dot("Эпохи короче этого числа дней пропускаются для best-snapshot. У блогов title главной меняется с каждым постом → генерирует 30+ микро-эпох по 1-2 недели. Искать «лучший слепок» для них бессмысленно. Дефолт 30 дней.") }}</label>
-          <input class="input" type="number" min="0" max="365" name="best_snapshot_min_epoch_days" value="{{ fields.best_snapshot_min_epoch_days }}">
-        </div>
-        <div class="field">
-          <label class="field__lbl">best_snapshot_max_epochs{{ help_dot("Жёсткий потолок на число эпох в обработке best-snapshot. Если получилось больше — берём N самых длинных. Защита от 25-минутных прогонов на блогах. Дефолт 10.") }}</label>
-          <input class="input" type="number" min="1" max="50" name="best_snapshot_max_epochs" value="{{ fields.best_snapshot_max_epochs }}">
-        </div>
-        <div class="field" style="justify-content:end">
-          <label class="toggle {% if fields.enable_best_snapshot_content_llm %}toggle--on{% endif %}">
-            <input type="checkbox" name="enable_best_snapshot_content_llm" value="true" {% if fields.enable_best_snapshot_content_llm %}checked{% endif %} style="display:none" onchange="this.parentNode.classList.toggle('toggle--on', this.checked)">
-            <span class="toggle__box"></span><span>содержательность через LLM</span>
-            {{ help_dot("Опционально: после выбора лучшего слепка спросить у LLM — это реальная страница эпохи или заглушка / страница ошибки / coming-soon. Дороже, но точнее.") }}
-          </label>
-        </div>
-      </div>
+      </details>
     </section>
 
-    <div class="row gap-2" style="border-top:1px dashed var(--divider);padding-top:14px">
+    <div class="settings-save row gap-2">
       <button class="btn btn--primary" type="submit">{{ icon("Check", 13) }} сохранить</button>
       <a class="btn" href="/">отмена</a>
+      <span class="muted" style="font-size:12px;margin-left:6px">Применится к следующему прогону.</span>
     </div>
   </form>
-</div>
 
 {#- Развёртывание (read-only) — секреты теперь редактируются выше -#}
 <div class="card">
@@ -341,4 +413,170 @@
 </div>
 
 </div>
+
+<script>
+  (function () {
+    var prov = document.getElementById("llmProvider");
+    var CUSTOM = "__custom__";
+
+    // Полный каталог моделей. openrouter — с префиксом вендора, openai
+    // (direct) — голые имена. Каталоги меняются — поэтому есть «другая».
+    // Списки сверены с живым каталогом OpenRouter (устаревшие id —
+    // claude-3.5-*, gemini-2.0-flash-001, o1-mini, :free-варианты —
+    // убраны). openai-direct — голые имена моделей OpenAI.
+    var MODELS = {
+      openrouter: [
+        "google/gemini-2.5-flash-lite", "google/gemini-2.5-flash",
+        "google/gemini-2.5-pro",
+        "openai/gpt-4o-mini", "openai/gpt-4o",
+        "openai/gpt-4.1-mini", "openai/gpt-4.1", "openai/gpt-4.1-nano",
+        "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5",
+        "openai/o4-mini", "openai/o3", "openai/o3-mini",
+        "anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.1",
+        "deepseek/deepseek-chat", "meta-llama/llama-3.1-8b-instruct"
+      ],
+      openai: [
+        "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano",
+        "gpt-5-nano", "gpt-5-mini", "gpt-5",
+        "o4-mini", "o3", "o3-mini", "gpt-4-turbo", "gpt-3.5-turbo"
+      ]
+    };
+
+    // Конвертация формата модели между провайдерами при переключении.
+    function convert(value, toProvider) {
+      if (!value) return value;
+      if (toProvider === "openai") {
+        // openrouter → openai: убираем префикс вендора (vendor/model → model)
+        var i = value.indexOf("/");
+        return i >= 0 ? value.slice(i + 1) : value;
+      }
+      // openai → openrouter: если префикса нет — добавляем openai/
+      return value.indexOf("/") >= 0 ? value : "openai/" + value;
+    }
+
+    function picks() { return Array.prototype.slice.call(document.querySelectorAll(".model-pick")); }
+
+    // Перестраивает один <select> под провайдера p, сохраняя текущее
+    // значение из связанного input (источник правды для сабмита).
+    function buildSelect(sel, p) {
+      var fname = sel.getAttribute("data-for");
+      var input = document.querySelector('input.model-custom[name="' + fname + '"]');
+      var current = input ? input.value.trim() : "";
+      var list = MODELS[p] || MODELS.openrouter;
+      sel.innerHTML = "";
+      list.forEach(function (m) {
+        var o = document.createElement("option");
+        o.value = m; o.textContent = m;
+        sel.appendChild(o);
+      });
+      var custom = document.createElement("option");
+      custom.value = CUSTOM; custom.textContent = "✏️ другая модель…";
+      sel.appendChild(custom);
+
+      if (current && list.indexOf(current) === -1) {
+        // Значение не из каталога — режим ручного ввода.
+        sel.value = CUSTOM;
+        input.style.display = "";
+      } else {
+        sel.value = current || list[0];
+        if (input) { input.value = sel.value; input.style.display = "none"; }
+      }
+    }
+
+    function onPickChange(e) {
+      var sel = e.target;
+      var fname = sel.getAttribute("data-for");
+      var input = document.querySelector('input.model-custom[name="' + fname + '"]');
+      if (!input) return;
+      if (sel.value === CUSTOM) {
+        input.style.display = "";
+        if (input.value && MODELS[prov.value || "openrouter"].indexOf(input.value) !== -1) {
+          input.value = "";
+        }
+        input.focus();
+      } else {
+        input.value = sel.value;
+        input.style.display = "none";
+      }
+    }
+
+    // Показ поля ключа только для выбранного провайдера + перестройка
+    // списков моделей с конвертацией формата.
+    function sync(convertValues) {
+      var p = (prov.value || "openrouter");
+      document.querySelectorAll("[data-key-field]").forEach(function (el) {
+        el.style.display = (el.getAttribute("data-key-field") === p) ? "" : "none";
+      });
+      if (convertValues) {
+        picks().forEach(function (sel) {
+          var fname = sel.getAttribute("data-for");
+          var input = document.querySelector('input.model-custom[name="' + fname + '"]');
+          if (input) input.value = convert(input.value.trim(), p);
+        });
+      }
+      picks().forEach(function (sel) { buildSelect(sel, p); });
+    }
+
+    picks().forEach(function (sel) { sel.addEventListener("change", onPickChange); });
+    prov.addEventListener("change", function () { sync(true); });
+    sync(false);
+
+    // Рекомендуемые модели по ролям (дёшево там, где часто; умнее на verdict).
+    var REC = {
+      openrouter: {
+        model_classification: "openai/gpt-4o-mini",
+        model_verdict: "openai/gpt-4o",
+        model_smart_drop: "openai/gpt-4o-mini",
+        model_redirect: "openai/gpt-4o-mini"
+      },
+      openai: {
+        model_classification: "gpt-4o-mini",
+        model_verdict: "gpt-4o",
+        model_smart_drop: "gpt-4o-mini",
+        model_redirect: "gpt-4o-mini"
+      }
+    };
+    var recBtn = document.getElementById("recModelsBtn");
+    if (recBtn) {
+      recBtn.addEventListener("click", function () {
+        var p = (prov.value || "openrouter");
+        var rec = REC[p] || REC.openrouter;
+        Object.keys(rec).forEach(function (fname) {
+          var input = document.querySelector('input.model-custom[name="' + fname + '"]');
+          if (input) input.value = rec[fname];
+        });
+        picks().forEach(function (sel) { buildSelect(sel, p); });
+      });
+    }
+
+    // Проверка ключа — без расхода токенов.
+    var btn = document.getElementById("checkKeyBtn");
+    var out = document.getElementById("checkKeyResult");
+    btn.addEventListener("click", function () {
+      var p = (prov.value || "openrouter");
+      var keyInput = document.getElementById(p === "openai" ? "keyOpenai" : "keyOpenrouter");
+      var key = keyInput ? keyInput.value.trim() : "";
+      out.textContent = "проверяю…";
+      out.style.color = "var(--text-3)";
+      var body = new URLSearchParams();
+      body.set("provider", p);
+      if (key) body.set("api_key", key);
+      fetch("/api/llm/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString()
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          out.textContent = d.message;
+          out.style.color = d.ok ? "var(--clean-fg)" : "var(--dirty-fg)";
+        })
+        .catch(function () {
+          out.textContent = "ошибка сети при проверке";
+          out.style.color = "var(--dirty-fg)";
+        });
+    });
+  })();
+</script>
 {% endblock %}

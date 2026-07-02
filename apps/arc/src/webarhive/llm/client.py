@@ -91,6 +91,63 @@ def _try_parse_json(text: str) -> dict[str, Any] | None:
         return None
 
 
+async def check_api_key(
+    *, provider: str, api_key: str, timeout: float = 15.0
+) -> tuple[bool, str]:
+    """Лёгкая проверка валидности LLM-ключа БЕЗ расхода токенов.
+
+    Дёргает дешёвый авторизованный endpoint провайдера:
+    - openrouter → GET /api/v1/key (возвращает лимиты/расход по ключу)
+    - openai     → GET /v1/models (список доступных моделей)
+
+    Возвращает (ok, человекочитаемое сообщение). Ключ никогда не логируем
+    и не возвращаем обратно.
+    """
+    provider = (provider or "openrouter").lower()
+    if not api_key:
+        return False, "ключ не задан — впишите его в поле выше или сохраните настройки"
+    if provider not in PROVIDER_ENDPOINTS:
+        return False, f"неизвестный провайдер: {provider}"
+
+    url = "https://api.openai.com/v1/models" if provider == "openai" \
+        else "https://openrouter.ai/api/v1/key"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        return False, f"сеть/таймаут при проверке: {type(exc).__name__}"
+
+    if resp.status_code == 200:
+        if provider == "openai":
+            try:
+                n = len(resp.json().get("data", []))
+                return True, f"✓ ключ OpenAI рабочий · доступно моделей: {n}"
+            except Exception:
+                return True, "✓ ключ OpenAI рабочий"
+        # openrouter
+        try:
+            d = resp.json().get("data", {}) or {}
+            usage = d.get("usage")
+            limit = d.get("limit")
+            bits = []
+            if usage is not None:
+                bits.append(f"израсходовано ${usage}")
+            if limit is not None:
+                bits.append(f"лимит ${limit}")
+            else:
+                bits.append("кредитный лимит не задан")
+            tail = " · ".join(bits)
+            return True, "✓ ключ OpenRouter рабочий" + (f" ({tail})" if tail else "")
+        except Exception:
+            return True, "✓ ключ OpenRouter рабочий"
+
+    if resp.status_code in (401, 403):
+        return False, f"✗ ключ отклонён (HTTP {resp.status_code}) — неверный ключ или нет прав"
+    return False, f"✗ неожиданный ответ провайдера: HTTP {resp.status_code}"
+
+
 class OpenRouterClient:
     def __init__(
         self,

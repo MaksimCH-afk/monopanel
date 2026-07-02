@@ -13,8 +13,7 @@ Earlier we used CDX with matchType=host per resource, which dumped
 millions of paginated rows for CDN hosts and burned 15+ minutes per
 domain. Availability API returns a tiny JSON immediately.
 
-No LLM by default. Optional content_llm step (off by default) only
-sanity-checks "is this a real epoch page vs coming-soon / 404".
+No LLM is used here — selection is purely by resource completeness.
 """
 
 from __future__ import annotations

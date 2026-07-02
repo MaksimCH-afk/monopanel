@@ -15,7 +15,7 @@
       {{ icon("Activity", 16, "var(--accent)") }}
       <span class="card__title">Идёт прогон #{{ r.id }}</span>
       <span class="badge badge--running" style="margin-left:4px">running</span>
-      <span class="muted" style="margin-left:auto;font-size:12.5px">стартовал {{ r.started_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      <span class="muted" style="margin-left:auto;font-size:12.5px">стартовал {{ r.started_at.strftime('%d.%m.%Y %H:%M') }}</span>
     </div>
     <div class="card__body">
       <div class="row gap-4" style="align-items:flex-end;margin-bottom:14px">
@@ -87,7 +87,6 @@
     <span class="card__title">История прогонов</span>
     <span class="muted" style="font-size:12.5px;margin-left:4px">· {{ runs|length }}</span>
     <span class="spacer"></span>
-    <a class="btn btn--sm" href="/settings">{{ icon("Settings", 13) }} настройки</a>
     <button class="btn btn--sm btn--primary" onclick="toggleNew(true)">{{ icon("Plus", 13) }} новый прогон</button>
   </div>
   <div class="card__body card__body--p0">
@@ -117,7 +116,7 @@
               <td>
                 <div class="row gap-3">
                   {{ icon("History", 14, "var(--text-3)") }}
-                  <span class="mono">{{ r.started_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                  <span class="mono">{{ r.started_at.strftime('%d.%m.%Y %H:%M') }}</span>
                 </div>
               </td>
               <td>{{ status_pill(r.status) }}</td>

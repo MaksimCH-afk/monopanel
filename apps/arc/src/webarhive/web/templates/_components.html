@@ -98,23 +98,44 @@
     {%- set min_start = epochs[0].period_from.timestamp() -%}
     {%- set max_end = epochs[-1].period_to.timestamp() -%}
     {%- set span = (max_end - min_start) or 1 -%}
+    {#- Ширина эпохи = доля от общего периода, но CSS min-width держит
+        даже эпоху из одного захвата читаемой. Между несмежными эпохами
+        вставляем сегмент «пауза» (нет захватов), пропорциональный
+        разрыву — лента заполняется целиком и показывает реальную
+        хронологию вместо кучки квадратиков слева. -#}
     <div class="epoch-bar" role="img" aria-label="Лента эпох тематики">
       {%- for e in epochs -%}
+        {%- if not loop.first -%}
+          {%- set prev_end = epochs[loop.index0 - 1].period_to.timestamp() -%}
+          {%- set gap_secs = e.period_from.timestamp() - prev_end -%}
+          {%- if gap_secs > 2592000 -%}
+            {%- set gap_days = (gap_secs / 86400)|int -%}
+            <div class="epoch epoch--gap" style="flex: {{ gap_secs / span }} 1 0"
+                 title="пауза в захватах: {{ gap_days }} дн (≈{{ (gap_days / 365)|round(1) }} г) — нет сохранённых версий">
+              <div class="epoch__cat">{{ icon("Pause", 11) }}<span>пауза</span></div>
+              <div class="epoch__period">{{ gap_days }} дн</div>
+            </div>
+          {%- endif -%}
+        {%- endif -%}
         {%- set c = categories.get(e.category) -%}
         {%- set kind = (c.group.value if c else "unknown") -%}
-        {%- set ep_w = ((e.period_to.timestamp() - e.period_from.timestamp()) / span) or 0.04 -%}
+        {%- set ep_secs = e.period_to.timestamp() - e.period_from.timestamp() -%}
         <div class="epoch {% if kind == 'risky' %}epoch--risk{% elif kind == 'service' %}epoch--util{% elif kind == 'neutral' %}epoch--neutral{% else %}epoch--unknown{% endif %}"
-             style="flex: {{ ep_w }}"
-             title="{{ e.period_from.strftime('%Y-%m-%d') }} — {{ e.period_to.strftime('%Y-%m-%d') }}
+             style="flex: {{ ep_secs / span }} 1 0"
+             title="{{ e.period_from.strftime('%d.%m.%Y') }} — {{ e.period_to.strftime('%d.%m.%Y') }}
 {{ c.label_ru if c else 'Не определено' }}{% if e.reason %}
 {{ e.reason }}{% endif %}">
           <div class="epoch__cat">
             {% if c %}{{ icon(c.icon, 11) }}{% else %}{{ icon("HelpCircle", 11) }}{% endif %}
             <span>{{ c.short_ru if c else "—" }}</span>
           </div>
-          <div class="epoch__period">{{ e.period_from.strftime('%Y-%m') }} → {{ e.period_to.strftime('%Y-%m') }}</div>
+          <div class="epoch__period">{% if e.period_from.strftime('%d.%m.%Y') == e.period_to.strftime('%d.%m.%Y') %}{{ e.period_from.strftime('%d.%m.%Y') }}{% else %}{{ e.period_from.strftime('%m.%Y') }} → {{ e.period_to.strftime('%m.%Y') }}{% endif %}</div>
         </div>
       {%- endfor -%}
+    </div>
+    <div class="muted" style="font-size:11px;margin-top:5px">
+      Период: {{ epochs[0].period_from.strftime('%d.%m.%Y') }} → {{ epochs[-1].period_to.strftime('%d.%m.%Y') }}
+      (до последнего захвата в архиве — не до «сегодня»). Заштрихованное — паузы без захватов.
     </div>
   {%- endif -%}
 {%- endmacro -%}

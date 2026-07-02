@@ -18,7 +18,7 @@
     <summary class="collapse-head" style="list-style:none">
       {{ icon("ChevronRight", 14, "var(--text-3)") }}
       <span class="collapse-head__title">Прогон #{{ run.id }}</span>
-      <span class="muted mono" style="font-size:12.5px">· {{ run.started_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      <span class="muted mono" style="font-size:12.5px">· {{ run.started_at.strftime('%d.%m.%Y %H:%M') }}</span>
       {{ status_pill(run.status) }}
       {% if run.status == 'running' %}
         <button type="button" class="btn btn--sm" style="border-color:var(--dirty-strong);color:var(--dirty-fg)"
@@ -37,6 +37,11 @@
             {{ icon("History", 13) }} повторить
           </button>
         {% endif %}
+        <a class="btn btn--sm" href="/runs/{{ run.id }}/all_logs.txt"
+           onclick="event.stopPropagation()"
+           title="Один файл: настройки прогона + сводка + трасса каждого домена + общий лог">
+          {{ icon("Download", 13) }} Все логи
+        </a>
       </span>
     </summary>
     <div class="card__body" style="border-top:1px solid var(--divider)">
@@ -110,7 +115,7 @@
             </th>
             <th>домен</th>
             <th style="width:170px">вердикт</th>
-            <th style="width:100px">возраст</th>
+            <th style="width:150px">возраст</th>
             <th style="width:70px">эпох</th>
             <th style="width:130px">флаги</th>
             <th style="width:100px">статус</th>
@@ -135,8 +140,8 @@
               </div>
             </td>
             <td onclick="location.href='/domains/{{ d.id }}'">{{ verdict_badge(d.verdict, d.status) }}</td>
-            <td class="mono" style="color:var(--text-2)" onclick="location.href='/domains/{{ d.id }}'">{% if d.age_days %}{{ d.age_days }} дн{% else %}<span class="muted">—</span>{% endif %}</td>
-            <td class="mono" style="color:var(--text-2)" onclick="location.href='/domains/{{ d.id }}'">{{ d.total_versions or 0 }}</td>
+            <td class="mono" style="color:var(--text-2)" onclick="location.href='/domains/{{ d.id }}'">{% if d.age_days %}{{ d.age_days|age_human }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td class="mono" style="color:var(--text-2)" onclick="location.href='/domains/{{ d.id }}'">{{ d.epochs|length }}</td>
             <td onclick="location.href='/domains/{{ d.id }}'">{{ flag_stack(d, d.epochs, CATEGORY_BY_KEY, d.redirects) }}</td>
             <td onclick="location.href='/domains/{{ d.id }}'">{{ status_pill(d.status) }}</td>
             <td style="text-align:right" onclick="location.href='/domains/{{ d.id }}'">{{ icon("ChevronRight", 16, "var(--text-3)") }}</td>

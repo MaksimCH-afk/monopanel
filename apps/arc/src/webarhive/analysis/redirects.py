@@ -37,6 +37,28 @@ from webarhive.llm.prompts import build_redirect_prompt
 logger = logging.getLogger(__name__)
 
 _TLD = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
+
+# Маркетплейсы / парковки / регистраторы доменов. Редирект НА такой
+# домен — это не «подозрительный внешний редирект», а известный
+# паттерн: домен дропнут и выставлен на продажу / припаркован.
+# Отдельный класс marketplace (показывается зелёным, не как тревожный
+# «обратить внимание»). Вердикт всё равно видит target_domain и reason —
+# сигнал «домен продан/припаркован» не теряется (verdict._build_report
+# передаёт ВСЕ редиректы в LLM).
+_MARKETPLACE_ROOTS = frozenset({
+    # явно названные оператором
+    "dropcatch.com", "godaddy.com", "dynadot.com", "namecheap.com",
+    "hugedomains.com",
+    # прочие частые маркетплейсы / аукционы / парковки / регистраторы
+    "sedo.com", "afternic.com", "dan.com", "sav.com", "namesilo.com",
+    "porkbun.com", "name.com", "networksolutions.com", "register.com",
+    "enom.com", "namebright.com", "epik.com", "spaceship.com",
+    "ionos.com", "1and1.com", "bodis.com", "parkingcrew.net",
+    "sedoparking.com", "above.com", "uniregistry.com", "undeveloped.com",
+    "brandbucket.com", "squadhelp.com", "atom.com", "fabulous.com",
+    "escrow.com", "domainmarket.com", "buydomains.com", "saw.com",
+    "cnobin.com", "alibuy.com", "park.io",
+})
 _META_REFRESH_RE = re.compile(
     r"""<meta[^>]+http-equiv=['"]?refresh['"]?[^>]+content=['"]?\s*\d+\s*;\s*url=([^'">\s]+)""",
     re.IGNORECASE,
@@ -142,6 +164,15 @@ def _classify_pair(
     if target_root_parts is None:
         return RedirectClass.REVIEW, "цель: не распознан суффикс", None
     target_root = f"{target_root_parts[0]}.{target_root_parts[1]}"
+
+    # Маркетплейс / парковка / регистратор доменов — известный паттерн
+    # «домен дропнут и продаётся». Не тревожный REVIEW, а technical.
+    if target_root in _MARKETPLACE_ROOTS:
+        return (
+            RedirectClass.MARKETPLACE,
+            f"маркетплейс/парковка доменов ({target_root}) — домен продаётся/припаркован",
+            target_root,
+        )
 
     # Same hostname or same registrable name — technical or same site.
     if source_root is not None:

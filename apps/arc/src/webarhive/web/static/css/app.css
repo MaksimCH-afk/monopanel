@@ -403,7 +403,8 @@ button { font-family: inherit; }
   width: 100%;
   height: 64px;
   border-radius: var(--r);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--border-strong);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
   background: repeating-linear-gradient(45deg, var(--bg-2), var(--bg-2) 6px, var(--surface-2) 6px, var(--surface-2) 12px);
@@ -419,10 +420,11 @@ button { font-family: inherit; }
   position: relative;
   overflow: hidden;
   cursor: pointer;
-  min-width: 0;
+  min-width: 68px;
   border-right: 1px solid var(--border);
   transition: filter 80ms ease;
 }
+.epoch--gap { min-width: 46px; }
 .epoch:last-child { border-right: 0; }
 .epoch:hover { filter: brightness(0.96); }
 .epoch__cat {

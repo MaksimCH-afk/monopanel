@@ -20,7 +20,7 @@ _EDITABLE_FIELDS = {
     "llm_provider", "openrouter_api_key", "openai_api_key",
     "model_classification", "model_verdict", "model_smart_drop", "model_redirect",
     "enable_verdict", "enable_smart_drop", "enable_redirect_llm",
-    "max_llm_calls_per_domain", "cost_budget_per_domain",
+    "max_llm_calls_per_domain",
     "text_limit", "title_shift_threshold", "light_fetch_cap",
     "redirect_cap", "redirect_llm_review_cap",
     "concurrency", "ia_rate_limit", "ia_backoff", "ia_max_retries",
@@ -35,7 +35,6 @@ _EDITABLE_FIELDS = {
     "enable_best_snapshot", "best_snapshot_top_n",
     "best_snapshot_max_resources", "best_snapshot_per_epoch_timeout_sec",
     "best_snapshot_min_epoch_days", "best_snapshot_max_epochs",
-    "enable_best_snapshot_content_llm",
 }
 
 
@@ -83,7 +82,6 @@ class Settings(BaseSettings):
 
     # Budgets and analysis thresholds
     max_llm_calls_per_domain: int = Field(default=40, alias="MAX_LLM_CALLS_PER_DOMAIN")
-    cost_budget_per_domain: float = Field(default=0.5, alias="COST_BUDGET_PER_DOMAIN")
     # text_limit обрезает body_text для классификации. Топовая модель
     # gpt-4o-mini читает <title>/<meta>/<h1> и первые ~1000 символов
     # текста — этого хватает, дальше латентность LLM растёт без улучшения
@@ -161,7 +159,6 @@ class Settings(BaseSettings):
     # Если эпох всё равно много (например после фильтра по длительности),
     # обрабатываем топ-N самых длинных. Защита от 25-минутных фаз.
     best_snapshot_max_epochs: int = Field(default=10, alias="BEST_SNAPSHOT_MAX_EPOCHS")
-    enable_best_snapshot_content_llm: bool = Field(default=False, alias="ENABLE_BEST_SNAPSHOT_CONTENT_LLM")
 
     # App / deployment
     app_domain: str = Field(default="checker.local", alias="APP_DOMAIN")
@@ -198,7 +195,6 @@ class Settings(BaseSettings):
             },
             "limits": {
                 "max_llm_calls_per_domain": self.max_llm_calls_per_domain,
-                "cost_budget_per_domain": self.cost_budget_per_domain,
                 "text_limit": self.text_limit,
                 "title_shift_threshold": self.title_shift_threshold,
                 "light_fetch_cap": self.light_fetch_cap,
@@ -234,7 +230,6 @@ class Settings(BaseSettings):
                 "epoch_parallelism": self.best_snapshot_epoch_parallelism,
                 "min_epoch_days": self.best_snapshot_min_epoch_days,
                 "max_epochs": self.best_snapshot_max_epochs,
-                "content_llm": self.enable_best_snapshot_content_llm,
             },
         }
 

@@ -17,7 +17,28 @@ from webarhive.db.engine import get_session
 # Версия деплоя — увеличиваем при каждой правке кода. Шапка показывает
 # это значение справа от «настройки» — чтобы оператор видел, что
 # именно крутится в Docker'е, и не путался при пересборках.
-APP_VERSION = "3.0"
+APP_VERSION = "3.9"
+
+
+def _age_human(days) -> str:
+    """Дни → «15 л 10 мес 16 д». Приближённо: год=365д, месяц=30д.
+    Нулевые старшие части опускаются; 0 дней → «0 д»."""
+    try:
+        days = int(days or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if days <= 0:
+        return "0 д"
+    years, rem = divmod(days, 365)
+    months, d = divmod(rem, 30)
+    parts = []
+    if years:
+        parts.append(f"{years} л")
+    if months:
+        parts.append(f"{months} мес")
+    if d or not parts:
+        parts.append(f"{d} д")
+    return " ".join(parts)
 
 
 def templates_for(directory: Path) -> Jinja2Templates:
@@ -30,6 +51,7 @@ def templates_for(directory: Path) -> Jinja2Templates:
     t.env.filters["category_label"] = lambda key: (CATEGORY_BY_KEY.get(key).label_ru if key in CATEGORY_BY_KEY else key)
     t.env.filters["category_group"] = lambda key: (CATEGORY_BY_KEY.get(key).group.value if key in CATEGORY_BY_KEY else "unknown")
     t.env.globals["app_version"] = APP_VERSION
+    t.env.filters["age_human"] = _age_human
     return t
 
 
