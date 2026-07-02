@@ -313,26 +313,29 @@ try {
             $domName = $dom['domain'];
             $mode = $_POST['mode'] ?? '';
 
-            // --- Режим АВТО: перебрать уже сохранённые токен-аккаунты панели и найти тот,
-            //     который реально управляет этой зоной. Новый токен не создаём. ---
+            // --- Режим АВТО: перебрать ВСЕ сохранённые аккаунты панели (и token, и global-key)
+            //     и найти тот, который реально управляет этой зоной. Новый токен не создаём. ---
             if ($mode === 'auto') {
-                $creds = $pdo->query("SELECT id, email, api_key FROM cloudflare_credentials WHERE user_id = $userId AND COALESCE(auth_type,'') = 'token'")->fetchAll();
-                $bound = null;
+                $creds = $pdo->query("SELECT id, email, api_key, auth_type FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id DESC")->fetchAll();
+                $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
+                $bound = null; $boundZone = '';
                 foreach ($creds as $c) {
-                    $z = cfMasterApi($c['api_key'], 'GET', 'zones?name=' . rawurlencode($domName));
-                    if (empty($z['success']) || empty($z['result'][0]['id'])) continue;
-                    $zoneId = $z['result'][0]['id'];
-                    $chk = cfMasterApi($c['api_key'], 'GET', "zones/$zoneId/dns_records?per_page=1");
+                    // userId=null у проб — чтобы не засорять логи ошибками по мёртвым аккаунтам.
+                    $z = cloudflareApiRequestDetailed($pdo, $c['email'], $c['api_key'], 'zones?name=' . rawurlencode($domName), 'GET', [], $proxies, null, $c['auth_type'] ?? null);
+                    if (empty($z['success']) || empty($z['data'])) continue;
+                    $zoneId = $z['data'][0]->id ?? '';
+                    if ($zoneId === '') continue;
+                    $chk = cloudflareApiRequestDetailed($pdo, $c['email'], $c['api_key'], "zones/$zoneId/dns_records?per_page=1", 'GET', [], $proxies, null, $c['auth_type'] ?? null);
                     if (empty($chk['success'])) continue;
                     $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$c['id'], $zoneId, $domainId, $userId]);
-                    $bound = $c;
+                    $bound = $c; $boundZone = $zoneId;
                     break;
                 }
                 if ($bound) {
-                    logAction($pdo, $userId, 'Перевыпущен токен домена', "{$domName}: авто-привязка к аккаунту {$bound['email']}");
+                    logAction($pdo, $userId, 'Перевыпущен токен домена', "{$domName}: авто-привязка к аккаунту {$bound['email']}, зона {$boundZone}");
                     echo json_encode(['success' => true, 'domain' => $domName, 'zone_ok' => true, 'dns_ok' => true, 'via' => $bound['email'], 'mode' => 'auto']);
                 } else {
-                    echo json_encode(['success' => false, 'error' => 'Среди сохранённых токен-аккаунтов панели ни один не управляет доменом ' . $domName . '. Добавьте мастер-токен того аккаунта Cloudflare, где заведён домен, и выберите его вместо «Авто».']);
+                    echo json_encode(['success' => false, 'error' => 'Среди сохранённых аккаунтов панели ни один не управляет доменом ' . $domName . '. Добавьте (на вкладке «Мастер-токен») токен того аккаунта Cloudflare, где заведён домен, затем повторите «Авто» или выберите этот мастер вручную.']);
                 }
                 break;
             }

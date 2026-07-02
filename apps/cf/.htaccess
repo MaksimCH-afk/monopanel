@@ -74,7 +74,7 @@
 </FilesMatch>
 
 # Allow specific API files for AJAX calls (only from same origin)
-<FilesMatch "^(add_accounts_bulk_api|analytics_api|bulk_api|bulk_domain_api|cache_api|cache_bulk_api|certificates_api|cloudflare_pages_api|dns_api|email_routing_api|firewall_rules_api|logs_api|master_token_api|ns_api|ns_queue_api|page_rules_api|queue_api|security_api|security_custom_rules_api|security_rules_api|smart_waf_api|sync_domains_api|telegram_api|tokens_api|whois_api|workers_api)\.php$">
+<FilesMatch "^(add_accounts_bulk_api|analytics_api|bulk_api|bulk_domain_api|cache_api|cache_bulk_api|certificates_api|cloudflare_pages_api|dns_api|email_routing_api|firewall_rules_api|logs_api|master_token_api|ns_api|ns_queue_api|page_rules_api|queue_api|security_api|security_custom_rules_api|security_rules_api|smart_waf_api|ssl_mode_api|sync_domains_api|telegram_api|tokens_api|whois_api|workers_api)\.php$">
     Order Allow,Deny
     Allow from all
 </FilesMatch>
