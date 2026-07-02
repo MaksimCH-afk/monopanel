@@ -5,7 +5,7 @@
 set -euo pipefail
 
 echo "[entrypoint] Подготовка каталогов данных…"
-mkdir -p /data/cf /data/ank /data/arc /data/img
+mkdir -p /data/cf /data/ank /data/arc /data/img /data/seo
 chown -R www-data:www-data /data/cf 2>/dev/null || true
 
 # --- cf: БД (с токенами Cloudflare) живёт в томе /data/cf; код видит её в корне ---

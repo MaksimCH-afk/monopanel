@@ -32,8 +32,14 @@ CORS(app, resources={
     }
 })
 
+# [monopanel] Постоянный каталог для кред/токенов Google — переживает пересборку
+# образа. В контейнере монтируется том /data/seo (env SEO_DATA_DIR); локально без
+# переменной работает как раньше (рядом с кодом).
+DATA_DIR = os.environ.get('SEO_DATA_DIR', os.path.dirname(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # Config file path
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'dashboard_config.json')
+CONFIG_FILE = os.path.join(DATA_DIR, 'dashboard_config.json')
 
 # Global variables
 webmasters_service = None
@@ -43,7 +49,7 @@ openai_client = None
 # Default settings
 DEFAULT_SETTINGS = {
     "openaiApiKey": "",
-    "credentialsPath": "/Users/kburchardt/Desktop/SEO_scripts-main/scripts/Api-Keys/client_secret.json",
+    "credentialsPath": os.path.join(DATA_DIR, "client_secret.json"),
     "trendsCredentialsPath": "",
     "isAuthorized": False,
     "overviewSites": []
@@ -190,7 +196,7 @@ def initialize_openai_client():
     else:
         openai_client = None
 
-def authorize_creds(creds_path, authorized_creds_path='authorizedcreds.dat'):
+def authorize_creds(creds_path, authorized_creds_path=os.path.join(DATA_DIR, 'authorizedcreds.dat')):
     """Authorize and return the Webmasters API service"""
     try:
         SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly']
@@ -821,7 +827,7 @@ def clear_settings():
     
     try:
         # Delete authorized credentials file
-        authorized_creds_path = 'authorizedcreds.dat'
+        authorized_creds_path = os.path.join(DATA_DIR, 'authorizedcreds.dat')
         if os.path.exists(authorized_creds_path):
             try:
                 os.remove(authorized_creds_path)
@@ -1241,7 +1247,7 @@ def trends_analyze():
             gsc_series = []
 
         # ── Step 3: Google Trends ─────────────────────────────────────────────
-        token_file = os.path.join(os.path.dirname(__file__), 'authorized_trends_token.json')
+        token_file = os.path.join(DATA_DIR, 'authorized_trends_token.json')
         try:
             trends_creds = load_trends_creds(token_file, trends_creds_path)
         except Exception as e:

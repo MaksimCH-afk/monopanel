@@ -12,8 +12,27 @@ data/
 │   └── cloudflare_panel.db   ← БД cf (домены, токены Cloudflare) — СЕКРЕТ
 ├── ank/
 │   └── app.db                ← БД ank (проекты, стратегии, профили)
-└── img/                      ← SQLite + сгенерированные картинки
+├── img/                      ← SQLite + сгенерированные картинки
+└── seo/
+    ├── client_secret.json    ← Google OAuth (для данных GSC) — СЕКРЕТ, положить сюда
+    ├── authorizedcreds.dat   ← сохранённый OAuth-токен (создаётся после входа)
+    └── dashboard_config.json ← конфиг seo (создаётся приложением)
 ```
+
+## seo — данные Google Search Console (переживают пересборку)
+
+Чтобы seo показывал реальные данные GSC и не пришлось авторизовываться заново
+после каждого `docker compose up --build`:
+
+1. Создайте в Google Cloud Console OAuth-клиент (тип «Desktop app») с доступом к
+   Search Console API и скачайте его `client_secret.json`.
+2. Положите файл сюда: `data/seo/client_secret.json` (папка `data/` — в `.gitignore`).
+3. Запустите панель, откройте **SEO Dashboard → Settings** и нажмите авторизацию
+   (кнопка дергает `/api/authorize`). Токен сохранится в `data/seo/authorizedcreds.dat`
+   и переживёт последующие пересборки — повторно логиниться не нужно.
+
+Путь к креденшлам берётся из `SEO_DATA_DIR=/data/seo` (том), поэтому и секрет, и
+токен лежат вне образа и вне git.
 
 ## Перенос данных (только cf и ank)
 

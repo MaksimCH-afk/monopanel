@@ -35,3 +35,4 @@ services:
       - ./data/ank:/data/ank   # ank-БД (проекты, стратегии)
       - ./data/arc:/data/arc   # arc-БД (прогоны) — стартует с чистого листа
       - ./data/img:/data/img   # img: SQLite + сгенерированные картинки
+      - ./data/seo:/data/seo   # seo: client_secret.json + OAuth-токен GSC (переживает пересборку)
