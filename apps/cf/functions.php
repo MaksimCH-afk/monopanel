@@ -706,6 +706,32 @@ function cfZoneAnalyticsGraphQL($pdo, $email, $apiKey, $zoneId, $days = 7, $prox
  * @param string|null $authType Явный тип аутентификации ('global'|'token') или null для автоопределения
  * @return array Детальный результат запроса
  */
+/**
+ * [monopanel] Человекочитаемая расшифровка ошибок Cloudflare для логов.
+ * Принимает сырой ответ CF (строку) или код и возвращает подсказку «что делать».
+ */
+function cfHumanErrorHint($response) {
+    $code = null;
+    if (is_int($response)) {
+        $code = $response;
+    } elseif (is_string($response) && $response !== '') {
+        $j = json_decode($response, true);
+        if (isset($j['errors'][0]['code'])) $code = (int)$j['errors'][0]['code'];
+    }
+    switch ($code) {
+        case 10000: // Authentication error
+            return '⚠ Токен не принят Cloudflare (битый/отозван/не тот). Перевыпустите токен домену: меню домена → «Перевыпустить токен».';
+        case 9109: // Unauthorized to access requested resource
+        case 9103:
+        case 9106:
+            return '⚠ Токену не хватает прав на эту зону. Добавьте право DNS:Edit (и нужную зону) и перевыпустите токен.';
+        case 6003: // Invalid request headers
+            return '⚠ Неверный формат авторизации (проверьте, что это API-токен, а не Global Key).';
+        default:
+            return $code ? "Код Cloudflare: {$code}." : '';
+    }
+}
+
 function cloudflareApiRequestDetailed($pdo, $email, $apiKey, $endpoint, $method = 'GET', $data = [], $proxies = [], $userId = null, $authType = null) {
     $result = [
         'success' => false,
@@ -785,7 +811,8 @@ function cloudflareApiRequestDetailed($pdo, $email, $apiKey, $endpoint, $method 
         // Это НЕ ошибка (так Cloudflare отвечает на пустую фазу), не засоряем лог.
         $benignNoRuleset = ($result['http_code'] == 404 && strpos($response, 'could not find entrypoint ruleset') !== false);
         if ($userId && !$benignNoRuleset) {
-            logAction($pdo, $userId, "API Request Failed (Detailed)", "Endpoint: $endpoint, HTTP Code: {$result['http_code']}, Response: " . substr($response, 0, 500));
+            $hint = cfHumanErrorHint($response);
+            logAction($pdo, $userId, "API Request Failed (Detailed)", "Endpoint: $endpoint, HTTP Code: {$result['http_code']}, Response: " . substr($response, 0, 500) . ($hint ? " — {$hint}" : ''));
         }
         return $result;
     }
@@ -825,7 +852,9 @@ function cloudflareApiRequestDetailed($pdo, $email, $apiKey, $endpoint, $method 
     // ошибки (успехи видны по результату операции в человекочитаемых записях выше).
     if ($userId && (!$result['success'] || !empty($result['api_errors']))) {
         $errorCount = count($result['api_errors']);
-        logAction($pdo, $userId, "API Request Failed (Detailed)", "Endpoint: $endpoint, Errors: $errorCount");
+        $firstCode = $result['api_errors'][0]['code'] ?? null;
+        $hint = is_numeric($firstCode) ? cfHumanErrorHint((int)$firstCode) : '';
+        logAction($pdo, $userId, "API Request Failed (Detailed)", "Endpoint: $endpoint, Errors: $errorCount" . ($hint ? " — {$hint}" : ''));
     }
 
     return $result;

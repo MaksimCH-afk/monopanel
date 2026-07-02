@@ -281,6 +281,80 @@ try {
             echo json_encode(['success' => true, 'masters' => $out]);
             break;
 
+        // [monopanel] Живой статус каждого сохранённого мастер-токена (Cloudflare verify).
+        case 'masters_status':
+            $rows = $pdo->query("SELECT id, label, account_email, domains_hint, token FROM master_tokens ORDER BY id DESC")->fetchAll();
+            $out = [];
+            foreach ($rows as $r) {
+                $v = cfMasterApi($r['token'], 'GET', 'user/tokens/verify');
+                $status = !empty($v['success']) ? ($v['result']['status'] ?? 'active') : 'invalid';
+                $out[] = [
+                    'id' => $r['id'],
+                    'label' => $r['label'],
+                    'email' => $r['account_email'],
+                    'domains_hint' => $r['domains_hint'],
+                    'masked' => mb_substr($r['token'], 0, 10) . '…' . mb_substr($r['token'], -4),
+                    'status' => $status,
+                    'ok' => ($status === 'active'),
+                ];
+            }
+            echo json_encode(['success' => true, 'masters' => $out]);
+            break;
+
+        // [monopanel] Перевыпустить токен домену: создать дочерний токен выбранным мастером
+        // и ПЕРЕПРИВЯЗАТЬ домен к нему (лечит домены, застрявшие на старом/отозванном токене).
+        case 'reissue_domain_token':
+            $domainId = (int)($_POST['domain_id'] ?? 0);
+            if ($domainId <= 0) throw new Exception('Не указан домен');
+            $st = $pdo->prepare("SELECT id, domain FROM cloudflare_accounts WHERE id = ? AND user_id = ?");
+            $st->execute([$domainId, $userId]);
+            $dom = $st->fetch();
+            if (!$dom) throw new Exception('Домен не найден');
+            $master = resolveMasterToken($pdo);
+            if ($master === '') throw new Exception('Выберите мастер-токен');
+            $r = mtCreateToken($master, 'panel-token-' . date('Ymd-His'), array_column(masterTokenPreset(), 'key'));
+            if (empty($r['ok'])) throw new Exception('Не удалось создать токен: ' . ($r['error'] ?? 'неизвестно'));
+            $tok = $r['token'];
+            if (!$tok) throw new Exception('Cloudflare не вернул значение токена');
+            // upsert креденшла (как save_as_account)
+            $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
+            $ex->execute([$userId, $tok]);
+            $credId = (int)($ex->fetchColumn() ?: 0);
+            if (!$credId) {
+                $nm = '';
+                $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');
+                if (!empty($acc['success']) && !empty($acc['result'][0]['name'])) $nm = $acc['result'][0]['name'];
+                $email = $nm ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $tok), -8));
+                $base = $email; $i = 2;
+                while (true) {
+                    $c = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ?");
+                    $c->execute([$userId, $email]);
+                    if (!$c->fetchColumn()) break;
+                    $email = $base . ' #' . $i; $i++;
+                }
+                $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
+                $credId = (int)$pdo->lastInsertId();
+            }
+            // свежий zone_id новым токеном
+            $zoneId = '';
+            $z = cfMasterApi($tok, 'GET', 'zones?name=' . rawurlencode($dom['domain']));
+            if (!empty($z['success']) && !empty($z['result'][0]['id'])) $zoneId = $z['result'][0]['id'];
+            // ПЕРЕПРИВЯЗКА домена к живому креденшлу
+            if ($zoneId !== '') {
+                $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $zoneId, $domainId, $userId]);
+            } else {
+                $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $domainId, $userId]);
+            }
+            // контроль: видит ли новый токен DNS зоны
+            $dnsOk = false;
+            if ($zoneId !== '') {
+                $chk = cfMasterApi($tok, 'GET', "zones/$zoneId/dns_records?per_page=1");
+                $dnsOk = !empty($chk['success']);
+            }
+            logAction($pdo, $userId, 'Перевыпущен токен домена', "{$dom['domain']}: зона " . ($zoneId ?: 'не найдена') . ", DNS доступ: " . ($dnsOk ? 'да' : 'нет'));
+            echo json_encode(['success' => true, 'domain' => $dom['domain'], 'zone_ok' => $zoneId !== '', 'dns_ok' => $dnsOk, 'masked' => mb_substr($tok, 0, 10) . '…' . mb_substr($tok, -4)]);
+            break;
+
         case 'import_empty':
             // Импорт/обновление зон по ВСЕМ токен-аккаунтам панели: подтягивает недостающие
             // домены из Cloudflare (INSERT OR IGNORE — существующие не трогаются). Так в панель

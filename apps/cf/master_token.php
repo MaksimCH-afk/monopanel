@@ -112,6 +112,18 @@ include 'sidebar.php';
             <div id="tokensList"><div class="text-muted small">Введите мастер-токен и нажмите «Загрузить список».</div></div>
         </div>
     </div>
+
+    <!-- [monopanel] Здоровье мастер-токенов -->
+    <div class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-heart-pulse me-2"></i>Здоровье мастер-токенов</span>
+            <button class="btn btn-outline-primary btn-sm" onclick="checkMastersHealth()"><i class="fas fa-stethoscope me-1"></i>Проверить все</button>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Сохранённые мастер-токены с метками, аккаунтом и живым статусом (Cloudflare verify). <span class="text-danger">🔴 недействителен/истёк</span> — таким токеном генерировать нельзя.</p>
+            <div id="mastersHealth"><div class="text-muted small">Нажмите «Проверить все» — панель опросит каждый токен в Cloudflare.</div></div>
+        </div>
+    </div>
 </div>
 
 <!-- jQuery нужен для AJAX (как в Security Manager); footer.php грузит только Bootstrap -->
@@ -314,6 +326,30 @@ function deleteToken(id, btn) {
         else { showToast('Ошибка: ' + (r.error || 'unknown'), 'error'); $(btn).prop('disabled', false).html('<i class="fas fa-trash"></i>'); }
     })
     .fail(function(){ showToast('Ошибка соединения', 'error'); $(btn).prop('disabled', false).html('<i class="fas fa-trash"></i>'); });
+}
+function checkMastersHealth() {
+    $('#mastersHealth').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Проверяю токены в Cloudflare…</div>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000, data: { action: 'masters_status' } })
+    .done(function(r) {
+        if (!r.success || !r.masters) { $('#mastersHealth').html('<div class="text-danger small">' + ((r && r.error) || 'Ошибка') + '</div>'); return; }
+        if (!r.masters.length) { $('#mastersHealth').html('<div class="text-muted small">Сохранённых мастер-токенов нет.</div>'); return; }
+        let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Метка</th><th>Аккаунт</th><th>Домены</th><th>Токен</th><th>Статус</th></tr></thead><tbody>';
+        r.masters.forEach(function(m) {
+            const ok = m.ok;
+            const badge = ok ? 'success' : 'danger';
+            const stTxt = ok ? 'активен' : (m.status === 'expired' ? 'истёк' : (m.status === 'disabled' ? 'отключён' : 'недействителен'));
+            html += `<tr class="${ok ? '' : 'table-danger'}">
+                <td>${$('<div>').text(m.label || '').html()}</td>
+                <td class="small text-muted">${$('<div>').text(m.email || '—').html()}</td>
+                <td class="small text-muted">${$('<div>').text(m.domains_hint || '—').html()}</td>
+                <td class="font-monospace small">${$('<div>').text(m.masked || '').html()}</td>
+                <td><span class="badge bg-${badge}">${stTxt}</span></td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        $('#mastersHealth').html(html);
+    })
+    .fail(function(x, st) { $('#mastersHealth').html('<div class="text-danger small">' + (st === 'timeout' ? 'Таймаут (много токенов — попробуйте ещё раз)' : 'Ошибка соединения') + '</div>'); });
 }
 $(document).ready(function(){ loadPerms(); loadMasters(); });
 </script>

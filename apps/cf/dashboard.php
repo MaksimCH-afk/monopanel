@@ -457,6 +457,7 @@ function getDomainStatusInfo($status, $httpCode = null) {
                                             <li><a class="dropdown-item" href="#" onclick="showCloudflareNS(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>')"><i class="fas fa-network-wired me-2 text-primary"></i>NS Cloudflare (для регистратора)</a></li>
                                             <li><a class="dropdown-item" href="#" onclick="checkSSL(<?php echo $domain['id']; ?>)"><i class="fas fa-shield-alt me-2 text-success"></i>Проверить SSL</a></li>
                                             <li><a class="dropdown-item" href="#" onclick="openAnalytics(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>')"><i class="fas fa-chart-line me-2 text-info"></i>Аналитика</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="reissueDomainToken(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>'); return false;"><i class="fas fa-key me-2 text-warning"></i>Перевыпустить токен</a></li>
                                             <li><hr class="dropdown-divider"></li>
                                             <li><h6 class="dropdown-header">Безопасность</h6></li>
                                             <li><a class="dropdown-item" href="#" onclick="toggleUnderAttack(<?php echo $domain['id']; ?>, true)"><i class="fas fa-bolt me-2 text-warning"></i>Under Attack ON</a></li>
@@ -950,6 +951,62 @@ async function syncDomainNow(id, name) {
 async function updateDNS(id) { await addTaskToQueue('update_dns_ip', [id], 'Обновление DNS'); }
 async function checkSSL(id) { await addTaskToQueue('check_ssl_status', [id], 'Проверка SSL'); }
 async function checkStatus(id) { await addTaskToQueue('check_domain_status', [id], 'Проверка статуса'); }
+
+// [monopanel] Перевыпустить токен домену: выбрать живой мастер → сгенерить дочерний → перепривязать домен.
+let _reissueModal = null;
+async function reissueDomainToken(domainId, domainName) {
+    if (!document.getElementById('reissueTokenModal')) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML =
+            '<div class="modal fade" id="reissueTokenModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">' +
+            '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-key me-2 text-warning"></i>Перевыпустить токен — <span id="reissueDomainName"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
+            '<div class="modal-body">' +
+            '<p class="text-muted small">Панель создаст новый дочерний токен выбранным мастер-токеном и <b>перепривяжет домен</b> к нему. Это чинит «недостаточно прав / неверный токен» (домен мог остаться на старом отозванном токене).</p>' +
+            '<label class="form-label small">Мастер-токен (должен быть живой)</label>' +
+            '<select id="reissueMasterSelect" class="form-select mb-2"></select>' +
+            '<div id="reissueOut" class="small"></div>' +
+            '</div>' +
+            '<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>' +
+            '<button type="button" class="btn btn-warning" id="reissueConfirmBtn"><i class="fas fa-key me-1"></i>Перевыпустить</button></div>' +
+            '</div></div></div>';
+        document.body.appendChild(wrap.firstElementChild);
+    }
+    document.getElementById('reissueDomainName').textContent = domainName;
+    document.getElementById('reissueOut').innerHTML = '';
+    const sel = document.getElementById('reissueMasterSelect');
+    sel.innerHTML = '<option>Загрузка…</option>';
+    _reissueModal = new bootstrap.Modal(document.getElementById('reissueTokenModal'));
+    _reissueModal.show();
+    try {
+        const r = await fetch('master_token_api.php?action=list_masters').then(r => r.json());
+        if (!r.success || !r.masters || !r.masters.length) {
+            sel.innerHTML = '<option value="">нет сохранённых мастер-токенов</option>';
+            document.getElementById('reissueOut').innerHTML = '<span class="text-danger">Сначала сохраните рабочий мастер-токен на вкладке «Мастер-токен».</span>';
+            return;
+        }
+        sel.innerHTML = r.masters.map(m => `<option value="${m.id}">${(m.label || ('#' + m.id))}${m.email ? (' (' + m.email + ')') : ''}</option>`).join('');
+    } catch (e) { sel.innerHTML = '<option value="">ошибка загрузки</option>'; }
+    const btn = document.getElementById('reissueConfirmBtn');
+    btn.onclick = async function () {
+        const mid = sel.value;
+        if (!mid) { showToast('Выберите мастер-токен', 'warning'); return; }
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Перевыпускаю…';
+        document.getElementById('reissueOut').innerHTML = '';
+        try {
+            const fd = new URLSearchParams({ action: 'reissue_domain_token', domain_id: domainId, master_id: mid });
+            const res = await fetch('master_token_api.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd }).then(r => r.json());
+            if (res.success) {
+                showToast('Токен перевыпущен для ' + res.domain, res.dns_ok ? 'success' : 'warning');
+                document.getElementById('reissueOut').innerHTML = '<span class="' + (res.dns_ok ? 'text-success' : 'text-warning') + '">Готово: ' + res.masked + '. Зона: ' + (res.zone_ok ? 'найдена' : 'не найдена') + ', DNS доступ: ' + (res.dns_ok ? 'есть ✓' : 'нет') + '.</span>';
+                if (res.dns_ok) setTimeout(function () { _reissueModal.hide(); location.reload(); }, 1300);
+            } else {
+                showToast('Ошибка: ' + (res.error || ''), 'error');
+                document.getElementById('reissueOut').innerHTML = '<span class="text-danger">' + (res.error || 'ошибка') + '</span>';
+            }
+        } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-key me-1"></i>Перевыпустить';
+    };
+}
 
 async function deleteDomain(id, name) {
     if (!confirm(`Удалить домен ${name}?`)) return;
