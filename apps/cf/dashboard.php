@@ -456,6 +456,7 @@ function getDomainStatusInfo($status, $httpCode = null) {
                                             <li><a class="dropdown-item" href="#" onclick="openDnsManager(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>')"><i class="fas fa-list me-2 text-primary"></i>DNS записи (A/CNAME/TXT/MX)</a></li>
                                             <li><a class="dropdown-item" href="#" onclick="showCloudflareNS(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>')"><i class="fas fa-network-wired me-2 text-primary"></i>NS Cloudflare (для регистратора)</a></li>
                                             <li><a class="dropdown-item" href="#" onclick="checkSSL(<?php echo $domain['id']; ?>)"><i class="fas fa-shield-alt me-2 text-success"></i>Проверить SSL</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="changeSslMode(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>', '<?php echo htmlspecialchars($domain['ssl_mode'] ?? ''); ?>'); return false;"><i class="fas fa-lock me-2 text-success"></i>Изменить SSL-режим</a></li>
                                             <li><a class="dropdown-item" href="#" onclick="openAnalytics(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>')"><i class="fas fa-chart-line me-2 text-info"></i>Аналитика</a></li>
                                             <li><a class="dropdown-item" href="#" onclick="reissueDomainToken(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>'); return false;"><i class="fas fa-key me-2 text-warning"></i>Перевыпустить токен</a></li>
                                             <li><hr class="dropdown-divider"></li>
@@ -1005,6 +1006,60 @@ async function reissueDomainToken(domainId, domainName) {
             }
         } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-key me-1"></i>Перевыпустить';
+    };
+}
+
+// [monopanel] Смена SSL-режима зоны для одного домена (Off/Flexible/Full/Full Strict).
+let _sslModal = null;
+function changeSslMode(domainId, domainName, current) {
+    if (!document.getElementById('sslModeModal')) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML =
+            '<div class="modal fade" id="sslModeModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">' +
+            '<div class="modal-header"><h5 class="modal-title"><i class="fas fa-lock me-2 text-success"></i>SSL-режим — <span id="sslModeDomain"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
+            '<div class="modal-body">' +
+            '<p class="text-muted small">Режим шифрования Cloudflare для зоны (это <b>не</b> сертификат). «Full (Strict)» требует валидный сертификат на сервере; «Full» — принимает и самоподписанный.</p>' +
+            '<label class="form-label small">Режим</label>' +
+            '<select id="sslModeSelect" class="form-select mb-2">' +
+            '<option value="off">Off (без шифрования)</option>' +
+            '<option value="flexible">Flexible</option>' +
+            '<option value="full">Full</option>' +
+            '<option value="strict">Full (Strict)</option>' +
+            '</select>' +
+            '<div id="sslModeOut" class="small"></div>' +
+            '</div>' +
+            '<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>' +
+            '<button type="button" class="btn btn-success" id="sslModeConfirmBtn"><i class="fas fa-check me-1"></i>Применить</button></div>' +
+            '</div></div></div>';
+        document.body.appendChild(wrap.firstElementChild);
+    }
+    document.getElementById('sslModeDomain').textContent = domainName;
+    document.getElementById('sslModeOut').innerHTML = '';
+    const sel = document.getElementById('sslModeSelect');
+    // текущий режим: в БД strict/full_strict → strict
+    let cur = (current || '').toLowerCase();
+    if (cur === 'full_strict') cur = 'strict';
+    if (['off', 'flexible', 'full', 'strict'].includes(cur)) sel.value = cur;
+    _sslModal = new bootstrap.Modal(document.getElementById('sslModeModal'));
+    _sslModal.show();
+    const btn = document.getElementById('sslModeConfirmBtn');
+    btn.onclick = async function () {
+        const mode = sel.value;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Применяю…';
+        document.getElementById('sslModeOut').innerHTML = '';
+        try {
+            const fd = new URLSearchParams({ domain_id: domainId, mode: mode });
+            const res = await fetch('ssl_mode_api.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd }).then(r => r.json());
+            if (res.success) {
+                showToast(res.domain + ': SSL-режим → ' + res.mode, 'success');
+                document.getElementById('sslModeOut').innerHTML = '<span class="text-success">Готово. Обновляю…</span>';
+                setTimeout(function () { _sslModal.hide(); location.reload(); }, 1000);
+            } else {
+                showToast('Ошибка: ' + (res.error || ''), 'error');
+                document.getElementById('sslModeOut').innerHTML = '<span class="text-danger">' + (res.error || 'ошибка') + '</span>';
+            }
+        } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-check me-1"></i>Применить';
     };
 }
 
