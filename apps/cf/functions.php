@@ -863,26 +863,21 @@ function cloudflareApiRequestDetailed($pdo, $email, $apiKey, $endpoint, $method 
 // Получение DNS IP из Cloudflare
 function getDNSIPFromCloudflare($pdo, $domainId, $userId) {
     try {
-        // Логируем начало операции
-        logAction($pdo, $userId, "getDNSIP Started", "Domain ID: $domainId, User ID: $userId");
-        
         // Получаем информацию о домене
         $stmt = $pdo->prepare("
-            SELECT ca.*, cc.email, cc.api_key 
-            FROM cloudflare_accounts ca 
-            JOIN cloudflare_credentials cc ON ca.account_id = cc.id 
+            SELECT ca.*, cc.email, cc.api_key
+            FROM cloudflare_accounts ca
+            JOIN cloudflare_credentials cc ON ca.account_id = cc.id
             WHERE ca.id = ? AND ca.user_id = ?
         ");
         $stmt->execute([$domainId, $userId]);
         $domain = $stmt->fetch();
-        
+
         if (!$domain) {
             logAction($pdo, $userId, "getDNSIP Error", "Domain not found for ID: $domainId");
             return ['success' => false, 'error' => 'Домен не найден'];
         }
-        
-        logAction($pdo, $userId, "getDNSIP Domain Found", "Domain: {$domain['domain']}, Email: {$domain['email']}, Current DNS IP: {$domain['dns_ip']}, Zone ID: {$domain['zone_id']}");
-        
+
         $proxies = getProxies($pdo, $userId);
         
         // Получаем зону по имени. ВАЖНО: lookup по имени бывает транзиентно пустым
@@ -897,17 +892,9 @@ function getDNSIPFromCloudflare($pdo, $domainId, $userId) {
             logAction($pdo, $userId, "getDNSIP Error", "Zone not found in Cloudflare for domain: {$domain['domain']}");
             return ['success' => false, 'error' => 'Зона не найдена в Cloudflare'];
         }
-        logAction($pdo, $userId, "getDNSIP Zone Found", "Domain: {$domain['domain']}, Zone ID: $zoneId");
-        
         // Обновляем zone_id в базе если его нет
         if (empty($domain['zone_id'])) {
-            logAction($pdo, $userId, "getDNSIP Updating Zone ID", "Domain: {$domain['domain']}, Old Zone ID: {$domain['zone_id']}, New Zone ID: $zoneId");
-            
-            $updateZoneStmt = $pdo->prepare("UPDATE cloudflare_accounts SET zone_id = ? WHERE id = ?");
-            $zoneUpdateResult = $updateZoneStmt->execute([$zoneId, $domainId]);
-            $zoneRowsAffected = $updateZoneStmt->rowCount();
-            
-            logAction($pdo, $userId, "getDNSIP Zone Update Result", "Domain: {$domain['domain']}, Update Success: " . ($zoneUpdateResult ? 'Yes' : 'No') . ", Rows Affected: $zoneRowsAffected");
+            $pdo->prepare("UPDATE cloudflare_accounts SET zone_id = ? WHERE id = ?")->execute([$zoneId, $domainId]);
         }
         
         // Получаем DNS записи типа A
@@ -934,54 +921,32 @@ function getDNSIPFromCloudflare($pdo, $domainId, $userId) {
         }
         $dnsIp = implode(', ', array_values(array_unique($apexIps)));
         $allIPs = array_map(function($record) { return $record->content; }, $dnsResponse->result);
-        
-        logAction($pdo, $userId, "getDNSIP Records Found", "Domain: {$domain['domain']}, Primary IP: $dnsIp, All IPs: " . implode(', ', $allIPs));
-        
+
         // Получаем NS серверы для домена
         $nsServers = [];
         $nsResponse = cloudflareApiRequest($pdo, $domain['email'], $domain['api_key'], "zones/$zoneId/dns_records?type=NS", 'GET', [], $proxies, $userId);
         if ($nsResponse && !empty($nsResponse->result)) {
-            $nsServers = array_map(function($record) { 
-                return $record->content; 
+            $nsServers = array_map(function($record) {
+                return $record->content;
             }, $nsResponse->result);
-            logAction($pdo, $userId, "getDNSIP NS Records Found", "Domain: {$domain['domain']}, NS Servers: " . implode(', ', $nsServers));
-        } else {
-            logAction($pdo, $userId, "getDNSIP NS Records", "Domain: {$domain['domain']}, No NS records found or API error");
         }
         
         // Обновляем DNS IP и NS серверы в базе
         $nsRecordsJson = json_encode($nsServers);
         $updateStmt = $pdo->prepare("UPDATE cloudflare_accounts SET dns_ip = ?, zone_id = ?, ns_records = ?, proxied = ? WHERE id = ?");
         $updateResult = $updateStmt->execute([$dnsIp, $zoneId, $nsRecordsJson, $proxiedFlag, $domainId]);
-        $rowsAffected = $updateStmt->rowCount();
-        
-        logAction($pdo, $userId, "getDNSIP Database Update", "Domain: {$domain['domain']}, Update Success: " . ($updateResult ? 'Yes' : 'No') . ", Rows Affected: $rowsAffected, New DNS IP: $dnsIp, Zone ID: $zoneId");
-        
+
         // Проверяем результат обновления
         if (!$updateResult) {
             logAction($pdo, $userId, "getDNSIP Database Update Failed", "Domain: {$domain['domain']}, Failed to execute UPDATE statement");
             return ['success' => false, 'error' => 'Не удалось обновить DNS IP в базе данных'];
         }
-        
-        if ($rowsAffected === 0) {
-            logAction($pdo, $userId, "getDNSIP Database Update Warning", "Domain: {$domain['domain']}, No rows were affected by UPDATE statement");
-        }
-        
-        // Проверяем что данные действительно обновились
-        $verifyStmt = $pdo->prepare("SELECT dns_ip, zone_id FROM cloudflare_accounts WHERE id = ?");
-        $verifyStmt->execute([$domainId]);
-        $verifyData = $verifyStmt->fetch();
-        
-        logAction($pdo, $userId, "getDNSIP Verification", "Domain: {$domain['domain']}, Stored DNS IP: {$verifyData['dns_ip']}, Stored Zone ID: {$verifyData['zone_id']}, Expected DNS IP: $dnsIp, Expected Zone ID: $zoneId");
-        
+
         // Убеждаемся что транзакция зафиксирована
         if ($pdo->inTransaction()) {
             $pdo->commit();
-            logAction($pdo, $userId, "getDNSIP Transaction Committed", "Domain: {$domain['domain']}");
         }
-        
-        logAction($pdo, $userId, "DNS IP Updated", "Domain: {$domain['domain']}, IP: $dnsIp");
-        
+
         return [
             'success' => true,
             'dns_ip' => $dnsIp,
@@ -999,26 +964,21 @@ function getDNSIPFromCloudflare($pdo, $domainId, $userId) {
 // Получение SSL статуса из Cloudflare (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 function getSSLStatusFromCloudflare($pdo, $domainId, $userId) {
     try {
-        // Логируем начало операции
-        logAction($pdo, $userId, "getSSLStatus Started", "Domain ID: $domainId, User ID: $userId");
-        
         // Получаем информацию о домене
         $stmt = $pdo->prepare("
-            SELECT ca.*, cc.email, cc.api_key 
-            FROM cloudflare_accounts ca 
-            JOIN cloudflare_credentials cc ON ca.account_id = cc.id 
+            SELECT ca.*, cc.email, cc.api_key
+            FROM cloudflare_accounts ca
+            JOIN cloudflare_credentials cc ON ca.account_id = cc.id
             WHERE ca.id = ? AND ca.user_id = ?
         ");
         $stmt->execute([$domainId, $userId]);
         $domain = $stmt->fetch();
-        
+
         if (!$domain || !$domain['zone_id']) {
             logAction($pdo, $userId, "getSSLStatus Error", "Domain not found or missing Zone ID for ID: $domainId");
             return ['success' => false, 'error' => 'Домен не найден или отсутствует Zone ID'];
         }
-        
-        logAction($pdo, $userId, "getSSLStatus Domain Found", "Domain: {$domain['domain']}, Zone ID: {$domain['zone_id']}, Current SSL Mode: {$domain['ssl_mode']}, HTTPS: {$domain['always_use_https']}, TLS: {$domain['min_tls_version']}");
-        
+
         $proxies = getProxies($pdo, $userId);
         $zoneId = $domain['zone_id'];
         
@@ -1039,8 +999,7 @@ function getSSLStatusFromCloudflare($pdo, $domainId, $userId) {
                 $sslMode = $sslVars['value'] ?? 'unknown';
             }
         }
-        logAction($pdo, $userId, "getSSLStatus SSL Mode", "Domain: {$domain['domain']}, SSL Mode: $sslMode");
-        
+
         // Получаем дополнительные SSL настройки
         $httpsResponse = cloudflareApiRequestDetailed($pdo, $domain['email'], $domain['api_key'], "zones/$zoneId/settings/always_use_https", 'GET', [], $proxies, $userId);
         $alwaysHttps = 0;
@@ -1050,8 +1009,7 @@ function getSSLStatusFromCloudflare($pdo, $domainId, $userId) {
                 $alwaysHttps = ($httpsVars['value'] === 'on') ? 1 : 0;
             }
         }
-        logAction($pdo, $userId, "getSSLStatus HTTPS Setting", "Domain: {$domain['domain']}, Always HTTPS: " . ($alwaysHttps ? 'On' : 'Off'));
-        
+
         $tlsResponse = cloudflareApiRequestDetailed($pdo, $domain['email'], $domain['api_key'], "zones/$zoneId/settings/min_tls_version", 'GET', [], $proxies, $userId);
         $minTls = '1.0';
         if ($tlsResponse['success'] && isset($tlsResponse['data']) && is_object($tlsResponse['data'])) {
@@ -1060,8 +1018,7 @@ function getSSLStatusFromCloudflare($pdo, $domainId, $userId) {
                 $minTls = $tlsVars['value'] ?? '1.0';
             }
         }
-        logAction($pdo, $userId, "getSSLStatus TLS Version", "Domain: {$domain['domain']}, Min TLS: $minTls");
-        
+
         // Обновляем SSL информацию в базе
         $updateStmt = $pdo->prepare("
             UPDATE cloudflare_accounts 
@@ -1069,35 +1026,18 @@ function getSSLStatusFromCloudflare($pdo, $domainId, $userId) {
             WHERE id = ?
         ");
         $updateResult = $updateStmt->execute([$sslMode, $alwaysHttps, $minTls, $domainId]);
-        $rowsAffected = $updateStmt->rowCount();
-        
-        logAction($pdo, $userId, "getSSLStatus Database Update", "Domain: {$domain['domain']}, Update Success: " . ($updateResult ? 'Yes' : 'No') . ", Rows Affected: $rowsAffected, SSL Mode: $sslMode, HTTPS: $alwaysHttps, TLS: $minTls");
-        
+
         // Проверяем результат обновления
         if (!$updateResult) {
             logAction($pdo, $userId, "getSSLStatus Database Update Failed", "Domain: {$domain['domain']}, Failed to execute UPDATE statement");
             return ['success' => false, 'error' => 'Не удалось обновить SSL статус в базе данных'];
         }
-        
-        if ($rowsAffected === 0) {
-            logAction($pdo, $userId, "getSSLStatus Database Update Warning", "Domain: {$domain['domain']}, No rows were affected by UPDATE statement");
-        }
-        
-        // Проверяем что данные действительно обновились
-        $verifyStmt = $pdo->prepare("SELECT ssl_mode, always_use_https, min_tls_version, ssl_last_check FROM cloudflare_accounts WHERE id = ?");
-        $verifyStmt->execute([$domainId]);
-        $verifyData = $verifyStmt->fetch();
-        
-        logAction($pdo, $userId, "getSSLStatus Verification", "Domain: {$domain['domain']}, Stored SSL Mode: {$verifyData['ssl_mode']}, Stored HTTPS: {$verifyData['always_use_https']}, Stored TLS: {$verifyData['min_tls_version']}, Last Check: {$verifyData['ssl_last_check']}");
-        
+
         // Убеждаемся что транзакция зафиксирована
         if ($pdo->inTransaction()) {
             $pdo->commit();
-            logAction($pdo, $userId, "getSSLStatus Transaction Committed", "Domain: {$domain['domain']}");
         }
-        
-        logAction($pdo, $userId, "SSL Status Updated", "Domain: {$domain['domain']}, Mode: $sslMode");
-        
+
         return [
             'success' => true,
             'ssl_mode' => $sslMode,

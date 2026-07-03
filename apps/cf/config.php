@@ -26,8 +26,12 @@ define('BASE_PATH', $basePath);
 define('ROOT_PATH', dirname(__FILE__) . '/');
 define('DB_PATH', ROOT_PATH . 'cloudflare_panel.db');
 
-// Версия панели (счётчик). Текущая — 48.0, следующие правки: 49.0, 50.0, ...
-define('PANEL_VERSION', '48.0');
+// Версия панели — авто-счётчик перезаливов. entrypoint.sh на каждом старте
+// контейнера увеличивает /data/cf/panel_build на 1 (1, 2, 3, …); показываем «N.0».
+// Фоллбэк (локальный запуск без тома) — 1.0.
+$__pv_file = '/data/cf/panel_build';
+$__pv = is_readable($__pv_file) ? (int)trim(@file_get_contents($__pv_file)) : 0;
+define('PANEL_VERSION', ($__pv > 0 ? $__pv : 1) . '.0');
 
 // Перенаправление на HTTPS, если соединение не защищено (исключая localhost, CLI и API файлы)
 if (php_sapi_name() !== 'cli') {
@@ -71,10 +75,16 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-    // Конкурентный доступ (фоновый обработчик очереди + веб-запросы):
+    // Конкурентный доступ (фоновые cf-queue/cf-monitor + веб-запросы):
     // WAL разрешает одновременные чтение/запись, busy_timeout ждёт вместо "database is locked".
-    $pdo->exec('PRAGMA busy_timeout = 20000');
+    // Ждём освобождения блокировки до 60с (было 20с) — фоновый мониторинг может писать
+    // почти непрерывно, и перевыпуск токена/смена SSL должны дождаться, а не падать.
+    $pdo->exec('PRAGMA busy_timeout = 60000');
     $pdo->exec('PRAGMA journal_mode = WAL');
+    // NORMAL под WAL безопасен и заметно короче держит блокировку писателем (меньше fsync).
+    $pdo->exec('PRAGMA synchronous = NORMAL');
+    // Не накапливаем WAL слишком большим — иначе разовый долгий чекпойнт-сброс встанет колом.
+    $pdo->exec('PRAGMA wal_autocheckpoint = 400');
 
     // Создание таблиц, если они еще не существуют
     $pdo->exec("

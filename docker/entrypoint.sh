@@ -8,6 +8,17 @@ echo "[entrypoint] Подготовка каталогов данных…"
 mkdir -p /data/cf /data/ank /data/arc /data/img /data/seo
 chown -R www-data:www-data /data/cf 2>/dev/null || true
 
+# --- Версия панели: авто-инкремент счётчика перезаливов (1, 2, 3, …) ---
+# Счётчик лежит в томе /data/cf, поэтому переживает пересборку образа.
+# Каждый старт контейнера (docker compose up) прибавляет 1 → в UI видно «N.0».
+PV_FILE=/data/cf/panel_build
+pv=$(tr -dc '0-9' < "$PV_FILE" 2>/dev/null || echo '')
+[ -z "$pv" ] && pv=0
+pv=$((pv + 1))
+echo "$pv" > "$PV_FILE"
+chown www-data:www-data "$PV_FILE" 2>/dev/null || true
+echo "[entrypoint] Версия панели: ${pv}.0"
+
 # --- cf: БД (с токенами Cloudflare) живёт в томе /data/cf; код видит её в корне ---
 CF_DB="/data/cf/cloudflare_panel.db"
 ln -sf "$CF_DB" /var/www/html/cloudflare_panel.db
