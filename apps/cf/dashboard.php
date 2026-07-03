@@ -580,6 +580,7 @@ function getDomainStatusInfo($status, $httpCode = null) {
                         <label class="form-label">Что синхронизировать (группа или аккаунт):</label>
                         <select id="syncGroupSelect" class="form-select">
                             <option value="all">🌐 Все домены</option>
+                            <option value="unsynced">🆕 Только несинхронизированные</option>
                             <optgroup label="Группы">
                             <?php foreach ($groups as $group): ?>
                                 <option value="group:<?php echo $group['id']; ?>"><?php echo htmlspecialchars($group['name']); ?></option>
@@ -903,9 +904,34 @@ async function showCloudflareNS(id, name) {
     } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
 }
 function copyText(text, btn) {
-    navigator.clipboard.writeText(text);
-    showToast('Скопировано: ' + text, 'success');
-    if (btn) { const o = btn.innerHTML; btn.innerHTML = '<i class="fas fa-check"></i>'; setTimeout(() => btn.innerHTML = o, 1200); }
+    // navigator.clipboard есть только в secure context (https/localhost) и часто недоступен
+    // в iframe/по http — тогда падало молча и в буфер ничего не попадало. Фоллбэк на execCommand.
+    const ok = () => {
+        showToast('Скопировано: ' + text, 'success');
+        if (btn) { const o = btn.innerHTML; btn.innerHTML = '<i class="fas fa-check"></i>'; setTimeout(() => btn.innerHTML = o, 1200); }
+    };
+    const fallback = () => {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            const done = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (done) ok(); else showToast('Не удалось скопировать — выделите и скопируйте вручную', 'error');
+        } catch (e) {
+            showToast('Не удалось скопировать: ' + e.message, 'error');
+        }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else {
+        fallback();
+    }
 }
 // Живая проверка текущих NS домена (публичный DNS через DoH) — на месте ли делегирование на Cloudflare.
 async function checkLiveNS(id, name) {
@@ -1222,7 +1248,8 @@ async function beginSync() {
     // Получаем список доменов (фильтр по группе ИЛИ по аккаунту)
     const formData = new FormData();
     formData.append('action', 'get_domains');
-    if (scope.indexOf('group:') === 0) formData.append('group_id', scope.slice(6));
+    if (scope === 'unsynced') formData.append('unsynced', '1');
+    else if (scope.indexOf('group:') === 0) formData.append('group_id', scope.slice(6));
     else if (scope.indexOf('account:') === 0) formData.append('account_id', scope.slice(8));
     else formData.append('group_id', 'all');
     

@@ -6,6 +6,7 @@
 
 require_once 'config.php';
 require_once 'functions.php';
+require_once 'db_retry.php';
 
 header('Content-Type: application/json');
 
@@ -49,15 +50,38 @@ switch ($action) {
  */
 function getDomains($pdo, $userId) {
     $groupId = $_POST['group_id'] ?? null;
-    
+    $unsynced = !empty($_POST['unsynced']);
+    $params = [$userId];
+
+    if ($unsynced) {
+        // «Несинхронизированные»: зона ещё не привязана, ЛИБО домен ни разу не проверялся,
+        // ЛИБО нет базовых данных. Такие раньше вообще НЕ попадали в синк (фильтр zone_id != '').
+        // zone_id может быть пустым — syncDomain определит зону по имени на лету.
+        $sql = "
+            SELECT ca.id, ca.domain, ca.zone_id, cc.email, cc.api_key
+            FROM cloudflare_accounts ca
+            JOIN cloudflare_credentials cc ON ca.account_id = cc.id
+            WHERE ca.user_id = ?
+              AND (ca.zone_id IS NULL OR ca.zone_id = ''
+                   OR ca.last_check IS NULL
+                   OR ca.dns_ip IS NULL OR ca.dns_ip = ''
+                   OR ca.domain_status IS NULL OR ca.domain_status = 'unknown')
+            ORDER BY ca.domain ASC
+        ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $domains = $stmt->fetchAll();
+        echo json_encode(['success' => true, 'domains' => $domains, 'total' => count($domains)]);
+        return;
+    }
+
     $sql = "
         SELECT ca.id, ca.domain, ca.zone_id, cc.email, cc.api_key
         FROM cloudflare_accounts ca
         JOIN cloudflare_credentials cc ON ca.account_id = cc.id
         WHERE ca.user_id = ? AND ca.zone_id IS NOT NULL AND ca.zone_id != ''
     ";
-    $params = [$userId];
-    
+
     if ($groupId && $groupId !== 'all') {
         $sql .= " AND ca.group_id = ?";
         $params[] = $groupId;
@@ -70,7 +94,7 @@ function getDomains($pdo, $userId) {
     }
 
     $sql .= " ORDER BY ca.domain ASC";
-    
+
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $domains = $stmt->fetchAll();
@@ -95,7 +119,7 @@ function syncDomain($pdo, $userId) {
     
     // Получаем данные домена
     $stmt = $pdo->prepare("
-        SELECT ca.*, cc.email, cc.api_key
+        SELECT ca.*, cc.email, cc.api_key, cc.auth_type
         FROM cloudflare_accounts ca
         JOIN cloudflare_credentials cc ON ca.account_id = cc.id
         WHERE ca.id = ? AND ca.user_id = ?
@@ -124,7 +148,33 @@ function syncDomain($pdo, $userId) {
     
     $proxies = getProxies($pdo, $userId);
     $zoneId = $domain['zone_id'];
-    
+
+    // Несинхронизированный домен: зона ещё не привязана — определяем её по имени и сохраняем,
+    // иначе последующие вызовы zones//... пойдут в пустой zoneId и синк ничего не обновит.
+    if (empty($zoneId)) {
+        $zr = cloudflareApiRequestDetailed(
+            $pdo, $domain['email'], $domain['api_key'],
+            "zones?name=" . rawurlencode($domain['domain']),
+            'GET', [], $proxies, $userId, $domain['auth_type'] ?? null
+        );
+        if (!empty($zr['success']) && !empty($zr['data'][0]->id)) {
+            $zoneId = $zr['data'][0]->id;
+            try {
+                dbRetryOnLock(function () use ($pdo, $zoneId, $domainId) {
+                    $pdo->prepare("UPDATE cloudflare_accounts SET zone_id = ? WHERE id = ?")->execute([$zoneId, $domainId]);
+                });
+            } catch (Exception $e) { /* не критично: zone_id используем ниже из переменной */ }
+        } else {
+            echo json_encode([
+                'success' => false,
+                'domain_id' => $domainId,
+                'domain' => $domain['domain'],
+                'error' => 'Зона не найдена в Cloudflare (домен не в этом аккаунте или токен не видит зону)'
+            ]);
+            return;
+        }
+    }
+
     // 1. Получаем DNS IP (все A-записи)
     try {
         $dnsResponse = cloudflareApiRequestDetailed(

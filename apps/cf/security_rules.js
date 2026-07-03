@@ -1561,6 +1561,40 @@ function deployCustomWorker() {
     });
 }
 
+// Подставить выбранный домен в маршрут в нужном формате (кнопки «домен/*» и «*.домен/*»).
+function fillWorkerRoute(kind) {
+    const sel = document.getElementById('customWorkerDomain');
+    const d = (sel && sel.value) ? (sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '') : '';
+    if (!d) { showError('Сначала выберите домен'); return; }
+    const route = (kind === 'wildcard') ? ('*.' + d + '/*') : (d + '/*');
+    const inp = document.getElementById('customWorkerRoute');
+    inp.value = route;
+    inp.focus();
+}
+
+// Проверка воркера БЕЗ деплоя: синтаксис (компиляция без выполнения) + наличие обработчика fetch.
+function checkCustomWorker() {
+    const code = document.getElementById('customWorkerScript')?.value || '';
+    if (!code.trim()) { showError('Пустой код Worker — вставьте скрипт'); return; }
+    // Компилируем как тело функции: new Function ПАРСИТ, но НЕ выполняет код.
+    // Модульный синтаксис приводим к парсибельному виду (export default → return, import-строки убираем).
+    const test = code
+        .replace(/export\s+default/g, 'return')
+        .replace(/^\s*import\s[^\n]*$/gm, '');
+    try {
+        new Function(test);
+    } catch (e) {
+        showError('Синтаксическая ошибка: ' + e.message);
+        return;
+    }
+    const hasHandler = /addEventListener\s*\(\s*['"]fetch['"]/.test(code) || /export\s+default/.test(code);
+    if (!hasHandler) {
+        showError('Синтаксис ок, но не найден обработчик fetch — нужен export default { fetch } или addEventListener("fetch", …)');
+        return;
+    }
+    showSuccess('✓ Синтаксис корректен, обработчик fetch найден — можно применять');
+}
+
 // Автозаполнение маршрута именем домена + счётчик символов кода
 $(function () {
     const $sel = $('#customWorkerDomain');

@@ -494,7 +494,11 @@ $stats = $statsStmt->fetch();
                                 <div class="col-md-7">
                                     <label class="form-label small fw-bold">Маршрут (Route)</label>
                                     <input type="text" class="form-control" id="customWorkerRoute" placeholder="example.com/*" spellcheck="false" autocapitalize="off" autocomplete="off">
-                                    <small class="text-muted">
+                                    <div class="btn-group btn-group-sm mt-1" role="group" aria-label="Подставить домен в маршрут">
+                                        <button type="button" class="btn btn-outline-secondary font-monospace" onclick="fillWorkerRoute('apex')" title="Весь сайт: домен/*">домен/*</button>
+                                        <button type="button" class="btn btn-outline-secondary font-monospace" onclick="fillWorkerRoute('wildcard')" title="Все поддомены: *.домен/*">*.домен/*</button>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">
                                         Как в Cloudflare: <code>*</code> — любой поддомен/путь, <code>/</code> — разделитель.
                                         Примеры: <code>example.com/*</code> (весь сайт), <code>*.example.com/*</code> (все поддомены),
                                         <code>example.com/api/*</code> (только /api). Выберите домен — подставлю <code>домен/*</code> автоматически.
@@ -510,9 +514,12 @@ $stats = $statsStmt->fetch();
                                         placeholder="export default {&#10;  async fetch(request, env, ctx) {&#10;    return new Response('Hello from Worker', { status: 200 });&#10;  }&#10;};&#10;&#10;// или классический синтаксис:&#10;// addEventListener('fetch', (event) => { event.respondWith(handle(event.request)); });"></textarea>
                                     <small class="text-muted">Поддерживаются оба формата: <code>export default { fetch }</code> (модульный) и <code>addEventListener('fetch', …)</code> (service worker).</small>
                                 </div>
-                                <div class="col-12 d-flex gap-2">
+                                <div class="col-12 d-flex gap-2 flex-wrap">
                                     <button class="btn btn-primary" onclick="deployCustomWorker()">
                                         <i class="fas fa-rocket me-2"></i>Создать и применить Worker
+                                    </button>
+                                    <button class="btn btn-outline-primary" type="button" onclick="checkCustomWorker()">
+                                        <i class="fas fa-circle-check me-2"></i>Проверить воркер
                                     </button>
                                     <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('customWorkerScript').value=''; document.getElementById('customWorkerScript').dispatchEvent(new Event('input'));">
                                         Очистить
