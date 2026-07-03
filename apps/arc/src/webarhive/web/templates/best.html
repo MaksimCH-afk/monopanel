@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_components.html" import status_pill %}
+{% block title %}Лучший слепок — Web Archive Checker{% endblock %}
+{% block content %}
+
+<div class="col gap-5">
+
+{#- ===== Что это ===== -#}
+<section class="card" style="border-color:#c9d6f6;background:linear-gradient(180deg,#f4f7ff 0%,#fff 60%)">
+  <div class="card__head" style="border-bottom:1px solid #dfe6f7">
+    {{ icon("Download", 16, "var(--accent)") }}
+    <span class="card__title">Лучший слепок</span>
+    <span class="muted" style="font-size:12.5px;margin-left:4px">· отдельный инструмент</span>
+  </div>
+  <div class="card__body">
+    <div style="font-size:13.5px;color:var(--text);max-width:820px">
+      Находит <b>наиболее полную сохранённую копию главной страницы</b> для каждого
+      календарного года архива. Проверяет полноту ресурсов (CSS/JS/изображения)
+      через Availability API и целостность HTML. <b>Без</b> LLM, тематик, редиректов и
+      вердикта — поэтому быстро и не требует LLM-ключа. Результат — в карточке
+      каждого домена, блок «Лучший слепок» (строка на год со ссылкой «открыть»).
+    </div>
+  </div>
+</section>
+
+{#- ===== Идёт прогон (best) ===== -#}
+{% if running_run %}
+  {% set r = running_run %}
+  {% set pct = ((r.processed_domains / r.total_domains * 100) | round) if r.total_domains else 0 %}
+  <section class="card" style="border-color:#c9d6f6">
+    <div class="card__head">
+      {{ icon("Activity", 16, "var(--accent)") }}
+      <span class="card__title">Идёт поиск слепков · прогон #{{ r.id }}</span>
+      <span class="badge badge--running" style="margin-left:4px">running</span>
+      <span class="muted" style="margin-left:auto;font-size:12.5px">стартовал {{ r.started_at.strftime('%d.%m.%Y %H:%M') }}</span>
+    </div>
+    <div class="card__body">
+      <div class="row gap-4" style="align-items:flex-end;margin-bottom:14px">
+        <div style="min-width:280px">
+          <div class="muted" style="font-size:12px">обработано</div>
+          <div style="font-size:28px;font-weight:600;letter-spacing:-0.02em">
+            <span id="proc">{{ r.processed_domains }}</span>
+            <span class="muted" style="font-weight:400;font-size:18px">/ {{ r.total_domains }}</span>
+            <span class="muted" style="font-weight:400;font-size:14px;margin-left:10px"><span id="pct">{{ pct }}</span>%</span>
+          </div>
+        </div>
+      </div>
+      <div class="progress" style="margin-bottom:14px">
+        <div class="progress__fill" id="bar" style="width: {{ pct }}%"></div>
+      </div>
+      <div class="row gap-4" style="flex-wrap:wrap">
+        <div class="row gap-2">{{ icon("Globe", 14, "var(--text-3)") }}<span class="muted" style="font-size:12.5px">сейчас:</span><span class="mono" id="current">—</span></div>
+        <div class="row gap-2">{{ icon("Hourglass", 14, "var(--nuance-fg)") }}<span style="font-size:12.5px;color:var(--nuance-fg)">троттлинг IA: паузы — это нормально</span></div>
+        <div class="spacer"></div>
+        <div class="row gap-2">
+          <button type="button" class="btn btn--sm" onclick="abortRun({{ r.id }})">{{ icon("Square", 13) }}стоп</button>
+          <a class="btn btn--sm btn--primary" href="/runs/{{ r.id }}">открыть {{ icon("ArrowRight", 13) }}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  <script>
+  (function(){
+    const es = new EventSource("/api/runs/{{ r.id }}/stream");
+    const $ = id => document.getElementById(id);
+    es.onmessage = (ev) => {
+      const s = JSON.parse(ev.data);
+      const pct = s.total ? Math.round(s.processed / s.total * 100) : 0;
+      $("proc").textContent = s.processed;
+      $("pct").textContent = pct;
+      $("bar").style.width = pct + "%";
+      $("current").textContent = s.current || "—";
+      if (s.status !== "running") { es.close(); setTimeout(()=>location.reload(), 800); }
+    };
+  })();
+  async function abortRun(id) {
+    if (!confirm("Остановить поиск? Уже обработанные домены сохранятся.")) return;
+    await fetch("/api/runs/" + id + "/abort", { method: "POST" });
+    location.reload();
+  }
+  </script>
+{% endif %}
+
+{#- ===== Новый поиск ===== -#}
+<section class="card">
+  <div class="card__head">
+    {{ icon("Plus", 16, "var(--accent)") }}
+    <span class="card__title">Новый поиск слепков</span>
+  </div>
+  <div class="card__body col gap-4">
+    <form id="best-form" enctype="multipart/form-data" onsubmit="event.preventDefault(); analyze()">
+      <div class="row gap-4" style="align-items:stretch">
+        <div class="col gap-2" style="flex:1">
+          <div class="field__lbl">домены (по одному в строке или вставка из буфера)</div>
+          <textarea class="input" name="text" style="min-height:150px" placeholder="example.com&#10;blog.foo.co.uk&#10;https://www.site.com/page  → нормализуется до site.com"></textarea>
+        </div>
+        <div class="col gap-3" style="width:280px">
+          <div class="field__lbl">или загрузите файл</div>
+          <label class="dropzone" style="cursor:pointer;display:block">
+            {{ icon("Upload", 20) }}
+            <div class="strong" style="margin-top:8px">Excel · CSV · TXT</div>
+            <div class="muted" style="font-size:12px;margin-top:4px">для Excel/CSV — домены из первого столбца</div>
+            <input type="file" name="file" accept=".txt,.csv,.xlsx" style="display:none" onchange="this.parentNode.nextElementSibling.textContent = this.files[0]?.name || ''">
+          </label>
+          <div class="muted small" style="font-size:11.5px;font-family:var(--font-mono)"></div>
+          <input class="input" id="note-input" placeholder="заметка к поиску (опционально)">
+        </div>
+      </div>
+      <div id="report"></div>
+      <div class="row gap-2" style="border-top:1px dashed var(--divider);padding-top:14px;margin-top:14px">
+        <button type="submit" class="btn btn--sm">{{ icon("ListChecks", 13) }} проверить ввод</button>
+        <span class="muted" style="font-size:12px">параметры поиска — в <a href="/settings">настройках</a>, блок «Лучший слепок»</span>
+        <span class="spacer"></span>
+        <button type="button" id="launch-btn" class="btn btn--sm btn--primary" onclick="launchBest()">{{ icon("Download", 13) }} запустить лучший слепок</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+{#- ===== История поисков ===== -#}
+<section class="card">
+  <div class="card__head">
+    {{ icon("Layers", 16, "var(--text-2)") }}
+    <span class="card__title">История поисков слепков</span>
+    <span class="muted" style="font-size:12.5px;margin-left:4px">· {{ runs|length }}</span>
+  </div>
+  <div class="card__body card__body--p0">
+    {% if not runs %}
+      <div class="empty">
+        <div class="empty__ico">{{ icon("Inbox", 22) }}</div>
+        <div style="font-weight:600;color:var(--text)">Поисков ещё не было</div>
+        <div class="muted" style="max-width:480px">Вставьте домены выше и запустите — по каждому найдётся самая полная копия главной по годам.</div>
+      </div>
+    {% else %}
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th style="width:180px">дата</th>
+            <th style="width:110px">статус</th>
+            <th style="width:90px">домены</th>
+            <th>заметка</th>
+            <th style="width:30px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in runs %}
+            <tr class="row--clickable" onclick="location.href='/runs/{{ r.id }}'">
+              <td>
+                <div class="row gap-3">
+                  {{ icon("History", 14, "var(--text-3)") }}
+                  <span class="mono">{{ r.started_at.strftime('%d.%m.%Y %H:%M') }}</span>
+                </div>
+              </td>
+              <td>{{ status_pill(r.status) }}</td>
+              <td class="mono">{{ r.processed_domains }}/{{ r.total_domains }}</td>
+              <td style="color:var(--text-2);font-size:12.5px">{{ r.note or '—' }}</td>
+              <td style="text-align:right">{{ icon("ChevronRight", 16, "var(--text-3)") }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+</section>
+
+</div>
+
+<script>
+let _validDomains = [];
+async function analyze() {
+  const form = document.getElementById("best-form");
+  const fd = new FormData(form);
+  const r = await fetch("/api/upload", { method: "POST", body: fd });
+  const data = await r.json();
+  _validDomains = data.valid_unique;
+  const rep = document.getElementById("report");
+  const rejBlock = (data.rejected || []).length
+    ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12.5px">отброшено: ${data.dropped}</summary><ul class="mono" style="font-size:12px;color:var(--text-2);margin:6px 0 0;padding-left:22px">${data.rejected.map(x => `<li>${x.original} — ${x.reason}</li>`).join("")}</ul></details>`
+    : "";
+  rep.innerHTML = `<div class="report-bar" style="margin-top:14px">
+    <span>отчёт о загрузке: загружено <b>${data.raw_lines}</b> строк → валидных уникальных <b>${data.valid_unique.length}</b> → отброшено <b>${data.dropped}</b></span>
+  </div>${rejBlock}`;
+  return data;
+}
+async function launchBest() {
+  if (!_validDomains.length) {
+    const data = await analyze();
+    if (!data || !data.valid_unique.length) {
+      alert("Не нашёл валидных доменов в поле или файле. Добавьте хотя бы один.");
+      return;
+    }
+  }
+  const btn = document.getElementById("launch-btn");
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = "Запускаем…";
+  const fd = new FormData();
+  fd.append("domains", _validDomains.join("\n"));
+  fd.append("note", document.getElementById("note-input").value || "");
+  fd.append("mode", "best");
+  const r = await fetch("/api/runs", { method: "POST", body: fd });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    alert("Не удалось запустить (HTTP " + r.status + ")" + (txt ? ":\n" + txt : ""));
+    btn.disabled = false;
+    btn.textContent = prev;
+    return;
+  }
+  const data = await r.json();
+  location.href = data.redirect;
+}
+</script>
+{% endblock %}

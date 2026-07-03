@@ -4,6 +4,8 @@
 {% block title %}{{ domain.domain }} — Web Archive Checker{% endblock %}
 {% block content %}
 
+{% set run_mode = (run.settings_snapshot or {}).get('mode', 'full') %}
+{% set is_best = run_mode == 'best' %}
 {% set has_verdict = domain.verdict in ('clean','nuanced','dirty') %}
 {% set tone = domain.verdict or ('error' if domain.status in ('error','no_data') else 'neutral') %}
 {% set tone_bg = {
@@ -33,6 +35,7 @@
   <div class="row gap-3" style="align-items:center;flex-wrap:wrap">
     <h1 class="mono" style="margin:0;font-size:22px;font-weight:600;color:var(--text-mono);letter-spacing:-0.01em">{{ domain.domain }}</h1>
     <span style="margin-left:8px">{{ verdict_badge(domain.verdict, domain.status) }}</span>
+    {% if is_best %}<span class="badge badge--neutral" style="margin-left:6px">{{ icon("Download", 11) }} режим: лучший слепок</span>{% endif %}
     <span class="spacer"></span>
     <button class="btn btn--sm" onclick="navigator.clipboard.writeText('{{ domain.domain }}'); this.innerHTML = this.innerHTML.replace('копировать','скопировано')">{{ icon("Copy", 13) }} копировать</button>
     <a class="btn btn--sm" href="https://web.archive.org/web/*/{{ domain.domain }}" target="_blank" rel="noopener">{{ icon("ExternalLink", 13) }} открыть в Wayback</a>
@@ -56,11 +59,15 @@
         <div class="row gap-3">
           <div style="font-size:18px;font-weight:600;color:{{ tone_fg }};letter-spacing:-0.01em">{{ tone_label }}</div>
           {% if not has_verdict and domain.status not in ('error','no_data') %}
-            {%- set verdict_was_enabled = run.settings_snapshot and run.settings_snapshot.get('roles',{}).get('verdict') -%}
-            {% if verdict_was_enabled %}
-              <span class="muted" style="font-size:12px">· LLM-вердикт не получен (модель не дала валидный ответ) — ориентируйтесь на флаги</span>
+            {% if is_best %}
+              <span class="muted" style="font-size:12px">· режим «лучший слепок» — вердикт не считается, см. блок ниже</span>
             {% else %}
-              <span class="muted" style="font-size:12px">· LLM-вердикт выключен — ориентируйтесь на флаги</span>
+              {%- set verdict_was_enabled = run.settings_snapshot and run.settings_snapshot.get('roles',{}).get('verdict') -%}
+              {% if verdict_was_enabled %}
+                <span class="muted" style="font-size:12px">· LLM-вердикт не получен (модель не дала валидный ответ) — ориентируйтесь на флаги</span>
+              {% else %}
+                <span class="muted" style="font-size:12px">· LLM-вердикт выключен — ориентируйтесь на флаги</span>
+              {% endif %}
             {% endif %}
           {% endif %}
         </div>

@@ -144,8 +144,48 @@ async def check_api_key(
             return True, "✓ ключ OpenRouter рабочий"
 
     if resp.status_code in (401, 403):
-        return False, f"✗ ключ отклонён (HTTP {resp.status_code}) — неверный ключ или нет прав"
+        # Разбираем тело ошибки. Ключевой кейс OpenAI: ограниченный
+        # project-ключ (sk-proj-…) без scope `model.read` отвечает 401 на
+        # GET /v1/models, ХОТЯ сам ключ валиден и работает для chat. Раньше
+        # мы называли это «неверный ключ» — и оператор путался. Отличаем
+        # «ключ не тот» (invalid_api_key) от «ключ верный, но урезаны права».
+        err = _parse_error_obj(resp)
+        code = str(err.get("code") or "").lower()
+        etype = str(err.get("type") or "").lower()
+        emsg = str(err.get("message") or "").strip()
+        blob = f"{code} {etype} {emsg}".lower()
+        scope_signal = any(
+            s in blob for s in
+            ("insufficient", "permission", "scope", "model.read", "missing scopes")
+        )
+        if scope_signal and "invalid_api_key" not in blob:
+            # Аутентификация прошла — ключ рабочий, но у него нет доступа
+            # к списку моделей. Для генерации (chat/completions) этого
+            # достаточно, если у ключа есть право на chat.
+            return True, (
+                "✓ ключ распознан (аутентификация ОК), но у него урезаны права — "
+                "нет доступа к списку моделей (scope model.read). Для генерации "
+                "этого обычно достаточно; если хотите полную проверку — выдайте "
+                "ключу право model.read на platform.openai.com."
+            )
+        detail = f" — {emsg}" if emsg else " — неверный ключ или нет прав"
+        return False, f"✗ ключ отклонён (HTTP {resp.status_code}){detail}"
+    if resp.status_code == 429:
+        return False, "⚠ провайдер ответил 429 (лимит запросов) — ключ, вероятно, рабочий; повторите проверку чуть позже"
     return False, f"✗ неожиданный ответ провайдера: HTTP {resp.status_code}"
+
+
+def _parse_error_obj(resp: httpx.Response) -> dict[str, Any]:
+    """Достаёт `error` из JSON-ответа провайдера (OpenAI/OpenRouter кладут
+    туда {code,type,message}). Возвращает пустой dict, если тело не JSON."""
+    try:
+        body = resp.json()
+    except Exception:
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    err = body.get("error")
+    return err if isinstance(err, dict) else {}
 
 
 class OpenRouterClient:

@@ -9,6 +9,7 @@ from webarhive.analysis.best_snapshot import (
     _select_candidates,
     epoch_candidates,
     filter_home_page_rows,
+    year_windows,
 )
 from webarhive.cdx.client import CdxRow
 
@@ -55,6 +56,33 @@ def test_select_candidates_keeps_first_last():
     picked = _select_candidates(rows, 3)
     assert picked[0] is rows[0]
     assert picked[-1] is rows[-1]
+
+
+def test_year_windows_one_per_year():
+    rows = [
+        _row("20100101000000", "http://foo.com/"),
+        _row("20100615000000", "http://foo.com/"),
+        _row("20120101000000", "http://foo.com/"),
+        _row("20180101000000", "http://foo.com/"),
+    ]
+    ws = year_windows(rows)
+    assert [w.label for w in ws] == ["2010", "2012", "2018"]
+    # 2010 window spans first→last capture of that year, counts both.
+    y2010 = ws[0]
+    assert y2010.versions == 2
+    assert y2010.period_from == datetime(2010, 1, 1)
+    assert y2010.period_to == datetime(2010, 6, 15)
+
+
+def test_year_windows_max_keeps_most_recent():
+    rows = [_row(f"{y}0101000000", "http://foo.com/")
+            for y in ("2010", "2012", "2018", "2020")]
+    ws = year_windows(rows, max_windows=2)
+    assert [w.label for w in ws] == ["2018", "2020"]
+
+
+def test_year_windows_empty():
+    assert year_windows([]) == []
 
 
 def test_classify_resource_buckets():

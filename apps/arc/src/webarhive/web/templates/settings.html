@@ -222,6 +222,10 @@
     {#- Лимиты -#}
     <section class="col gap-3">
       <div class="section-title" style="margin:0">Лимиты и пороги</div>
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn btn--sm" id="recLimitsBtn">✦ проставить рекомендуемые</button>
+        <span class="muted" style="font-size:12px">баланс полноты и скорости; капы защищают от «часовых» доменов</span>
+      </div>
       <div class="form-grid">
         <div class="field">
           <label class="field__lbl">max_llm_calls_per_domain{{ help_dot("Потолок вызовов LLM на один домен. Если у домена аномально много версий — упрёмся в лимит, проверка помечается «частично». Без лимита один домен с тысячей версий может съесть весь бюджет.") }}</label>
@@ -262,6 +266,10 @@
     {#- CDX cache -#}
     <section class="col gap-3">
       <div class="section-title" style="margin:0">Cross-run CDX-кэш</div>
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn btn--sm" id="recCdxBtn">✦ проставить рекомендуемые</button>
+        <span class="muted" style="font-size:12px">кэш включён · TTL 24 ч</span>
+      </div>
       <label class="toggle {% if fields.cdx_cache_enabled %}toggle--on{% endif %}">
         <input type="checkbox" name="cdx_cache_enabled" value="true" {% if fields.cdx_cache_enabled %}checked{% endif %} style="display:none" onchange="this.parentNode.classList.toggle('toggle--on', this.checked)">
         <span class="toggle__box"></span><span>кэшировать CDX-результаты между прогонами</span>
@@ -281,13 +289,17 @@
     {#- Параллелизм + троттлинг -#}
     <section class="col gap-3">
       <div class="section-title" style="margin:0">Параллелизм и троттлинг IA</div>
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn btn--sm" id="recThrottleBtn">✦ проставить рекомендуемые</button>
+        <span class="muted" style="font-size:12px">ia_rate_limit=1 req/s — безопасно под лимит IA (иначе бан IP на час)</span>
+      </div>
       <div class="form-grid">
         <div class="field">
           <label class="field__lbl">concurrency (доменов одновременно){{ help_dot("Сколько доменов параллельно крутится. Узкое место — Internet Archive троттлит. Дефолт 3–5; больше 8 обычно не имеет смысла, IA начнёт банить.") }}</label>
           <input class="input" type="number" min="1" max="20" name="concurrency" value="{{ fields.concurrency }}">
         </div>
         <div class="field">
-          <label class="field__lbl">ia_rate_limit (req/sec){{ help_dot("Общий вентиль на ВСЕ запросы к Internet Archive (CDX + снапшоты) суммарно по всем параллельным доменам. Если ловите 429 — уменьшите.") }}</label>
+          <label class="field__lbl">ia_rate_limit (req/sec){{ help_dot("Общий вентиль на ВСЕ запросы к Internet Archive (CDX + Availability + снапшоты) суммарно по всем параллельным доменам. ВАЖНО: с конца 2024 IA держит жёсткий лимит ~60 запросов/мин = 1 req/s на CDX; при игнорировании 429 дольше минуты IP банится на 1 час (с удвоением). Дефолт 1.0 — безопасно. Поднимать выше 1–2 рискованно: словите бан IP на час. Если ловите 429 — уменьшите.") }}</label>
           <input class="input" type="number" step="any" name="ia_rate_limit" value="{{ fields.ia_rate_limit }}">
         </div>
       </div>
@@ -323,6 +335,10 @@
     {#- WHOIS -#}
     <section class="col gap-3">
       <div class="section-title" style="margin:0">WHOIS · реальная дата регистрации</div>
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn btn--sm" id="recWhoisBtn">✦ проставить рекомендуемые</button>
+        <span class="muted" style="font-size:12px">под бесплатный план WhoisJSON (20/мин); тумблер не трогаем</span>
+      </div>
       <label class="toggle {% if fields.whois_enabled %}toggle--on{% endif %}">
         <input type="checkbox" name="whois_enabled" value="true" {% if fields.whois_enabled %}checked{% endif %} style="display:none" onchange="this.parentNode.classList.toggle('toggle--on', this.checked)">
         <span class="toggle__box"></span><span>получать дату регистрации через WhoisJSON</span>
@@ -350,6 +366,10 @@
     {#- Best snapshot -#}
     <section class="col gap-3">
       <div class="section-title" style="margin:0">Лучший слепок (Best Snapshot)</div>
+      <div class="row gap-2" style="align-items:center">
+        <button type="button" class="btn btn--sm" id="recBestBtn">✦ проставить рекомендуемые</button>
+        <span class="muted" style="font-size:12px">репрезентативная выборка без «часовых» прогонов; тумблер не трогаем</span>
+      </div>
       <label class="toggle {% if fields.enable_best_snapshot %}toggle--on{% endif %}">
         <input type="checkbox" name="enable_best_snapshot" value="true" {% if fields.enable_best_snapshot %}checked{% endif %} style="display:none" onchange="this.parentNode.classList.toggle('toggle--on', this.checked)">
         <span class="toggle__box"></span><span>искать лучший слепок главной страницы для каждой эпохи</span>
@@ -549,6 +569,60 @@
         picks().forEach(function (sel) { buildSelect(sel, p); });
       });
     }
+
+    // Рекомендуемые значения по блокам (совпадают с дефолтами settings.py).
+    // Кнопка «проставить рекомендуемые» просто заполняет поля блока —
+    // тумблеры (кроме CDX-кэша) не трогаем, чтобы не сбивать намерение.
+    function setField(name, val) {
+      var el = document.querySelector('[name="' + name + '"]');
+      if (!el) return;
+      if (el.type === "checkbox") {
+        el.checked = !!val;
+        if (el.parentNode) el.parentNode.classList.toggle("toggle--on", !!val);
+      } else {
+        el.value = val;
+      }
+    }
+    function bindRec(btnId, values) {
+      var b = document.getElementById(btnId);
+      if (!b) return;
+      b.addEventListener("click", function () {
+        Object.keys(values).forEach(function (k) { setField(k, values[k]); });
+      });
+    }
+    bindRec("recLimitsBtn", {
+      max_llm_calls_per_domain: 40,
+      text_limit: 1000,
+      title_shift_threshold: 2,
+      light_fetch_cap: 120,
+      redirect_cap: 150,
+      redirect_llm_review_cap: 30,
+      llm_parallelism: 16
+    });
+    bindRec("recCdxBtn", {
+      cdx_cache_enabled: true,
+      cdx_cache_ttl_hours: 24
+    });
+    bindRec("recThrottleBtn", {
+      concurrency: 4,
+      ia_rate_limit: 1,
+      ia_backoff: 2,
+      ia_max_retries: 5,
+      per_domain_timeout_sec: 1800
+    });
+    bindRec("recWhoisBtn", {
+      whois_cache_ttl_days: 90,
+      whois_rate_limit: 0.33,
+      whois_monthly_floor: 10
+    });
+    bindRec("recBestBtn", {
+      best_snapshot_top_n: 3,
+      best_snapshot_max_resources: 8,
+      best_snapshot_per_epoch_timeout_sec: 90,
+      best_snapshot_epoch_parallelism: 3,
+      best_snapshot_min_epoch_days: 30,
+      best_snapshot_max_epochs: 10
+    });
 
     // Проверка ключа — без расхода токенов.
     var btn = document.getElementById("checkKeyBtn");

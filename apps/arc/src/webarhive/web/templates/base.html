@@ -32,8 +32,12 @@
     </a>
     <div class="topbar__crumbs">
       {%- set crumbs = crumbs or [] -%}
-      <a href="/" class="crumb {% if not crumbs %}crumb--current{% endif %}">
+      {%- set active_tab = active_tab|default('runs') -%}
+      <a href="/" class="crumb {% if active_tab == 'runs' and not crumbs %}crumb--current{% endif %}">
         <span class="row gap-2">{{ icon("Layers", 13) }}Прогоны</span>
+      </a>
+      <a href="/best" class="crumb {% if active_tab == 'best' and not crumbs %}crumb--current{% endif %}">
+        <span class="row gap-2">{{ icon("Download", 13) }}Лучший слепок</span>
       </a>
       {%- for c in crumbs -%}
         {{ icon("ChevronRight", 13, "var(--text-3)") }}

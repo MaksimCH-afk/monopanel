@@ -62,6 +62,93 @@ from webarhive.logging_.tracer import DomainTracer
 logger = logging.getLogger(__name__)
 
 
+async def _load_cdx_buckets(
+    *,
+    domain: str,
+    match_type: str,
+    snapshot: dict,
+    session_factory: async_sessionmaker,
+    cdx: CdxClient,
+    tracer: "DomainTracer",
+):
+    """Load the 200/3xx/404 CDX buckets for a domain, reusing the
+    cross-run CDX cache when fresh. Shared by the full pipeline and the
+    lean «best copy» tool so both hit the cache identically."""
+    from webarhive.cdx.client import CdxRow
+    from webarhive.db.repo import cdx_cache_get, cdx_cache_put
+    cdx_cache_cfg = snapshot.get("cdx_cache", {}) or {}
+    cdx_cache_enabled = bool(cdx_cache_cfg.get("enabled", True))
+    cdx_cache_ttl_hours = int(cdx_cache_cfg.get("ttl_hours", 24))
+
+    tracer.step("CDX", f"matchType={match_type}")
+    cached = None
+    if cdx_cache_enabled:
+        async with session_factory() as s:
+            cached = await cdx_cache_get(
+                s, domain, match_type, cdx_cache_ttl_hours,
+            )
+    if cached is not None:
+        rows_by_bucket, counts = cached
+        # Defensive: старые записи кэша (до фикса header-row) могут
+        # содержать строку-заголовок CDX в виде "строки". Отсеиваем
+        # любую строку с нечисловым timestamp / литералом "urlkey".
+        def _filter_cache_rows(rows: list[list[str]]) -> list[list[str]]:
+            clean: list[list[str]] = []
+            for r in rows:
+                if not r or len(r) < 2:
+                    continue
+                if r[0] == "urlkey" or r[1] == "timestamp":
+                    continue
+                if not (r[1] and r[1][:8].isdigit()):
+                    continue
+                clean.append(r)
+            return clean
+        cdx_200 = [CdxRow.from_list(r) for r in _filter_cache_rows(rows_by_bucket.get("200", []))]
+        cdx_3xx = [CdxRow.from_list(r) for r in _filter_cache_rows(rows_by_bucket.get("3xx", []))]
+        cdx_404 = [CdxRow.from_list(r) for r in _filter_cache_rows(rows_by_bucket.get("404", []))]
+        tracer.info(
+            f"CDX-кэш HIT: {len(cdx_200)+len(cdx_3xx)+len(cdx_404)} "
+            f"строк из кэша (TTL {cdx_cache_ttl_hours}ч)"
+        )
+    else:
+        # Тянем три бакета (200/3xx/404) параллельно с серверной
+        # фильтрацией: каждая CDX-страница возвращает только нужные
+        # статусы, что на больших архивах (20k+ строк) экономит
+        # ~40-60% трафика и парсинга. 5xx/other не анализируются.
+        # 200-бакет дополнительно ограничен mimetype:text/html —
+        # тематику строим только из HTML главной, поэтому feed/
+        # wp-json/CSS/JSON-API не нужны и не должны раздувать payload.
+        cdx_200, cdx_3xx, cdx_404 = await asyncio.gather(
+            cdx.fetch_all(domain, match_type=match_type,
+                          filters=("statuscode:200", "mimetype:text/html")),
+            cdx.fetch_all(domain, match_type=match_type,
+                          filters=("statuscode:3..",)),
+            cdx.fetch_all(domain, match_type=match_type,
+                          filters=("statuscode:404",)),
+        )
+        if cdx_cache_enabled:
+            # Сериализуем как массивы строк, идентично формату из
+            # CDX API — чтобы при чтении восстановить через
+            # CdxRow.from_list без дополнительной логики.
+            rows_by_bucket = {
+                "200": [list(_cdx_to_list(r)) for r in cdx_200],
+                "3xx": [list(_cdx_to_list(r)) for r in cdx_3xx],
+                "404": [list(_cdx_to_list(r)) for r in cdx_404],
+            }
+            async with session_factory() as s:
+                await cdx_cache_put(
+                    s, domain, match_type,
+                    rows_by_bucket=rows_by_bucket,
+                    bucket_counts={
+                        "200": len(cdx_200),
+                        "3xx": len(cdx_3xx),
+                        "404": len(cdx_404),
+                    },
+                )
+                await s.commit()
+    return cdx_200, cdx_3xx, cdx_404
+
+
 async def process_domain(
     *,
     domain_row: Domain,
@@ -129,81 +216,13 @@ async def process_domain(
 
     try:
         # --- CDX ---
-        # Cross-run кэш: если за последние ttl_hours тот же домен уже
-        # сканировался, переиспользуем результат без обращения к IA.
-        # Полезно когда оператор тестит настройки / перезапускает прогон.
-        from webarhive.cdx.client import CdxRow
-        from webarhive.db.repo import cdx_cache_get, cdx_cache_put
-        cdx_cache_cfg = snapshot.get("cdx_cache", {}) or {}
-        cdx_cache_enabled = bool(cdx_cache_cfg.get("enabled", True))
-        cdx_cache_ttl_hours = int(cdx_cache_cfg.get("ttl_hours", 24))
-
-        tracer.step("CDX", f"matchType={match_type}")
-        cached = None
-        if cdx_cache_enabled:
-            async with session_factory() as s:
-                cached = await cdx_cache_get(
-                    s, domain_row.domain, match_type, cdx_cache_ttl_hours,
-                )
-        if cached is not None:
-            rows_by_bucket, counts = cached
-            # Defensive: старые записи кэша (до фикса header-row) могут
-            # содержать строку-заголовок CDX в виде "строки". Отсеиваем
-            # любую строку с нечисловым timestamp / литералом "urlkey".
-            def _filter_cache_rows(rows: list[list[str]]) -> list[list[str]]:
-                clean: list[list[str]] = []
-                for r in rows:
-                    if not r or len(r) < 2:
-                        continue
-                    if r[0] == "urlkey" or r[1] == "timestamp":
-                        continue
-                    if not (r[1] and r[1][:8].isdigit()):
-                        continue
-                    clean.append(r)
-                return clean
-            cdx_200 = [CdxRow.from_list(r) for r in _filter_cache_rows(rows_by_bucket.get("200", []))]
-            cdx_3xx = [CdxRow.from_list(r) for r in _filter_cache_rows(rows_by_bucket.get("3xx", []))]
-            cdx_404 = [CdxRow.from_list(r) for r in _filter_cache_rows(rows_by_bucket.get("404", []))]
-            tracer.info(
-                f"CDX-кэш HIT: {len(cdx_200)+len(cdx_3xx)+len(cdx_404)} "
-                f"строк из кэша (TTL {cdx_cache_ttl_hours}ч)"
-            )
-        else:
-            # Тянем три бакета (200/3xx/404) параллельно с серверной
-            # фильтрацией: каждая CDX-страница возвращает только нужные
-            # статусы, что на больших архивах (20k+ строк) экономит
-            # ~40-60% трафика и парсинга. 5xx/other не анализируются.
-            # 200-бакет дополнительно ограничен mimetype:text/html —
-            # тематику строим только из HTML главной, поэтому feed/
-            # wp-json/CSS/JSON-API не нужны и не должны раздувать payload.
-            cdx_200, cdx_3xx, cdx_404 = await asyncio.gather(
-                cdx.fetch_all(domain_row.domain, match_type=match_type,
-                              filters=("statuscode:200", "mimetype:text/html")),
-                cdx.fetch_all(domain_row.domain, match_type=match_type,
-                              filters=("statuscode:3..",)),
-                cdx.fetch_all(domain_row.domain, match_type=match_type,
-                              filters=("statuscode:404",)),
-            )
-            if cdx_cache_enabled:
-                # Сериализуем как массивы строк, идентично формату из
-                # CDX API — чтобы при чтении восстановить через
-                # CdxRow.from_list без дополнительной логики.
-                rows_by_bucket = {
-                    "200": [list(_cdx_to_list(r)) for r in cdx_200],
-                    "3xx": [list(_cdx_to_list(r)) for r in cdx_3xx],
-                    "404": [list(_cdx_to_list(r)) for r in cdx_404],
-                }
-                async with session_factory() as s:
-                    await cdx_cache_put(
-                        s, domain_row.domain, match_type,
-                        rows_by_bucket=rows_by_bucket,
-                        bucket_counts={
-                            "200": len(cdx_200),
-                            "3xx": len(cdx_3xx),
-                            "404": len(cdx_404),
-                        },
-                    )
-                    await s.commit()
+        # Cross-run кэш и серверная фильтрация — внутри _load_cdx_buckets
+        # (общий с lean-режимом «лучший слепок»).
+        cdx_200, cdx_3xx, cdx_404 = await _load_cdx_buckets(
+            domain=domain_row.domain, match_type=match_type,
+            snapshot=snapshot, session_factory=session_factory,
+            cdx=cdx, tracer=tracer,
+        )
         cdx_rows = cdx_200 + cdx_3xx + cdx_404
         # Sort by timestamp so downstream (history, gap detection) sees
         # the same chronological order as a single unfiltered fetch.
@@ -733,6 +752,256 @@ async def process_domain(
             await s.commit()
 
 
+async def process_domain_best_only(
+    *,
+    domain_row: Domain,
+    run_id: int,
+    snapshot: dict,
+    session_factory: async_sessionmaker,
+    cdx: CdxClient,
+    fetcher: SnapshotFetcher,
+    llm: OpenRouterClient | None = None,   # не используется, для единого вызова
+    whois_client=None,                     # не используется
+    http: httpx.AsyncClient | None = None,
+    throttle: IAThrottle | None = None,
+) -> None:
+    """Lean-пайплайн «лучший слепок» (mode=best).
+
+    Отдельный инструмент: находит наиболее полную сохранённую копию
+    ГЛАВНОЙ страницы по каждому календарному году архива. Использует
+    ровно те же проверки, что и best-snapshot в полном прогоне
+    (полнота ресурсов через Availability API + целостность HTML), но
+    БЕЗ LLM-тематики, редиректов, дропов и вердикта. Периоды строятся
+    из таймстемпов CDX (year_windows), а не из тем.
+    """
+    from webarhive.analysis.best_snapshot import (
+        best_snapshot_for_epoch,
+        epoch_candidates,
+        filter_home_page_rows,
+        year_windows,
+    )
+
+    async def _flush_trace(text: str) -> None:
+        try:
+            async with session_factory() as s:
+                d_row = await s.get(Domain, domain_row.id)
+                if d_row is not None:
+                    d_row.trace = text
+                    await s.commit()
+        except Exception:
+            logger.exception("trace flush failed for %s", domain_row.domain)
+
+    tracer = DomainTracer(domain_row.domain, flush_fn=_flush_trace)
+    started_at = datetime.utcnow()
+
+    inp = snapshot.get("input", {}) or {}
+    match_type = "host" if inp.get("check_subdomains") else "domain"
+
+    bs_cfg = snapshot.get("best_snapshot", {}) or {}
+    top_n = int(bs_cfg.get("top_n", 3))
+    max_res = int(bs_cfg.get("max_resources_per_candidate", 8))
+    per_epoch_timeout = float(bs_cfg.get("per_epoch_timeout_sec", 90))
+    epoch_parallelism = max(1, int(bs_cfg.get("epoch_parallelism", 3)))
+    max_epochs = max(1, int(bs_cfg.get("max_epochs", 10)))
+
+    async with session_factory() as s:
+        d = await s.get(Domain, domain_row.id)
+        if d is None:
+            return
+        d.status = DomainStatus.RUNNING.value
+        d.started_at = started_at
+        await s.commit()
+
+    final_status = DomainStatus.DONE
+    error_message: str | None = None
+    history = None
+    deduped_live: list = []
+    window_best: dict[int, object] = {}
+    windows: list = []
+    any_failed = False
+
+    try:
+        cdx_200, cdx_3xx, cdx_404 = await _load_cdx_buckets(
+            domain=domain_row.domain, match_type=match_type,
+            snapshot=snapshot, session_factory=session_factory,
+            cdx=cdx, tracer=tracer,
+        )
+        cdx_rows = cdx_200 + cdx_3xx + cdx_404
+        cdx_rows.sort(key=lambda r: r.timestamp)
+        history = summarize_history(cdx_rows)
+
+        # digest-дедуп 200-версий (как в полном прогоне) — для честного
+        # счётчика версий в карточке.
+        seen_digest: set[str] = set()
+        for r in history.live_versions:
+            if r.digest and r.digest in seen_digest:
+                continue
+            if r.digest:
+                seen_digest.add(r.digest)
+            deduped_live.append(r)
+        history.by_bucket["200"] = deduped_live
+
+        tracer.cdx_summary(
+            total=len(cdx_rows),
+            after_collapse=len(cdx_rows),
+            buckets={"200": len(cdx_200), "3xx": len(cdx_3xx),
+                     "404": len(cdx_404), "5xx": 0, "other": 0},
+        )
+
+        if not cdx_rows:
+            final_status = DomainStatus.NO_DATA
+            tracer.warn("домена нет в архиве — нет данных для анализа")
+        else:
+            home_rows = filter_home_page_rows(cdx_rows, domain_row.domain)
+            windows = year_windows(home_rows, max_windows=max_epochs)
+            if not windows:
+                tracer.warn(
+                    "не нашёл рабочих (200) снимков ГЛАВНОЙ страницы — "
+                    "лучший слепок строить не из чего"
+                )
+            else:
+                tracer.step(
+                    "ЛУЧШИЙ СЛЕПОК",
+                    f"{len(windows)} годовых окон · top_n={top_n} "
+                    f"· ресурсов/кандидат={max_res}",
+                )
+                if http is None or throttle is None:
+                    tracer.warn("нет http/throttle — пропускаю лучший слепок")
+                else:
+                    bs_sem = asyncio.Semaphore(epoch_parallelism)
+
+                    async def _bs_progress(msg: str) -> None:
+                        tracer.info(msg)
+
+                    async def _process_window(i: int, w) -> None:
+                        nonlocal any_failed
+                        cands = epoch_candidates(
+                            home_rows, w.period_from, w.period_to)
+                        if not cands:
+                            return
+                        async with bs_sem:
+                            try:
+                                best = await asyncio.wait_for(
+                                    best_snapshot_for_epoch(
+                                        epoch_idx=i, candidates=cands,
+                                        source_domain=domain_row.domain,
+                                        fetcher=fetcher, cdx=cdx,
+                                        http=http, throttle=throttle,
+                                        top_n=top_n,
+                                        max_resources_per_candidate=max_res,
+                                        progress=_bs_progress,
+                                    ),
+                                    timeout=per_epoch_timeout,
+                                )
+                            except asyncio.TimeoutError:
+                                any_failed = True
+                                tracer.warn(
+                                    f"{w.label}: лучший слепок превысил "
+                                    f"{per_epoch_timeout:.0f}s — пропускаю"
+                                )
+                                return
+                            except Exception as exc:
+                                any_failed = True
+                                tracer.warn(f"{w.label}: сбой — {type(exc).__name__}")
+                                return
+                        if best is not None:
+                            window_best[i] = best
+                            tracer.info(
+                                f"{w.label}: лучший слепок {best.timestamp[:8]} "
+                                f"· score {best.score:.2f}"
+                            )
+
+                    await asyncio.gather(
+                        *(_process_window(i, w) for i, w in enumerate(windows))
+                    )
+
+        # --- Persist ---
+        async with session_factory() as s:
+            d = await s.get(Domain, domain_row.id)
+            assert d is not None
+            if history is not None:
+                d.first_capture_at = history.first_capture_at
+                d.last_capture_at = history.last_capture_at
+                d.age_days = history.age_days
+                d.total_captures = history.total_captures
+                d.total_versions = len(deduped_live) + len(history.redirect_rows)
+            # Вердикт в этом режиме не выставляем.
+            d.verdict = None
+            d.verdict_reason = "режим «лучший слепок» — вердикт не считается"
+
+            for i, w in enumerate(windows):
+                bs = window_best.get(i)
+                s.add(Epoch(
+                    domain_id=d.id,
+                    period_from=w.period_from,
+                    period_to=w.period_to,
+                    category=w.label,
+                    confidence=None,
+                    reason=f"{w.versions} снимков главной за период",
+                    sample_snapshot_url=(bs.snapshot_url_human if bs else ""),
+                    versions_in_epoch=w.versions,
+                    best_snapshot_url=(bs.snapshot_url_human if bs else None),
+                    best_snapshot_ts=(bs.timestamp if bs else None),
+                    best_snapshot_score=(bs.score if bs else None),
+                    best_snapshot_detail=({
+                        "resources_total": bs.resources_total,
+                        "resources_archived": bs.resources_archived,
+                        "by_type": bs.by_type,
+                        "integrity": bs.integrity,
+                        "missing": bs.missing,
+                    } if bs else None),
+                ))
+
+            if final_status is DomainStatus.NO_DATA:
+                d.status = DomainStatus.NO_DATA.value
+            elif any_failed:
+                # Часть годовых окон не дала слепок (таймаут/сбой) —
+                # помечаем PARTIAL, чтобы оператор видел неполноту.
+                d.status = DomainStatus.PARTIAL.value
+                final_status = DomainStatus.PARTIAL
+            else:
+                d.status = final_status.value
+            d.finished_at = datetime.utcnow()
+            await s.commit()
+
+        tracer.finish(
+            age_days=history.age_days if history else None,
+            epochs=len(windows),
+            flags=0,
+            verdict=None,
+            partial=(final_status is DomainStatus.PARTIAL),
+        )
+
+    except Exception as exc:
+        logger.exception("best-only pipeline failed for %s", domain_row.domain)
+        tracer.error(f"ошибка пайплайна: {type(exc).__name__}: {exc}")
+        final_status = DomainStatus.ERROR
+        error_message = f"{type(exc).__name__}: {exc}"
+    finally:
+        await tracer.drain()
+        async with session_factory() as s:
+            d = await s.get(Domain, domain_row.id)
+            if d is not None:
+                d.trace = tracer.text()
+                if history is not None and d.total_captures in (None, 0):
+                    d.first_capture_at = history.first_capture_at
+                    d.last_capture_at = history.last_capture_at
+                    d.age_days = history.age_days
+                    d.total_captures = history.total_captures
+                    d.total_versions = (
+                        len(deduped_live) + len(history.redirect_rows)
+                    )
+                if final_status is DomainStatus.ERROR:
+                    d.status = DomainStatus.ERROR.value
+                    d.error_message = error_message
+                    d.finished_at = datetime.utcnow()
+                await increment_run_counters(
+                    s, run_id, verdict=None,
+                    error=(final_status is DomainStatus.ERROR),
+                )
+            await s.commit()
+
+
 def _safe_parse(ts: str):
     from webarhive.analysis.history import _parse_ts
     return _parse_ts(ts)
@@ -788,6 +1057,10 @@ async def run_pipeline(
     concurrency = settings_snapshot["throttle"]["concurrency"]
     max_retries = settings_snapshot["throttle"]["ia_max_retries"]
     backoff = settings_snapshot["throttle"]["ia_backoff"]
+    # Режим прогона: "full" (полный анализ) или "best" (только лучший
+    # слепок главной по годам, без LLM). Хранится в снапшоте прогона.
+    mode = (settings_snapshot.get("mode") or "full").strip().lower()
+    domain_fn = process_domain_best_only if mode == "best" else process_domain
 
     # Pick up work
     async with session_factory() as s:
@@ -852,7 +1125,7 @@ async def run_pipeline(
                 async with semaphore:
                     try:
                         await asyncio.wait_for(
-                            process_domain(
+                            domain_fn(
                                 domain_row=d,
                                 run_id=run_id,
                                 snapshot=settings_snapshot,

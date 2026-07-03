@@ -335,3 +335,53 @@ def epoch_candidates(
             out.append(r)
     out.sort(key=lambda r: r.timestamp)
     return out
+
+
+@dataclass
+class TimeWindow:
+    """A time slice to search for a best snapshot in. Used by the
+    standalone «best copy» tool, which builds windows purely from CDX
+    timestamps (no LLM topic classification)."""
+    period_from: datetime
+    period_to: datetime
+    label: str
+    versions: int = 0
+
+
+def year_windows(
+    rows: Sequence[CdxRow], *, max_windows: int | None = None,
+) -> list[TimeWindow]:
+    """Split home-page CDX rows into one window per calendar year that
+    actually has captures.
+
+    Unlike topic epochs (which need the LLM), these windows are a pure
+    function of capture timestamps — the «best copy» tool uses them to
+    find the most complete home-page snapshot for each year without any
+    topic/verdict analysis.
+
+    `rows` must already be filtered to home-page 200s (see
+    `filter_home_page_rows`). Windows are returned chronologically. When
+    `max_windows` is set and there are more years than that, the MOST
+    RECENT `max_windows` years are kept (recent state is usually what an
+    operator wants to restore) — the caller should log the drop.
+    """
+    by_year: dict[int, list[datetime]] = {}
+    for r in rows:
+        ts = _ts_to_dt(r.timestamp)
+        if ts is None:
+            continue
+        by_year.setdefault(ts.year, []).append(ts)
+
+    windows: list[TimeWindow] = []
+    for year in sorted(by_year):
+        stamps = by_year[year]
+        windows.append(TimeWindow(
+            period_from=min(stamps),
+            period_to=max(stamps),
+            label=str(year),
+            versions=len(stamps),
+        ))
+
+    if max_windows is not None and len(windows) > max_windows:
+        windows = windows[-max_windows:]  # keep most recent years
+    return windows

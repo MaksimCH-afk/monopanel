@@ -63,6 +63,16 @@ async def test_help_page_renders(app):
         assert "Лента эпох" in r.text
 
 
+async def test_best_page_renders(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/best")
+        assert r.status_code == 200
+        assert "Новый поиск слепков" in r.text
+        # nav tab present and marked current
+        assert 'href="/best"' in r.text
+
+
 async def test_settings_page_renders(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

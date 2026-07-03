@@ -115,7 +115,40 @@ async def main_page(request: Request):
         request,
         "main.html",
         {"runs": runs, "settings": get_settings(),
-         "running_run": running_run, "current_domain": current_domain},
+         "running_run": running_run, "current_domain": current_domain,
+         "active_tab": "runs"},
+    )
+
+
+def _is_best_run(run: Run) -> bool:
+    return (run.settings_snapshot or {}).get("mode") == "best"
+
+
+@html_router.get("/best", response_class=HTMLResponse)
+async def best_page(request: Request):
+    """Отдельный инструмент «лучший слепок» — своя вкладка. Тот же ввод
+    доменов, но запускает облегчённый режим (mode=best): только поиск
+    самой полной копии главной по годам, без LLM/тем/редиректов/вердикта."""
+    async with get_session() as s:
+        all_runs = (await s.execute(
+            select(Run).order_by(desc(Run.started_at)).limit(200))).scalars().all()
+        runs = [r for r in all_runs if _is_best_run(r)]
+        running_run = next(
+            (r for r in runs if r.status == RunStatus.RUNNING.value), None)
+        current_domain = None
+        if running_run is not None:
+            current_domain = (await s.execute(
+                select(Domain.domain).where(
+                    Domain.run_id == running_run.id,
+                    Domain.status == DomainStatus.RUNNING.value,
+                ).limit(1)
+            )).scalar_one_or_none()
+    return get_templates(request).TemplateResponse(
+        request,
+        "best.html",
+        {"runs": runs, "settings": get_settings(),
+         "running_run": running_run, "current_domain": current_domain,
+         "active_tab": "best"},
     )
 
 
@@ -490,13 +523,23 @@ async def api_create_run(
     request: Request,
     domains: Annotated[str, Form()],  # newline-separated
     note: Annotated[str, Form()] = "",
+    mode: Annotated[str, Form()] = "full",
 ):
     settings = get_settings()
     names = [ln.strip() for ln in domains.splitlines() if ln.strip()]
     if not names:
         raise HTTPException(400, "no domains")
+    mode = (mode or "full").strip().lower()
+    if mode not in ("full", "best"):
+        mode = "full"
     snap = settings.snapshot()
-    run_id = await start_run(domains=names, settings_snapshot=snap, note=note or None)
+    # Режим прогона едет в снапшоте — так он честно фиксируется в истории
+    # и переиспользуется при «повторить прогон».
+    snap["mode"] = mode
+    note_final = note or None
+    if mode == "best":
+        note_final = ("лучший слепок" + (f" · {note}" if note else ""))
+    run_id = await start_run(domains=names, settings_snapshot=snap, note=note_final)
 
     # Kick off the pipeline in the background.
     task = asyncio.create_task(run_pipeline(
