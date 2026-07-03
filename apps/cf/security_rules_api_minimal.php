@@ -91,7 +91,12 @@ try {
             $result = deployWorkerWithConfig($pdo, $userId, $_POST);
             echo json_encode($result);
             break;
-            
+
+        case 'deploy_custom_worker':
+            $result = deployCustomWorker($pdo, $userId, $_POST);
+            echo json_encode($result);
+            break;
+
         case 'debug_info':
             echo json_encode([
                 'success' => true,
@@ -602,6 +607,64 @@ function deployWorker($pdo, $userId, $data) {
     }
 
     return ['success' => $applied > 0, 'applied' => $applied, 'total' => count($domainIds), 'template' => $template, 'errors' => $errors];
+}
+
+/**
+ * Развернуть ПОЛЬЗОВАТЕЛЬСКИЙ (кастомный) Worker на выбранный домен.
+ * Скрипт заливается как есть (без подстановки шаблонных {{...}}), маршрут —
+ * произвольный паттерн CF (пример: example.com/*, *.example.com/*, example.com/api/*).
+ */
+function deployCustomWorker($pdo, $userId, $data) {
+    $domainId = (int)($data['domain_id'] ?? 0);
+    $route    = trim($data['route'] ?? '');
+    $script   = (string)($data['script'] ?? '');
+
+    if ($domainId <= 0)          return ['success' => false, 'error' => 'Не выбран домен'];
+    if (trim($script) === '')    return ['success' => false, 'error' => 'Пустой код Worker — вставьте скрипт'];
+    // Базовая защита от мусора: у воркера должен быть обработчик запросов.
+    if (stripos($script, 'addEventListener') === false && stripos($script, 'export default') === false) {
+        return ['success' => false, 'error' => 'Код не похож на Worker: нужен либо addEventListener("fetch", …), либо export default { fetch(…) }'];
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT ca.*, cc.email, cc.api_key, cc.auth_type
+        FROM cloudflare_accounts ca
+        JOIN cloudflare_credentials cc ON ca.account_id = cc.id
+        WHERE ca.id = ? AND ca.user_id = ?
+    ");
+    $stmt->execute([$domainId, $userId]);
+    $domain = $stmt->fetch();
+    if (!$domain) return ['success' => false, 'error' => 'Домен не найден'];
+
+    $proxies = getProxies($pdo, $userId);
+
+    // Маршрут: пусто/'*' = весь домен (домен/*); {{domain}} подставляем именем домена.
+    if ($route === '' || $route === '*') {
+        $routePattern = $domain['domain'] . '/*';
+    } else {
+        $routePattern = str_replace('{{domain}}', $domain['domain'], $route);
+    }
+
+    $credentials = ['email' => $domain['email'], 'api_key' => $domain['api_key'], 'auth_type' => $domain['auth_type'] ?? null];
+    // id=null + пустой config → generateWorkerScript вернёт скрипт как есть (без {{...}}).
+    $templateRow = ['id' => null, 'name' => 'custom', 'script' => $script];
+
+    $apply = cloudflareApplyWorkerTemplate($pdo, $userId, $domain, $credentials, $templateRow, $routePattern, $proxies, []);
+    if (empty($apply['success'])) {
+        return ['success' => false, 'error' => $apply['error'] ?? 'Не удалось развернуть Worker', 'details' => $apply['details'] ?? null];
+    }
+
+    saveSecurityRule($pdo, $userId, $domainId, 'worker', json_encode([
+        'template' => 'custom',
+        'route' => $apply['pattern'] ?? $routePattern
+    ]));
+
+    return [
+        'success' => true,
+        'domain'  => $domain['domain'],
+        'pattern' => $apply['pattern'] ?? $routePattern,
+        'route_id' => $apply['route_id'] ?? null,
+    ];
 }
 
 // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===

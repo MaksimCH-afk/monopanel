@@ -473,6 +473,62 @@ $stats = $statsStmt->fetch();
 
                 <!-- Workers -->
                 <div class="tab-pane fade" id="worker-manager" role="tabpanel">
+                    <!-- ============ Свой (кастомный) Worker ============ -->
+                    <div class="card border-primary mb-4">
+                        <div class="card-header bg-primary text-white py-2 d-flex align-items-center">
+                            <i class="fas fa-code me-2"></i>
+                            <span class="fw-bold">Свой Worker</span>
+                            <span class="ms-2 small opacity-75">— выберите домен, задайте маршрут и вставьте код воркера</span>
+                        </div>
+                        <div class="card-body p-3">
+                            <div class="row g-3">
+                                <div class="col-md-5">
+                                    <label class="form-label small fw-bold">Домен</label>
+                                    <select class="form-select" id="customWorkerDomain">
+                                        <option value="">— выберите домен —</option>
+                                        <?php foreach ($domains as $domain): ?>
+                                            <option value="<?php echo $domain['id']; ?>" data-domain="<?php echo htmlspecialchars($domain['domain']); ?>"><?php echo htmlspecialchars($domain['domain']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-7">
+                                    <label class="form-label small fw-bold">Маршрут (Route)</label>
+                                    <input type="text" class="form-control" id="customWorkerRoute" placeholder="example.com/*" spellcheck="false" autocapitalize="off" autocomplete="off">
+                                    <small class="text-muted">
+                                        Как в Cloudflare: <code>*</code> — любой поддомен/путь, <code>/</code> — разделитель.
+                                        Примеры: <code>example.com/*</code> (весь сайт), <code>*.example.com/*</code> (все поддомены),
+                                        <code>example.com/api/*</code> (только /api). Выберите домен — подставлю <code>домен/*</code> автоматически.
+                                    </small>
+                                </div>
+                                <div class="col-12">
+                                    <div class="d-flex justify-content-between align-items-end mb-1">
+                                        <label class="form-label small fw-bold mb-0">Код Worker</label>
+                                        <span class="small text-muted" id="customWorkerCharCount">0 симв.</span>
+                                    </div>
+                                    <textarea class="form-control font-monospace" id="customWorkerScript" rows="18" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"
+                                        style="min-height:340px; resize:vertical; font-size:.82rem; line-height:1.45; white-space:pre; overflow:auto; tab-size:2;"
+                                        placeholder="export default {&#10;  async fetch(request, env, ctx) {&#10;    return new Response('Hello from Worker', { status: 200 });&#10;  }&#10;};&#10;&#10;// или классический синтаксис:&#10;// addEventListener('fetch', (event) => { event.respondWith(handle(event.request)); });"></textarea>
+                                    <small class="text-muted">Поддерживаются оба формата: <code>export default { fetch }</code> (модульный) и <code>addEventListener('fetch', …)</code> (service worker).</small>
+                                </div>
+                                <div class="col-12 d-flex gap-2">
+                                    <button class="btn btn-primary" onclick="deployCustomWorker()">
+                                        <i class="fas fa-rocket me-2"></i>Создать и применить Worker
+                                    </button>
+                                    <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('customWorkerScript').value=''; document.getElementById('customWorkerScript').dispatchEvent(new Event('input'));">
+                                        Очистить
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="alert alert-warning small mt-3 mb-0 py-2">
+                                <i class="fas fa-key me-1"></i>
+                                Нужны права токена: <strong>Workers Scripts: Edit</strong> (аккаунт) + <strong>Workers Routes: Edit</strong> (зона) + <strong>Account Settings: Read</strong>. Скрипт заливается на аккаунт и привязывается маршрутом к зоне выбранного домена.
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+                    <h6 class="text-muted mb-3"><i class="fas fa-file-code me-2"></i>Или готовый шаблон:</h6>
+
                     <div class="row">
                         <!-- Выбор шаблона -->
                         <div class="col-md-3">

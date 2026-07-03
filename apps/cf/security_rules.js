@@ -1525,6 +1525,65 @@ function deployWorkerWithConfig() {
     });
 }
 
+// ============ Свой (кастомный) Worker ============
+function deployCustomWorker() {
+    const sel = document.getElementById('customWorkerDomain');
+    const domainId = sel ? sel.value : '';
+    const route = (document.getElementById('customWorkerRoute')?.value || '').trim();
+    const script = document.getElementById('customWorkerScript')?.value || '';
+
+    if (!domainId) { showError('Выберите домен'); return; }
+    if (!script.trim()) { showError('Вставьте код Worker'); return; }
+
+    const domainName = sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '';
+    const pattern = route || (domainName ? domainName + '/*' : '*');
+    if (!confirm(`Создать Worker и применить к маршруту «${pattern}» (домен ${domainName})?`)) return;
+
+    showLoading('Создание и применение Worker…');
+    $.post('security_rules_api_minimal.php', {
+        action: 'deploy_custom_worker',
+        domain_id: domainId,
+        route: route,
+        script: script
+    })
+    .done(function(response) {
+        hideLoading();
+        if (response.success) {
+            showSuccess(`Worker создан и применён: ${response.pattern || pattern}`);
+        } else {
+            showError(response.error || 'Ошибка развертывания Worker');
+        }
+    })
+    .fail(function(xhr) {
+        hideLoading();
+        console.error('Custom worker deploy error:', xhr.responseText);
+        showError('Ошибка соединения с сервером');
+    });
+}
+
+// Автозаполнение маршрута именем домена + счётчик символов кода
+$(function () {
+    const $sel = $('#customWorkerDomain');
+    const $route = $('#customWorkerRoute');
+    if ($sel.length && $route.length) {
+        $sel.on('change', function () {
+            const d = this.options[this.selectedIndex]?.getAttribute('data-domain') || '';
+            const cur = ($route.val() || '').trim();
+            // Подставляем домен/* только если поле пустое или там прежний авто-паттерн (…/*).
+            if (d && (cur === '' || /\/\*$/.test(cur))) {
+                $route.val(d + '/*');
+            }
+        });
+    }
+    const $ta = $('#customWorkerScript');
+    const $counter = $('#customWorkerCharCount');
+    if ($ta.length && $counter.length) {
+        const upd = () => $counter.text($ta.val().length.toLocaleString('ru-RU') + ' симв.');
+        $ta.on('input', upd);
+        upd();
+    }
+});
+
 // Debounce функция для оптимизации
 function debounce(func, wait) {
     let timeout;
