@@ -7,6 +7,7 @@
  */
 require_once 'config.php';
 require_once 'functions.php';
+require_once 'db_retry.php';
 
 header('Content-Type: application/json; charset=utf-8');
 $userId = $_SESSION['user_id'] ?? 1;
@@ -327,7 +328,11 @@ try {
                     if ($zoneId === '') continue;
                     $chk = cloudflareApiRequestDetailed($pdo, $c['email'], $c['api_key'], "zones/$zoneId/dns_records?per_page=1", 'GET', [], $proxies, null, $c['auth_type'] ?? null);
                     if (empty($chk['success'])) continue;
-                    $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$c['id'], $zoneId, $domainId, $userId]);
+                    // Перепривязка — с повтором при «database is locked» (фоновые cf-queue/cf-monitor
+                    // могут держать запись в момент клика «Перевыпустить»).
+                    dbRetryOnLock(function () use ($pdo, $c, $zoneId, $domainId, $userId) {
+                        $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$c['id'], $zoneId, $domainId, $userId]);
+                    });
                     $bound = $c; $boundZone = $zoneId;
                     break;
                 }
@@ -377,10 +382,14 @@ try {
                     if (!$c->fetchColumn()) break;
                     $email = $base . ' #' . $i; $i++;
                 }
-                $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
+                dbRetryOnLock(function () use ($pdo, $userId, $email, $tok) {
+                    $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
+                });
                 $credId = (int)$pdo->lastInsertId();
             }
-            $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $zoneId, $domainId, $userId]);
+            dbRetryOnLock(function () use ($pdo, $credId, $zoneId, $domainId, $userId) {
+                $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $zoneId, $domainId, $userId]);
+            });
             logAction($pdo, $userId, 'Перевыпущен токен домена', "{$domName}: новый токен, зона {$zoneId}, DNS доступ: да");
             echo json_encode(['success' => true, 'domain' => $domName, 'zone_ok' => true, 'dns_ok' => true, 'masked' => mb_substr($tok, 0, 10) . '…' . mb_substr($tok, -4)]);
             break;
@@ -556,5 +565,11 @@ try {
             throw new Exception('Неизвестное действие');
     }
 } catch (Exception $e) {
+    // Фиксируем сбой в разделе «Логи» (logAction сам повторит запись при блокировке БД),
+    // чтобы ошибки вроде «database is locked» были видны в панели, а не только в тосте.
+    if (isset($pdo)) {
+        $act = $action !== '' ? $action : 'master_token_api';
+        logActionSafe($pdo, $userId ?? 1, 'Ошибка перевыпуска/операции токена', "{$act}: " . $e->getMessage());
+    }
     echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }

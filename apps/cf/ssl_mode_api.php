@@ -6,6 +6,7 @@
  */
 require_once 'config.php';
 require_once 'functions.php';
+require_once 'db_retry.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -36,17 +37,25 @@ try {
         $zoneResp = cloudflareApiRequest($pdo, $domain['email'], $domain['api_key'], "zones?name={$domain['domain']}", 'GET', [], $proxies, $userId);
         if (!$zoneResp || empty($zoneResp->result)) throw new Exception('Zone ID не найден');
         $zoneId = $zoneResp->result[0]->id;
-        $pdo->prepare("UPDATE cloudflare_accounts SET zone_id = ? WHERE id = ?")->execute([$zoneId, $domainId]);
+        dbRetryOnLock(function () use ($pdo, $zoneId, $domainId) {
+            $pdo->prepare("UPDATE cloudflare_accounts SET zone_id = ? WHERE id = ?")->execute([$zoneId, $domainId]);
+        });
     }
 
     $resp = cloudflareApiRequestDetailed($pdo, $domain['email'], $domain['api_key'], "zones/$zoneId/settings/ssl", 'PATCH', ['value' => $mode], $proxies, $userId);
     if (!$resp['success']) throw new Exception('Cloudflare отклонил смену режима: ' . cfReadableError($resp));
 
-    $pdo->prepare("UPDATE cloudflare_accounts SET ssl_mode = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")->execute([$mode, $domainId, $userId]);
+    dbRetryOnLock(function () use ($pdo, $mode, $domainId, $userId) {
+        $pdo->prepare("UPDATE cloudflare_accounts SET ssl_mode = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")->execute([$mode, $domainId, $userId]);
+    });
     logAction($pdo, $userId, 'Изменён SSL-режим', "{$domain['domain']}: → {$mode}");
 
     echo json_encode(['success' => true, 'domain' => $domain['domain'], 'mode' => $mode]);
 } catch (Exception $e) {
+    // Фиксируем сбой в логах панели (с повтором при блокировке БД).
+    if (isset($pdo)) {
+        logActionSafe($pdo, $userId ?? 1, 'Ошибка смены SSL-режима', $e->getMessage());
+    }
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }
