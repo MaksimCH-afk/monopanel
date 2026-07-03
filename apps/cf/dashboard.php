@@ -446,6 +446,12 @@ function getDomainStatusInfo($status, $httpCode = null) {
                                     <button class="btn btn-light btn-sm btn-icon me-1" type="button" title="Очистить кэш" onclick="purgeDomainCache(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars($domain['domain']); ?>')">
                                         <i class="fas fa-broom text-warning"></i>
                                     </button>
+                                    <?php $ogOn = !empty($domain['only_google_count']); ?>
+                                    <button class="btn btn-light btn-sm btn-icon me-1" type="button"
+                                            title="<?php echo $ogOn ? 'Только Google ВКЛючён — нажмите, чтобы отключить' : 'Применить «Только Google» (пускать только Googlebot, остальных блокировать)'; ?>"
+                                            onclick="toggleOnlyGoogleDomain(<?php echo $domain['id']; ?>, '<?php echo htmlspecialchars(mb_strtolower($domain['domain'])); ?>', <?php echo $ogOn ? 'true' : 'false'; ?>)">
+                                        <i class="fab fa-google <?php echo $ogOn ? 'text-success' : 'text-muted'; ?>"></i>
+                                    </button>
                                     <div class="dropdown d-inline-block">
                                         <button class="btn btn-light btn-sm btn-icon" type="button" data-bs-toggle="dropdown">
                                             <i class="fas fa-ellipsis-v"></i>
@@ -795,6 +801,10 @@ let operationModal = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     operationModal = new bootstrap.Modal(document.getElementById('operationModal'));
+    // После живого поиска возвращаем фокус и каретку в конец — чтобы можно было
+    // продолжать печатать домен после автоматической перезагрузки страницы.
+    const si = document.getElementById('searchInput');
+    if (si && si.value) { const v = si.value; si.focus(); si.value = ''; si.value = v; }
 });
 
 // Navigation
@@ -811,7 +821,15 @@ function applyFilters() {
     params.set('page', 1);
     window.location.search = params.toString();
 }
-function searchDomains(e) { if(e.key === 'Enter') applyFilters(); }
+// Живой поиск по ВСЕМ доменам (не только по текущей странице): поиск серверный
+// (SQL LIKE по всем записям), поэтому перезагружаем с ?search= с дебаунсом, чтобы
+// не дёргать сервер на каждый символ. Enter — сразу.
+let _searchTimer = null;
+function searchDomains(e) {
+    if (e.key === 'Enter') { clearTimeout(_searchTimer); applyFilters(); return; }
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(applyFilters, 500);
+}
 
 // Bulk Actions
 function getSelectedDomains() {
@@ -951,6 +969,36 @@ async function checkLiveNS(id, name) {
         document.getElementById('nsModalBody').innerHTML = body;
         new bootstrap.Modal(document.getElementById('nsModal')).show();
     } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
+}
+
+// Быстрое «Только Google» для одного домена (иконка в ряду действий).
+// isOn=true → правило уже стоит, кнопка отключает; иначе применяет.
+async function toggleOnlyGoogleDomain(id, name, isOn) {
+    const q = isOn
+        ? `Отключить «Только Google» на ${name}? (удалятся 2 правила)`
+        : `Применить «Только Google» на ${name}? Весь трафик, кроме Googlebot, будет блокироваться.`;
+    if (!confirm(q)) return;
+    showToast((isOn ? 'Отключаю' : 'Применяю') + ` «Только Google» на ${name}…`, 'info');
+    try {
+        const body = new URLSearchParams();
+        body.append('action', isOn ? 'remove_only_google' : 'apply_only_google');
+        body.append('scope[type]', 'selected');
+        body.append('scope[domainIds][]', id);
+        const res = await fetch('security_rules_api_minimal.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body
+        });
+        const d = await res.json();
+        if (d.success) {
+            showToast(`«Только Google» ${isOn ? 'отключён' : 'применён'}: ${name}`, 'success');
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            showToast(d.error || 'Не удалось выполнить', 'error');
+        }
+    } catch (e) {
+        showToast('Ошибка: ' + e.message, 'error');
+    }
 }
 
 async function purgeDomainCache(id, name) {
