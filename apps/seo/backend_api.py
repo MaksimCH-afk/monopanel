@@ -38,6 +38,7 @@ log = setup_logging()
 import db as seo_db
 import cache as seo_cache
 import gsc_manager as gscm
+import dashboard as seo_dashboard
 
 app = Flask(__name__)
 
@@ -577,6 +578,37 @@ def refresh_accounts_endpoint():
     total = gscm.refresh_all_sites()
     verified_sites = gscm.all_site_urls()
     return jsonify({"success": True, "sites": total, "accounts": gscm.list_accounts()})
+
+
+# ─── Главный дашборд (агрегация по всем сайтам, ленивая подгрузка) ──────────────
+@app.route('/api/dashboard/summary', methods=['GET'])
+def dashboard_summary():
+    """
+    Готовый кэш сводных метрик по всем сайтам за период + статус фонового прогона.
+    Если кэш пуст и обновление не идёт — сразу запускаем фоновое обновление.
+    """
+    period = int(request.args.get('period', 28))
+    rows = seo_dashboard.get_summary(period)
+    job = seo_dashboard.job_status()
+    if not rows and not job.get('running'):
+        seo_dashboard.refresh_all(period)
+        job = seo_dashboard.job_status()
+    return jsonify({"period": period, "sites": rows, "job": job})
+
+
+@app.route('/api/dashboard/refresh', methods=['POST'])
+def dashboard_refresh():
+    """Запустить фоновое обновление сводных метрик."""
+    period = int((request.get_json(silent=True) or {}).get('period',
+                 request.args.get('period', 28)))
+    started = seo_dashboard.refresh_all(period)
+    return jsonify({"started": started, "job": seo_dashboard.job_status()})
+
+
+@app.route('/api/dashboard/status', methods=['GET'])
+def dashboard_status():
+    """Статус фонового прогона (для прогресс-бара)."""
+    return jsonify(seo_dashboard.job_status())
 
 @app.route('/api/data', methods=['GET'])
 def get_gsc_data():

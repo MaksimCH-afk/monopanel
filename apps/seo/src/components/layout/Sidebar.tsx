@@ -4,13 +4,18 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChartBar, faChartLine, faMicroscope, faMagnifyingGlass, faCog, faSitemap, faBrain, faChartArea } from '@fortawesome/free-solid-svg-icons';
+import { faChartBar, faChartLine, faMicroscope, faMagnifyingGlass, faCog, faSitemap, faBrain, faChartArea, faTableColumns } from '@fortawesome/free-solid-svg-icons';
 
 const Sidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
 
   const menuItems = [
+    {
+      icon: <FontAwesomeIcon icon={faTableColumns} />,
+      label: 'Главный дашборд',
+      href: '/dashboard',
+    },
     {
       icon: <FontAwesomeIcon icon={faChartLine} />,
       label: 'Обзор сайтов',

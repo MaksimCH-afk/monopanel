@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import (create_engine, Column, Integer, String, Text, DateTime,
-                        ForeignKey, UniqueConstraint)
+                        Float, ForeignKey, UniqueConstraint)
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 log = logging.getLogger('seo.db')
@@ -63,6 +63,34 @@ class Site(Base):
 
     def __repr__(self):
         return f"<Site {self.site_url} (acc={self.account_id})>"
+
+
+class SiteSummary(Base):
+    """
+    Кэш сводных метрик по сайту за период (для главного дашборда).
+    Заполняется фоновым пайплайном, читается моментально (ленивая подгрузка).
+    """
+    __tablename__ = 'site_summary'
+    __table_args__ = (UniqueConstraint('site_url', 'period_days', name='uq_summary_site_period'),)
+
+    id = Column(Integer, primary_key=True)
+    site_url = Column(String(2048), nullable=False, index=True)
+    account_email = Column(String(320))
+    period_days = Column(Integer, nullable=False, default=28)
+
+    # Текущий период
+    clicks = Column(Integer, default=0)
+    impressions = Column(Integer, default=0)
+    ctr = Column(Float, default=0.0)
+    position = Column(Float, default=0.0)
+
+    # Предыдущий период (для сравнения было/стало)
+    prev_clicks = Column(Integer, default=0)
+    prev_impressions = Column(Integer, default=0)
+    prev_ctr = Column(Float, default=0.0)
+    prev_position = Column(Float, default=0.0)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def init_db():
