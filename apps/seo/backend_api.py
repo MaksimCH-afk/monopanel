@@ -4,7 +4,7 @@ GSC Dashboard Backend API
 Flask API to serve Google Search Console data to the Next.js frontend
 """
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
 import sys
 import os
@@ -12,6 +12,7 @@ import argparse
 import datetime
 import time
 import httplib2
+from urllib.parse import quote
 from apiclient.discovery import build
 from oauth2client import client, file, tools
 import pandas as pd
@@ -21,12 +22,30 @@ from openai import OpenAI
 import requests as http_requests
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
+from google_auth_oauthlib.flow import Flow
+
+# OAuth через веб-редирект работает по http на localhost (не https) и Google
+# может вернуть чуть иной набор scope — ослабляем требования oauthlib, иначе
+# fetch_token падает. setdefault, чтобы не переопределять при внешней настройке.
+os.environ.setdefault('OAUTHLIB_INSECURE_TRANSPORT', '1')
+os.environ.setdefault('OAUTHLIB_RELAX_TOKEN_SCOPE', '1')
 
 app = Flask(__name__)
-# Enable CORS for Next.js frontend with explicit configuration
+
+# Адрес фронта seo (для CORS и для возврата после OAuth). По умолчанию :3332,
+# как в docker-compose; можно переопределить через env для другого хоста.
+FRONTEND_URL = os.environ.get('SEO_FRONTEND_URL', 'http://localhost:3332').rstrip('/')
+
+# Enable CORS for Next.js frontend with explicit configuration.
+# Фронт живёт на :3332 (docker-compose), :3000 оставлен для локальной разработки.
+_cors_origins = list(dict.fromkeys([
+    FRONTEND_URL,
+    "http://localhost:3332", "http://127.0.0.1:3332",
+    "http://localhost:3000", "http://127.0.0.1:3000",
+]))
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "origins": _cors_origins,
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }
@@ -48,6 +67,17 @@ openai_client = None
 
 # Default OpenAI model used for insights when none is configured
 DEFAULT_OPENAI_MODEL = "gpt-4o"
+
+# ─── GSC OAuth (веб-флоу, совместимый с Docker) ────────────────────────────────
+GSC_SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly']
+# Токен пользователя GSC (новый веб-флоу). Отдельно от legacy authorizedcreds.dat.
+GSC_TOKEN_FILE = os.path.join(DATA_DIR, 'authorized_user_gsc.json')
+# Куда Google возвращает пользователя после подтверждения. Должен быть добавлен
+# в «Authorized redirect URIs» OAuth-клиента в Google Cloud Console.
+OAUTH_REDIRECT_URI = os.environ.get(
+    'SEO_OAUTH_REDIRECT_URI', 'http://localhost:5001/api/oauth/google/callback')
+# state -> путь к client_secret.json (приложение однопользовательское)
+_oauth_flows = {}
 
 # Default settings
 DEFAULT_SETTINGS = {
@@ -426,25 +456,63 @@ def clean_and_export_data(rows, dimensions):
     
     return data
 
+def build_gsc_service(creds):
+    """Собрать сервис Search Console из google-auth Credentials (веб-флоу)."""
+    return build('searchconsole', 'v1', credentials=creds, cache_discovery=False)
+
+
+def load_gsc_user_creds():
+    """
+    Загрузить сохранённый токен пользователя GSC (веб-флоу) и, при необходимости,
+    обновить его. Возвращает валидные Credentials или None. Ничего не блокирует.
+    """
+    if not os.path.exists(GSC_TOKEN_FILE):
+        return None
+    try:
+        creds = Credentials.from_authorized_user_file(GSC_TOKEN_FILE, GSC_SCOPES)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(GoogleRequest())
+            with open(GSC_TOKEN_FILE, 'w') as f:
+                f.write(creds.to_json())
+        return creds if creds and creds.valid else None
+    except Exception as e:
+        print(f"Error loading GSC user creds: {e}")
+        return None
+
+
 # Initialize GSC service
 def init_gsc():
     global webmasters_service, verified_sites
+
+    # 1) Приоритет — токен нового веб-флоу (совместим с Docker).
+    creds = load_gsc_user_creds()
+    if creds:
+        try:
+            webmasters_service = build_gsc_service(creds)
+            verified_sites = get_verified_sites(webmasters_service)
+            print(f"Initialized GSC (web token) with {len(verified_sites)} verified sites")
+            config = load_config()
+            config['isAuthorized'] = True
+            save_config(config)
+            return
+        except Exception as e:
+            print(f"Error initializing GSC from web token: {e}")
+
+    # 2) Legacy: подхватить старую oauth2client-авторизацию БЕЗ интерактива.
+    #    Интерактивный OAuth на старте блокирует поток до app.run() — порт 5001
+    #    не откроется (Connection reset by peer), поэтому allow_interactive=False.
     config = load_config()
     creds_path = config.get('credentialsPath', '')
-    
     if creds_path and os.path.exists(creds_path):
-        # На старте НЕ запускаем интерактивный OAuth — иначе сервер зависает
-        # до app.run() и порт 5001 не открывается. Только подхватываем уже
-        # сохранённую авторизацию (authorizedcreds.dat), если она есть.
         webmasters_service = authorize_creds(creds_path, allow_interactive=False)
         if webmasters_service:
             verified_sites = get_verified_sites(webmasters_service)
-            print(f"Initialized GSC with {len(verified_sites)} verified sites")
-            # Update config to mark as authorized
+            print(f"Initialized GSC (legacy) with {len(verified_sites)} verified sites")
             config['isAuthorized'] = True
             save_config(config)
         else:
-            print("Failed to initialize GSC service")
+            print("GSC credentials present but not authorized yet "
+                  "(use the Authorize button).")
             config['isAuthorized'] = False
             save_config(config)
     else:
@@ -860,6 +928,82 @@ def save_settings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _oauth_return(ok, message):
+    """Вернуть пользователя на страницу настроек фронта с результатом OAuth."""
+    status = 'success' if ok else 'error'
+    return redirect(f"{FRONTEND_URL}/settings?gscAuth={status}&msg={quote(message)}")
+
+
+@app.route('/api/oauth/google/start', methods=['GET', 'POST'])
+def oauth_google_start():
+    """
+    Начать веб-авторизацию GSC. Возвращает {authUrl} — ссылку на согласие Google.
+    Фронт перенаправляет туда браузер. Работает в Docker (не нужен браузер на
+    сервере, в отличие от старого tools.run_flow).
+    """
+    config = load_config()
+    creds_path = config.get('credentialsPath', '')
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        creds_path = (data.get('credentialsPath') or '').strip() or creds_path
+
+    if not creds_path or not os.path.exists(creds_path):
+        return jsonify({"error": f"Файл client_secret.json не найден: {creds_path or '(путь не задан)'}"}), 400
+
+    # Запомним путь в конфиге, чтобы callback его нашёл.
+    if config.get('credentialsPath') != creds_path:
+        config['credentialsPath'] = creds_path
+        save_config(config)
+
+    try:
+        flow = Flow.from_client_secrets_file(
+            creds_path, scopes=GSC_SCOPES, redirect_uri=OAUTH_REDIRECT_URI)
+        auth_url, state = flow.authorization_url(
+            access_type='offline', include_granted_scopes='true', prompt='consent')
+        _oauth_flows[state] = creds_path
+        return jsonify({"authUrl": auth_url})
+    except Exception as e:
+        return jsonify({"error": f"Не удалось начать авторизацию: {e}"}), 500
+
+
+@app.route('/api/oauth/google/callback', methods=['GET'])
+def oauth_google_callback():
+    """
+    Google возвращает пользователя сюда с code. Меняем code на токен, сохраняем
+    его в /data/seo и инициализируем сервис GSC. Затем — назад на фронт.
+    """
+    global webmasters_service, verified_sites
+
+    err = request.args.get('error')
+    if err:
+        return _oauth_return(False, f"Google вернул ошибку: {err}")
+
+    state = request.args.get('state', '')
+    creds_path = _oauth_flows.pop(state, None) or load_config().get('credentialsPath', '')
+    if not creds_path or not os.path.exists(creds_path):
+        return _oauth_return(False, "Не найден client_secret.json или истекла сессия авторизации. Повторите.")
+
+    try:
+        flow = Flow.from_client_secrets_file(
+            creds_path, scopes=GSC_SCOPES, redirect_uri=OAUTH_REDIRECT_URI, state=state)
+        flow.fetch_token(authorization_response=request.url)
+        creds = flow.credentials
+
+        with open(GSC_TOKEN_FILE, 'w') as f:
+            f.write(creds.to_json())
+
+        webmasters_service = build_gsc_service(creds)
+        verified_sites = get_verified_sites(webmasters_service)
+
+        config = load_config()
+        config['isAuthorized'] = True
+        save_config(config)
+
+        return _oauth_return(True, f"Авторизация прошла успешно. Найдено сайтов: {len(verified_sites)}.")
+    except Exception as e:
+        return _oauth_return(False, f"Не удалось завершить авторизацию: {e}")
+
+
 @app.route('/api/authorize', methods=['POST'])
 def authorize():
     """Authorize Google Search Console credentials"""
@@ -918,14 +1062,14 @@ def clear_settings():
     global webmasters_service, verified_sites, openai_client
     
     try:
-        # Delete authorized credentials file
-        authorized_creds_path = os.path.join(DATA_DIR, 'authorizedcreds.dat')
-        if os.path.exists(authorized_creds_path):
-            try:
-                os.remove(authorized_creds_path)
-                print(f"Deleted {authorized_creds_path}")
-            except Exception as e:
-                print(f"Error deleting {authorized_creds_path}: {e}")
+        # Delete authorized credentials files (legacy oauth2client + web-flow token)
+        for path in (os.path.join(DATA_DIR, 'authorizedcreds.dat'), GSC_TOKEN_FILE):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Deleted {path}")
+                except Exception as e:
+                    print(f"Error deleting {path}: {e}")
         
         # Reset global variables
         webmasters_service = None

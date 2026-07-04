@@ -72,6 +72,22 @@ export default function SettingsPage() {
     loadSettings();
   }, []);
 
+  // Обработка возврата после веб-авторизации Google (?gscAuth=success|error)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gscAuth = params.get('gscAuth');
+    if (!gscAuth) return;
+    const msg = params.get('msg');
+    if (gscAuth === 'success') {
+      setMessage({ type: 'success', text: msg || 'Авторизация прошла успешно!' });
+      loadSettings();
+    } else {
+      setMessage({ type: 'error', text: msg || 'Ошибка авторизации' });
+    }
+    // убрать query-параметры из URL, чтобы сообщение не всплывало при обновлении
+    window.history.replaceState({}, '', '/settings');
+  }, []);
+
   const loadSettings = async () => {
     setLoading(true);
     try {
@@ -205,7 +221,9 @@ export default function SettingsPage() {
     setAuthorizing(true);
     setMessage(null);
     try {
-      const response = await fetch(`${API_BASE}/api/authorize`, {
+      // Веб-флоу OAuth: бэкенд отдаёт ссылку на согласие Google, уводим туда
+      // браузер. После подтверждения Google вернёт на /settings?gscAuth=...
+      const response = await fetch(`${API_BASE}/api/oauth/google/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -214,23 +232,17 @@ export default function SettingsPage() {
           credentialsPath: settings.credentialsPath
         })
       });
+      const data = await response.json();
 
-      if (response.ok) {
-        const result = await response.json();
-        setSettings({ ...settings, isAuthorized: result.authorized || false });
-        if (result.authorized) {
-          setMessage({ type: 'success', text: 'Данные для доступа успешно авторизованы! Теперь вы можете пользоваться дашбордом.' });
-        } else {
-          setMessage({ type: 'error', text: result.message || 'Ошибка авторизации' });
-        }
-      } else {
-        const error = await response.json();
-        setMessage({ type: 'error', text: error.error || 'Не удалось авторизовать данные для доступа' });
+      if (response.ok && data.authUrl) {
+        window.location.href = data.authUrl;
+        return; // уходим на Google, состояние authorizing не сбрасываем
       }
+      setMessage({ type: 'error', text: data.error || 'Не удалось начать авторизацию' });
+      setAuthorizing(false);
     } catch (error) {
-      console.error('Error authorizing credentials:', error);
-      setMessage({ type: 'error', text: 'Не удалось авторизовать данные для доступа. Убедитесь, что бэкенд запущен.' });
-    } finally {
+      console.error('Error starting Google authorization:', error);
+      setMessage({ type: 'error', text: 'Не удалось начать авторизацию. Убедитесь, что бэкенд запущен.' });
       setAuthorizing(false);
     }
   };
@@ -618,10 +630,13 @@ export default function SettingsPage() {
         <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
           <li>Получите API-ключ OpenAI на платформе OpenAI и вставьте его выше</li>
           <li>Выберите модель OpenAI, которую хотите использовать для аналитики</li>
-          <li>Скачайте учётные данные Google Search Console (client_secret.json) из Google Cloud Console</li>
-          <li>Укажите полный путь к файлу client_secret.json</li>
-          <li>Нажмите «Сохранить настройки», чтобы сохранить конфигурацию</li>
-          <li>Нажмите «Авторизовать данные», чтобы пройти аутентификацию в Google (откроется окно браузера)</li>
+          <li>Создайте OAuth-клиент типа «Веб-приложение» в Google Cloud Console и скачайте client_secret.json</li>
+          <li>
+            В настройках OAuth-клиента добавьте <strong>Authorized redirect URI</strong>:{' '}
+            <code>http://localhost:5001/api/oauth/google/callback</code>
+          </li>
+          <li>Укажите полный путь к файлу client_secret.json выше и нажмите «Сохранить настройки»</li>
+          <li>Нажмите «Авторизовать данные» — откроется страница согласия Google, после подтверждения вы вернётесь сюда автоматически</li>
           <li>После авторизации можно начинать работу с дашбордом!</li>
         </ol>
       </div>
