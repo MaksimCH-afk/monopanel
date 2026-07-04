@@ -64,6 +64,10 @@ export default function SettingsPage() {
   // Подключённые Google-аккаунты (мультиаккаунт)
   const [accounts, setAccounts] = useState<Array<{ email: string; sites: number; created_at: string | null }>>([]);
   const [deletingAccount, setDeletingAccount] = useState<string | null>(null);
+  // Автоматизация (планировщик)
+  const [autom, setAutom] = useState({ enabled: false, dashboardRefreshHours: 6, sitesRefreshHours: 24, dashboardPeriod: 28 });
+  const [automState, setAutomState] = useState<{ lastDashboard: string | null; lastSites: string | null }>({ lastDashboard: null, lastSites: null });
+  const [savingAutom, setSavingAutom] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
@@ -80,6 +84,7 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings();
     loadAccounts();
+    loadAutomation();
   }, []);
 
   // Обработка возврата после веб-авторизации Google (?gscAuth=success|error)
@@ -141,6 +146,46 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadAutomation = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/automation`);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.config) setAutom((prev) => ({ ...prev, ...d.config }));
+        if (d.state) setAutomState(d.state);
+      }
+    } catch (e) { console.error('Error loading automation:', e); }
+  };
+
+  const saveAutomation = async (next?: Partial<typeof autom>) => {
+    const payload = { ...autom, ...(next || {}) };
+    setSavingAutom(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/automation`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (d.config) setAutom((prev) => ({ ...prev, ...d.config }));
+      if (d.state) setAutomState(d.state);
+      setMessage({ type: 'success', text: 'Настройки автоматизации сохранены.' });
+    } catch (e) {
+      console.error('Error saving automation:', e);
+      setMessage({ type: 'error', text: 'Не удалось сохранить автоматизацию.' });
+    } finally { setSavingAutom(false); }
+  };
+
+  const runAutomationNow = async (task: 'dashboard' | 'sites') => {
+    try {
+      const r = await fetch(`${API_BASE}/api/automation/run-now`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task }),
+      });
+      const d = await r.json();
+      if (d.error) { setMessage({ type: 'error', text: d.error }); return; }
+      if (d.state) setAutomState(d.state);
+      setMessage({ type: 'success', text: 'Задача запущена.' });
+    } catch (e) { console.error('Error run-now:', e); }
   };
 
   const loadAccounts = async () => {
@@ -751,6 +796,60 @@ export default function SettingsPage() {
             </div>
           </>
         )}
+      </div>
+
+      {/* Автоматизация */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Автоматизация</h2>
+            <p className="text-sm text-gray-500">Периодически обновлять данные в фоне без ручных действий</p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={autom.enabled}
+              onChange={(e) => { const v = e.target.checked; setAutom({ ...autom, enabled: v }); saveAutomation({ enabled: v }); }}
+              className="w-4 h-4" />
+            <span className="text-sm font-medium text-gray-700">{autom.enabled ? 'Включена' : 'Выключена'}</span>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">Обновление дашборда</span>
+              <button onClick={() => runAutomationNow('dashboard')} className="text-xs text-blue-600 hover:underline">Запустить сейчас</button>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500">каждые</span>
+              <input type="number" min={1} value={autom.dashboardRefreshHours}
+                onChange={(e) => setAutom({ ...autom, dashboardRefreshHours: Number(e.target.value) })}
+                className="w-20 px-2 py-1 border border-gray-300 rounded" />
+              <span className="text-gray-500">ч.</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Последний запуск: {automState.lastDashboard ? new Date(automState.lastDashboard).toLocaleString() : '—'}</p>
+          </div>
+
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">Обновление списка сайтов</span>
+              <button onClick={() => runAutomationNow('sites')} className="text-xs text-blue-600 hover:underline">Запустить сейчас</button>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500">каждые</span>
+              <input type="number" min={1} value={autom.sitesRefreshHours}
+                onChange={(e) => setAutom({ ...autom, sitesRefreshHours: Number(e.target.value) })}
+                className="w-20 px-2 py-1 border border-gray-300 rounded" />
+              <span className="text-gray-500">ч.</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Последний запуск: {automState.lastSites ? new Date(automState.lastSites).toLocaleString() : '—'}</p>
+          </div>
+        </div>
+
+        <button onClick={() => saveAutomation()} disabled={savingAutom}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2">
+          {savingAutom && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
+          <span>Сохранить автоматизацию</span>
+        </button>
       </div>
 
       {/* Instructions */}

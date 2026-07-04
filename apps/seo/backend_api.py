@@ -41,6 +41,7 @@ import gsc_manager as gscm
 import dashboard as seo_dashboard
 import backlinks as seo_backlinks
 import indexation as seo_indexation
+import scheduler as seo_scheduler
 
 app = Flask(__name__)
 
@@ -978,6 +979,41 @@ def index_delete():
 @app.route('/api/index/status', methods=['GET'])
 def index_status():
     return jsonify(seo_indexation.job_status())
+
+
+# ─── Автоматизация (планировщик фоновых задач) ─────────────────────────────────
+@app.route('/api/automation', methods=['GET'])
+def get_automation():
+    """Текущий конфиг автоматизации + отметки последних запусков."""
+    return jsonify(seo_scheduler.get_status())
+
+
+@app.route('/api/automation', methods=['POST'])
+def save_automation():
+    """Сохранить конфиг автоматизации (в dashboard_config.json) и применить."""
+    data = request.get_json(silent=True) or {}
+    config = load_config()
+    autom = dict(config.get('automation') or {})
+    for k in ('enabled', 'dashboardRefreshHours', 'sitesRefreshHours', 'dashboardPeriod'):
+        if k in data:
+            autom[k] = data[k]
+    config['automation'] = autom
+    save_config(config)
+    seo_scheduler.configure(autom)
+    log.info("Automation settings saved: %s", autom)
+    return jsonify({"success": True, **seo_scheduler.get_status()})
+
+
+@app.route('/api/automation/run-now', methods=['POST'])
+def automation_run_now():
+    """Запустить задачу автоматизации немедленно: {task: 'dashboard'|'sites'}."""
+    data = request.get_json(silent=True) or {}
+    task = (data.get('task') or '').strip()
+    try:
+        seo_scheduler.run_now(task)
+        return jsonify({"success": True, **seo_scheduler.get_status()})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/api/data', methods=['GET'])
 def get_gsc_data():
@@ -2178,6 +2214,13 @@ if __name__ == '__main__':
 
     # Initialize GSC service
     init_gsc()
+
+    # Планировщик автоматизации (интервалы из сохранённого конфига)
+    try:
+        seo_scheduler.configure((load_config() or {}).get('automation'))
+        seo_scheduler.start()
+    except Exception as e:  # noqa: BLE001
+        log.exception("Scheduler start failed: %s", e)
 
     try:
         # Use use_reloader=False to prevent multiprocessing conflicts
