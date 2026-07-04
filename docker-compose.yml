@@ -10,6 +10,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Адрес seo-бэкенда для браузера. NEXT_PUBLIC_* «запекается» в бандл при
+        # сборке, поэтому это build-arg, а не runtime-env. По умолчанию
+        # localhost:5001; переопределяется через .env (NEXT_PUBLIC_SEO_API_URL).
+        NEXT_PUBLIC_SEO_API_URL: ${NEXT_PUBLIC_SEO_API_URL:-http://localhost:5001}
     image: monopanel:latest
     container_name: panel
     restart: unless-stopped
