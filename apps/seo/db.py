@@ -134,6 +134,30 @@ class Backlink(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class IndexPage(Base):
+    """
+    Реальная страница сайта (из sitemap) для раздела «Индексация».
+    Хранит статус индексации из Google (URL Inspection) и/или XMLRIVER,
+    а также статус отправки на индекс (2index).
+    """
+    __tablename__ = 'index_pages'
+    __table_args__ = (UniqueConstraint('site_url', 'url', name='uq_indexpage_site_url'),)
+
+    id = Column(Integer, primary_key=True)
+    site_url = Column(String(2048), nullable=False, index=True)  # GSC-ресурс
+    url = Column(String(2048), nullable=False)
+
+    coverage_state = Column(String(128))   # из Google URL Inspection
+    verdict = Column(String(32))           # PASS / NEUTRAL / FAIL
+    last_crawl_time = Column(String(40))   # из Google
+    index_status = Column(String(32))      # indexed | not_indexed | unknown | error
+    index_count = Column(Integer)          # из XMLRIVER
+    submitted = Column(Boolean, default=False)   # отправлен в 2index
+    submitted_at = Column(DateTime)
+    last_checked = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Создать таблицы, если их нет. Идемпотентно."""
     Base.metadata.create_all(engine)

@@ -40,6 +40,7 @@ import cache as seo_cache
 import gsc_manager as gscm
 import dashboard as seo_dashboard
 import backlinks as seo_backlinks
+import indexation as seo_indexation
 
 app = Flask(__name__)
 
@@ -881,6 +882,102 @@ def submit_index_backlinks():
 @app.route('/api/backlinks/status', methods=['GET'])
 def backlinks_status():
     return jsonify(seo_backlinks.job_status())
+
+
+# ─── Индексация (sitemap → страницы → статус/переобход/2index) ──────────────────
+def _index_page_dict(p):
+    return {
+        "id": p.id, "site_url": p.site_url, "url": p.url,
+        "coverage_state": p.coverage_state, "verdict": p.verdict,
+        "last_crawl_time": p.last_crawl_time,
+        "index_status": p.index_status, "index_count": p.index_count,
+        "submitted": bool(p.submitted),
+        "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None,
+        "last_checked": p.last_checked.isoformat() if p.last_checked else None,
+    }
+
+
+@app.route('/api/index/pages', methods=['GET'])
+def index_pages():
+    """Список страниц сайта для раздела индексации."""
+    from db import IndexPage
+    site_url = request.args.get('siteUrl')
+    if not site_url:
+        return jsonify({"error": "siteUrl обязателен"}), 400
+    with seo_db.session_scope() as s:
+        rows = [_index_page_dict(p) for p in
+                s.query(IndexPage).filter_by(site_url=site_url)
+                 .order_by(IndexPage.created_at.desc()).all()]
+    return jsonify({"pages": rows, "job": seo_indexation.job_status()})
+
+
+@app.route('/api/index/crawl', methods=['POST'])
+def index_crawl():
+    """Обойти sitemap и подтянуть реальные страницы. {siteUrl, sitemapUrl?}"""
+    data = request.get_json(silent=True) or {}
+    site_url = (data.get('siteUrl') or '').strip()
+    sitemap_url = (data.get('sitemapUrl') or '').strip() or None
+    if not site_url:
+        return jsonify({"error": "siteUrl обязателен"}), 400
+    started = seo_indexation.start_crawl(site_url, sitemap_url)
+    return jsonify({"started": started, "job": seo_indexation.job_status()})
+
+
+@app.route('/api/index/inspect', methods=['POST'])
+def index_inspect():
+    """Статус индексации из Google (URL Inspection) для выбранных/всех страниц."""
+    data = request.get_json(silent=True) or {}
+    started = seo_indexation.start_inspect(data.get('siteUrl'), data.get('ids'))
+    return jsonify({"started": started, "job": seo_indexation.job_status()})
+
+
+@app.route('/api/index/xmlriver', methods=['POST'])
+def index_xmlriver():
+    """Проверка индексации через XMLRIVER для выбранных/всех страниц."""
+    data = request.get_json(silent=True) or {}
+    config = load_config()
+    user = config.get('xmlriverUser', '')
+    key = config.get('xmlriverKey', '')
+    if not user or not key:
+        return jsonify({"error": "XMLRIVER не настроен (user/key в Настройках)"}), 400
+    started = seo_indexation.start_xmlriver(data.get('siteUrl'), data.get('ids'), user, key)
+    return jsonify({"started": started, "job": seo_indexation.job_status()})
+
+
+@app.route('/api/index/submit', methods=['POST'])
+def index_submit():
+    """Отправить выбранные/все страницы на индекс через 2index."""
+    data = request.get_json(silent=True) or {}
+    config = load_config()
+    key = config.get('twoindexKey', '')
+    if not key:
+        return jsonify({"error": "2index не настроен (ключ в Настройках)"}), 400
+    started = seo_indexation.start_submit(data.get('siteUrl'), data.get('ids'), key)
+    return jsonify({"started": started, "job": seo_indexation.job_status()})
+
+
+@app.route('/api/index/delete', methods=['POST'])
+def index_delete():
+    """Удалить страницы: {ids:[...]} или {siteUrl} (все по сайту)."""
+    from db import IndexPage
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids')
+    site_url = data.get('siteUrl')
+    with seo_db.session_scope() as s:
+        q = s.query(IndexPage)
+        if ids:
+            q = q.filter(IndexPage.id.in_(ids))
+        elif site_url:
+            q = q.filter_by(site_url=site_url)
+        else:
+            return jsonify({"error": "ids или siteUrl обязателен"}), 400
+        deleted = q.delete(synchronize_session=False)
+    return jsonify({"success": True, "deleted": deleted})
+
+
+@app.route('/api/index/status', methods=['GET'])
+def index_status():
+    return jsonify(seo_indexation.job_status())
 
 @app.route('/api/data', methods=['GET'])
 def get_gsc_data():

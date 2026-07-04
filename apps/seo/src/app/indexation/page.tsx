@@ -1,0 +1,234 @@
+'use client';
+
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { API_BASE } from '@/lib/api';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch } from '@fortawesome/free-solid-svg-icons';
+
+interface IdxPage {
+  id: number;
+  url: string;
+  coverage_state: string | null;
+  verdict: string | null;
+  last_crawl_time: string | null;
+  index_status: string | null;
+  index_count: number | null;
+  submitted: boolean;
+  submitted_at: string | null;
+  last_checked: string | null;
+}
+interface Job { running: boolean; kind: string | null; done: number; total: number; error: string | null; }
+
+function IndexBadge({ status }: { status: string | null }) {
+  if (!status) return <span className="text-gray-400 text-xs">—</span>;
+  const map: Record<string, { label: string; color: string }> = {
+    indexed: { label: 'в индексе', color: 'text-green-600' },
+    not_indexed: { label: 'нет в индексе', color: 'text-red-600' },
+    unknown: { label: 'неизвестно', color: 'text-gray-500' },
+    error: { label: 'ошибка', color: 'text-orange-600' },
+  };
+  const m = map[status] || { label: status, color: 'text-gray-500' };
+  return <span className={`text-xs font-medium ${m.color}`}>{m.label}</span>;
+}
+
+export default function IndexationPage() {
+  const [sites, setSites] = useState<string[]>([]);
+  const [selectedSite, setSelectedSite] = useState('');
+  const [sitemapUrl, setSitemapUrl] = useState('');
+  const [pages, setPages] = useState<IdxPage[]>([]);
+  const [job, setJob] = useState<Job | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/sites`).then(r => r.json()).then(d => {
+      const s = Array.isArray(d.sites) ? d.sites : [];
+      setSites(s);
+      if (s.length && !selectedSite) setSelectedSite(s[0]);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const load = useCallback(async () => {
+    if (!selectedSite) return;
+    setLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/index/pages?siteUrl=${encodeURIComponent(selectedSite)}`);
+      const d = await r.json();
+      setPages(Array.isArray(d.pages) ? d.pages : []);
+      setJob(d.job || null);
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, [selectedSite]);
+
+  useEffect(() => { setSelected(new Set()); load(); }, [load]);
+
+  useEffect(() => {
+    if (job?.running && !pollRef.current) {
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await fetch(`${API_BASE}/api/index/status`);
+          const st: Job = await r.json();
+          setJob(st);
+          if (!st.running) { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } load(); }
+        } catch { /* ignore */ }
+      }, 2000);
+    }
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  }, [job?.running, load]);
+
+  const post = async (path: string, body: any) => {
+    const r = await fetch(`${API_BASE}/api/index/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    setJob(d.job || { running: true, kind: path, done: 0, total: 0, error: null });
+  };
+
+  const crawl = () => post('crawl', { siteUrl: selectedSite, sitemapUrl: sitemapUrl.trim() || undefined });
+  const idsForAction = () => (selected.size ? Array.from(selected) : undefined);
+  const runAction = (path: string) => post(path, { siteUrl: selectedSite, ids: idsForAction() });
+
+  const deleteSelected = async () => {
+    if (!selected.size) return;
+    if (!confirm(`Удалить ${selected.size} страниц(ы) из списка?`)) return;
+    await fetch(`${API_BASE}/api/index/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: Array.from(selected) }),
+    });
+    setSelected(new Set()); load();
+  };
+
+  const filtered = useMemo(
+    () => pages.filter(p => p.url.toLowerCase().includes(search.toLowerCase())),
+    [pages, search]
+  );
+  const allSelected = filtered.length > 0 && filtered.every(p => selected.has(p.id));
+  const toggleAll = () => setSelected(prev => {
+    const n = new Set(prev);
+    if (allSelected) filtered.forEach(p => n.delete(p.id)); else filtered.forEach(p => n.add(p.id));
+    return n;
+  });
+  const toggleOne = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const progressPct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
+  const jobLabel: Record<string, string> = {
+    crawl: 'Обход sitemap', inspect: 'Google URL Inspection', xmlriver: 'Проверка XMLRIVER', submit: 'Отправка в 2index',
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900">Индексация</h1>
+          <p className="text-gray-600 mt-1">Обход sitemap, статус индексации (Google/XMLRIVER), массовая отправка на индекс</p>
+        </div>
+
+        {/* Обход sitemap */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[220px]">
+              <label className="block text-xs text-gray-500 mb-1">Сайт</label>
+              <select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white">
+                {sites.map(s => <option key={s} value={s}>{s.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}</option>)}
+              </select>
+            </div>
+            <div className="flex-1 min-w-[240px]">
+              <label className="block text-xs text-gray-500 mb-1">URL sitemap (необязательно — по умолчанию /sitemap.xml)</label>
+              <input type="text" value={sitemapUrl} onChange={(e) => setSitemapUrl(e.target.value)}
+                placeholder="https://site.com/sitemap.xml"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+            </div>
+            <button onClick={crawl} disabled={job?.running || !selectedSite}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2">
+              <FontAwesomeIcon icon={faSitemap} /> Обойти sitemap
+            </button>
+          </div>
+        </div>
+
+        {/* Прогресс */}
+        {job?.running && (
+          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex justify-between text-sm text-blue-800 mb-2">
+              <span>{jobLabel[job.kind || ''] || 'Операция'}…</span>
+              <span>{job.total ? `${job.done}/${job.total}` : '…'}</span>
+            </div>
+            <div className="w-full bg-blue-100 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+        )}
+        {job?.error && !job.running && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-red-800 text-sm">Ошибка: {job.error}</div>
+        )}
+
+        {/* Действия */}
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Поиск по URL…" className="px-4 py-2 border border-gray-300 rounded-lg flex-1 min-w-[180px]" />
+          <span className="text-sm text-gray-500">{selected.size ? `Выбрано: ${selected.size}` : `Всего: ${pages.length}`}</span>
+          <button onClick={() => runAction('inspect')} disabled={job?.running}
+            className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm flex items-center gap-2">
+            <FontAwesomeIcon icon={faSearch} /> Статус в Google
+          </button>
+          <button onClick={() => runAction('xmlriver')} disabled={job?.running}
+            className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm flex items-center gap-2">
+            <FontAwesomeIcon icon={faSearch} /> XMLRIVER
+          </button>
+          <button onClick={() => runAction('submit')} disabled={job?.running}
+            className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm flex items-center gap-2">
+            <FontAwesomeIcon icon={faPaperPlane} /> На индекс (2index)
+          </button>
+          <button onClick={deleteSelected} disabled={!selected.size}
+            className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 text-sm flex items-center gap-2">
+            <FontAwesomeIcon icon={faTrash} /> Удалить
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mb-3">Операции применяются к выбранным строкам; если ничего не выбрано — ко всем страницам сайта.</p>
+
+        {/* Таблица */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
+          {loading && pages.length === 0 ? (
+            <div className="p-8 text-center text-gray-500"><FontAwesomeIcon icon={faSpinner} className="animate-spin text-2xl text-blue-600" /></div>
+          ) : filtered.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">Страниц нет. Нажмите «Обойти sitemap».</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-3 py-3 w-8"><input type="checkbox" checked={allSelected} onChange={toggleAll} /></th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">URL</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Google (покрытие)</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Индекс</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase">2index</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filtered.map(p => (
+                  <tr key={p.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} /></td>
+                    <td className="px-3 py-2 max-w-md truncate">
+                      <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline" title={p.url}>
+                        {p.url.replace(/^https?:\/\/[^/]+/, '') || '/'}
+                      </a>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-600 max-w-[220px] truncate" title={p.coverage_state || ''}>
+                      {p.coverage_state || '—'}
+                    </td>
+                    <td className="px-3 py-2 text-center"><IndexBadge status={p.index_status} /></td>
+                    <td className="px-3 py-2 text-center">
+                      {p.submitted ? <FontAwesomeIcon icon={faCheckCircle} className="text-green-600" title={p.submitted_at || ''} />
+                                   : <span className="text-gray-300">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
