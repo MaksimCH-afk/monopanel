@@ -105,7 +105,9 @@ function mtImportZones($pdo, $userId, $credId, $email, $token, $groupId = null) 
         $zn = is_object($zone) ? ($zone->name ?? null) : ($zone['name'] ?? null);
         $zid = is_object($zone) ? ($zone->id ?? '') : ($zone['id'] ?? '');
         if (!$zn) continue;
-        $ins->execute([$userId, $credId, $groupId, $zn, $zid]);
+        dbRetryOnLock(function () use ($ins, $userId, $credId, $groupId, $zn, $zid) {
+            $ins->execute([$userId, $credId, $groupId, $zn, $zid]);
+        });
         $n++;
     }
     return ['ok' => true, 'count' => $n];
@@ -207,7 +209,9 @@ try {
                     $names = array_map(function ($zone) { return $zone['name']; }, $z['result']);
                     $total = $z['result_info']['total_count'] ?? count($names);
                     $hint = $total . ' доменов: ' . implode(', ', array_slice($names, 0, 6)) . (count($names) > 6 ? '…' : '');
-                    $pdo->prepare("UPDATE master_tokens SET domains_hint = ? WHERE id = ?")->execute([$hint, $mid]);
+                    dbRetryOnLock(function () use ($pdo, $hint, $mid) {
+                        $pdo->prepare("UPDATE master_tokens SET domains_hint = ? WHERE id = ?")->execute([$hint, $mid]);
+                    });
                 }
             }
 
@@ -230,7 +234,9 @@ try {
                             if (!$c->fetchColumn()) break;
                             $em = $b . ' #' . $k; $k++;
                         }
-                        $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $em, $newToken]);
+                        dbRetryOnLock(function () use ($pdo, $userId, $em, $newToken) {
+                            $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $em, $newToken]);
+                        });
                         $credId = (int)$pdo->lastInsertId();
                         $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
                         $imp = mtImportZones($pdo, $userId, $credId, $em, $newToken, $grp ?: null);
@@ -263,7 +269,9 @@ try {
             $u = cfMasterApi($tok, 'GET', 'user');
             if (!empty($u['success'])) $email = $u['result']['email'] ?? '';
             if ($label === '') $label = $email ?: ('master-' . date('Ymd-His'));
-            $pdo->prepare("INSERT INTO master_tokens (label, token, account_email) VALUES (?, ?, ?)")->execute([$label, $tok, $email]);
+            dbRetryOnLock(function () use ($pdo, $label, $tok, $email) {
+                $pdo->prepare("INSERT INTO master_tokens (label, token, account_email) VALUES (?, ?, ?)")->execute([$label, $tok, $email]);
+            });
             logAction($pdo, $userId, 'Master Token: сохранён мастер', "label: {$label}");
             echo json_encode(['success' => true]);
             break;
@@ -432,7 +440,9 @@ try {
                 if (!$c->fetchColumn()) break;
                 $email = $base . ' #' . $i; $i++;
             }
-            $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
+            dbRetryOnLock(function () use ($pdo, $userId, $email, $tok) {
+                $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
+            });
             $credId = (int)$pdo->lastInsertId();
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
             $imp = mtImportZones($pdo, $userId, $credId, $email, $tok, $grp ?: null);
@@ -467,7 +477,9 @@ try {
                 $mk = mtCreateToken($m['token'], 'panel-worker-' . date('Ymd-His'), $allKeys);
                 if (empty($mk['ok'])) throw new Exception('Не удалось создать рабочий токен: ' . ($mk['error'] ?? ''));
                 $work = $mk['token'];
-                $pdo->prepare("UPDATE master_tokens SET working_token = ? WHERE id = ?")->execute([$work, $mid]);
+                dbRetryOnLock(function () use ($pdo, $work, $mid) {
+                    $pdo->prepare("UPDATE master_tokens SET working_token = ? WHERE id = ?")->execute([$work, $mid]);
+                });
             }
 
             // account_id (нужен для POST /zones) + имя аккаунта
@@ -480,7 +492,9 @@ try {
 
             // Кредентал в панели под рабочий токен (чтобы домены были управляемы)
             $email = 'master#' . $mid . ($accountName ? ' ' . $accountName : '');
-            $pdo->prepare("INSERT OR IGNORE INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $work]);
+            dbRetryOnLock(function () use ($pdo, $userId, $email, $work) {
+                $pdo->prepare("INSERT OR IGNORE INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $work]);
+            });
             $credId = $pdo->query("SELECT id FROM cloudflare_credentials WHERE user_id = $userId AND email = " . $pdo->quote($email))->fetchColumn();
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
 
@@ -491,8 +505,10 @@ try {
                     $zid = $z['result']['id'] ?? '';
                     $ns  = $z['result']['name_servers'] ?? [];
                     try {
-                        $pdo->prepare("INSERT OR IGNORE INTO cloudflare_accounts (user_id, account_id, group_id, domain, server_ip, zone_id, ns_records, domain_status) VALUES (?, ?, ?, ?, '', ?, ?, 'unknown')")
-                            ->execute([$userId, $credId, $grp ?: null, $dom, $zid, json_encode($ns)]);
+                        dbRetryOnLock(function () use ($pdo, $userId, $credId, $grp, $dom, $zid, $ns) {
+                            $pdo->prepare("INSERT OR IGNORE INTO cloudflare_accounts (user_id, account_id, group_id, domain, server_ip, zone_id, ns_records, domain_status) VALUES (?, ?, ?, ?, '', ?, ?, 'unknown')")
+                                ->execute([$userId, $credId, $grp ?: null, $dom, $zid, json_encode($ns)]);
+                        });
                     } catch (Exception $e) {}
                     $results[] = ['domain' => $dom, 'ok' => true, 'ns' => $ns];
                 } else {
