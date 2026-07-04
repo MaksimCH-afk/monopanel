@@ -523,6 +523,9 @@ $stats = $statsStmt->fetch();
                                     <button class="btn btn-outline-primary" type="button" onclick="checkCustomWorker()">
                                         <i class="fas fa-circle-check me-2"></i>Проверить воркер
                                     </button>
+                                    <button class="btn btn-outline-danger" type="button" onclick="deleteCustomWorker()">
+                                        <i class="fas fa-trash me-2"></i>Удалить воркер
+                                    </button>
                                     <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('customWorkerScript').value=''; document.getElementById('customWorkerScript').dispatchEvent(new Event('input'));">
                                         Очистить
                                     </button>

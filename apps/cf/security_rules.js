@@ -1586,6 +1586,34 @@ function fillWorkerRoute(kind) {
     inp.focus();
 }
 
+// Удалить кастомный воркер выбранного домена (снять маршруты + удалить скрипт).
+function deleteCustomWorker() {
+    const sel = document.getElementById('customWorkerDomain');
+    const domainId = sel ? sel.value : '';
+    if (!domainId) { showError('Выберите домен, с которого удалить воркер'); return; }
+    const domainName = sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '';
+    if (!confirm(`Удалить Worker с домена ${domainName}? Будут сняты его маршруты и удалён скрипт.`)) return;
+
+    showLoading('Удаление Worker…');
+    $.post('security_rules_api_minimal.php', {
+        action: 'delete_custom_worker',
+        domain_id: domainId
+    })
+    .done(function(response) {
+        hideLoading();
+        if (response.success) {
+            showSuccess(`Worker удалён: ${response.domain || domainName} (маршрутов снято: ${response.routes_removed || 0}${response.script_deleted ? ', скрипт удалён' : ''})`);
+        } else {
+            showError(response.error || 'Не удалось удалить Worker');
+        }
+    })
+    .fail(function(xhr) {
+        hideLoading();
+        console.error('Delete worker error:', xhr.responseText);
+        showError('Ошибка соединения с сервером');
+    });
+}
+
 // Проверка воркера БЕЗ деплоя: синтаксис (компиляция без выполнения) + наличие обработчика fetch.
 function checkCustomWorker() {
     const code = document.getElementById('customWorkerScript')?.value || '';

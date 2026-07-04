@@ -97,6 +97,11 @@ try {
             echo json_encode($result);
             break;
 
+        case 'delete_custom_worker':
+            $result = deleteCustomWorker($pdo, $userId, $_POST);
+            echo json_encode($result);
+            break;
+
         case 'debug_info':
             echo json_encode([
                 'success' => true,
@@ -684,6 +689,79 @@ function deployCustomWorker($pdo, $userId, $data) {
         'total'   => count($patterns),
         'results' => $results,
         'error'   => $okCount > 0 ? null : ('Не удалось развернуть Worker: ' . ($lastError ?? 'неизвестно')),
+    ];
+}
+
+/**
+ * Удалить кастомный Worker выбранного домена: снять все маршруты, указывающие на
+ * его скрипт (cfp-<домен>), и удалить сам скрипт с аккаунта. Плюс локальная чистка.
+ */
+function deleteCustomWorker($pdo, $userId, $data) {
+    $domainId = (int)($data['domain_id'] ?? 0);
+    if ($domainId <= 0) return ['success' => false, 'error' => 'Не выбран домен'];
+
+    $stmt = $pdo->prepare("
+        SELECT ca.*, cc.email, cc.api_key, cc.auth_type
+        FROM cloudflare_accounts ca
+        JOIN cloudflare_credentials cc ON ca.account_id = cc.id
+        WHERE ca.id = ? AND ca.user_id = ?
+    ");
+    $stmt->execute([$domainId, $userId]);
+    $domain = $stmt->fetch();
+    if (!$domain) return ['success' => false, 'error' => 'Домен не найден'];
+
+    $proxies = getProxies($pdo, $userId);
+    $credentials = ['email' => $domain['email'], 'api_key' => $domain['api_key'], 'auth_type' => $domain['auth_type'] ?? null];
+    $scriptName = cfWorkerScriptName($domain['domain']);
+    $zoneId = $domain['zone_id'];
+
+    // 1) Снимаем маршруты зоны, указывающие на наш скрипт.
+    $routesRemoved = 0;
+    $routeErrors = [];
+    if ($zoneId) {
+        $list = cloudflareListWorkerRoutes($pdo, $credentials, $zoneId, $proxies, $userId);
+        if (!empty($list['success']) && !empty($list['data'])) {
+            $routes = is_array($list['data']) ? $list['data'] : [$list['data']];
+            foreach ($routes as $r) {
+                $rScript = is_object($r) ? ($r->script ?? '') : ($r['script'] ?? '');
+                $rId     = is_object($r) ? ($r->id ?? '')     : ($r['id'] ?? '');
+                if ($rScript === $scriptName && $rId !== '') {
+                    $del = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'], "zones/$zoneId/workers/routes/$rId", 'DELETE', [], $proxies, $userId, $credentials['auth_type']);
+                    if (!empty($del['success'])) $routesRemoved++;
+                    else $routeErrors[] = cfReadableError($del);
+                }
+            }
+        }
+    }
+
+    // 2) Удаляем сам скрипт с аккаунта (force — на случай оставшихся ссылок).
+    $accountId = $zoneId ? cfGetAccountId($pdo, $credentials, $zoneId, $proxies, $userId) : null;
+    $scriptDeleted = false;
+    $scriptError = null;
+    if ($accountId) {
+        $ds = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'], "accounts/$accountId/workers/scripts/$scriptName?force=true", 'DELETE', [], $proxies, $userId, $credentials['auth_type']);
+        if (!empty($ds['success']) || (int)($ds['http_code'] ?? 0) === 404) {
+            $scriptDeleted = true; // 404 = скрипта уже нет → тоже успех
+        } else {
+            $scriptError = cfReadableError($ds);
+        }
+    } else {
+        $scriptError = 'account_id не определён (нужно право Account Settings: Read)';
+    }
+
+    // 3) Локальная чистка (некритично).
+    try { $pdo->prepare("DELETE FROM cloudflare_worker_routes WHERE user_id = ? AND domain_id = ?")->execute([$userId, $domainId]); } catch (Exception $e) {}
+    try { $pdo->prepare("DELETE FROM security_rules WHERE user_id = ? AND domain_id = ? AND rule_type = 'worker'")->execute([$userId, $domainId]); } catch (Exception $e) {}
+
+    logAction($pdo, $userId, 'Worker удалён', "{$domain['domain']}: маршрутов снято {$routesRemoved}, скрипт " . ($scriptDeleted ? 'удалён' : 'НЕ удалён'));
+
+    $ok = $scriptDeleted || $routesRemoved > 0;
+    return [
+        'success' => $ok,
+        'domain' => $domain['domain'],
+        'routes_removed' => $routesRemoved,
+        'script_deleted' => $scriptDeleted,
+        'error' => $ok ? null : ('Не удалось удалить воркер: ' . ($scriptError ?? (implode('; ', $routeErrors) ?: 'воркер не найден на домене'))),
     ];
 }
 
