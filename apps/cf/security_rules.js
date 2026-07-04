@@ -1569,9 +1569,10 @@ function deployCustomWorker() {
     });
 }
 
-// Подставить выбранный домен в маршрут. Один воркер может иметь НЕСКОЛЬКО маршрутов
-// (через запятую): «домен/*» и «*.домен/*» добавляют пункт в список (без дублей),
-// «оба» — сразу оба варианта.
+// Подставить выбранный домен в маршрут. Кнопки задают маршрут (заменяют содержимое),
+// чтобы можно было свободно переключаться: «домен/*» → только apex, «*.домен/*» →
+// только поддомены, «оба» → оба варианта. Несколько своих путей можно вписать вручную
+// через запятую (один воркер поддерживает несколько маршрутов).
 function fillWorkerRoute(kind) {
     const sel = document.getElementById('customWorkerDomain');
     const d = (sel && sel.value) ? (sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '') : '';
@@ -1579,11 +1580,9 @@ function fillWorkerRoute(kind) {
     const inp = document.getElementById('customWorkerRoute');
     const apex = d + '/*';
     const wild = '*.' + d + '/*';
-    if (kind === 'both') { inp.value = apex + ', ' + wild; inp.focus(); return; }
-    const want = (kind === 'wildcard') ? wild : apex;
-    const list = (inp.value || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (!list.includes(want)) list.push(want);
-    inp.value = list.join(', ');
+    if (kind === 'both') inp.value = apex + ', ' + wild;
+    else if (kind === 'wildcard') inp.value = wild;
+    else inp.value = apex;
     inp.focus();
 }
 
