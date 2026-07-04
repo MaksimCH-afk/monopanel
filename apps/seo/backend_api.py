@@ -37,6 +37,7 @@ log = setup_logging()
 
 import db as seo_db
 import cache as seo_cache
+import gsc_manager as gscm
 
 app = Flask(__name__)
 
@@ -93,14 +94,15 @@ openai_client = None
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 # ─── GSC OAuth (веб-флоу, совместимый с Docker) ────────────────────────────────
-GSC_SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly']
-# Токен пользователя GSC (новый веб-флоу). Отдельно от legacy authorizedcreds.dat.
+# Scope'ы берём из менеджера (там же webmasters + email для мультиаккаунта).
+GSC_SCOPES = gscm.GSC_SCOPES
+# Legacy single-token файл прежнего одно-аккаунтного флоу (для миграции на старте).
 GSC_TOKEN_FILE = os.path.join(DATA_DIR, 'authorized_user_gsc.json')
 # Куда Google возвращает пользователя после подтверждения. Должен быть добавлен
 # в «Authorized redirect URIs» OAuth-клиента в Google Cloud Console.
 OAUTH_REDIRECT_URI = os.environ.get(
     'SEO_OAUTH_REDIRECT_URI', 'http://localhost:5001/api/oauth/google/callback')
-# state -> путь к client_secret.json (приложение однопользовательское)
+# state -> путь к client_secret.json
 _oauth_flows = {}
 
 # Default settings
@@ -508,49 +510,73 @@ def load_gsc_user_creds():
 def init_gsc():
     global webmasters_service, verified_sites
 
-    # 1) Приоритет — токен нового веб-флоу (совместим с Docker).
-    creds = load_gsc_user_creds()
-    if creds:
-        try:
-            webmasters_service = build_gsc_service(creds)
-            verified_sites = get_verified_sites(webmasters_service)
-            print(f"Initialized GSC (web token) with {len(verified_sites)} verified sites")
-            config = load_config()
-            config['isAuthorized'] = True
-            save_config(config)
-            return
-        except Exception as e:
-            print(f"Error initializing GSC from web token: {e}")
+    # 0) Миграция: если остался single-token файл прежнего флоу и в БД ещё нет
+    #    аккаунтов — попробовать импортировать его как аккаунт (нужен email-scope;
+    #    старый токен мог его не иметь — тогда просто пропускаем).
+    try:
+        if os.path.exists(GSC_TOKEN_FILE) and not gscm.list_accounts():
+            creds = load_gsc_user_creds()
+            if creds:
+                try:
+                    email = gscm.add_or_update_account(creds)
+                    log.info("Migrated legacy token to account %s", email)
+                    os.remove(GSC_TOKEN_FILE)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Legacy token migration skipped: %s", e)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Legacy migration check failed: %s", e)
 
-    # 2) Legacy: подхватить старую oauth2client-авторизацию БЕЗ интерактива.
-    #    Интерактивный OAuth на старте блокирует поток до app.run() — порт 5001
-    #    не откроется (Connection reset by peer), поэтому allow_interactive=False.
-    config = load_config()
-    creds_path = config.get('credentialsPath', '')
-    if creds_path and os.path.exists(creds_path):
-        webmasters_service = authorize_creds(creds_path, allow_interactive=False)
-        if webmasters_service:
-            verified_sites = get_verified_sites(webmasters_service)
-            print(f"Initialized GSC (legacy) with {len(verified_sites)} verified sites")
-            config['isAuthorized'] = True
-            save_config(config)
-        else:
-            print("GSC credentials present but not authorized yet "
-                  "(use the Authorize button).")
-            config['isAuthorized'] = False
-            save_config(config)
-    else:
-        if creds_path:
-            print(f"Credentials file not found at {creds_path}")
-        else:
-            print("No credentials path configured")
+    # Основной путь: собрать реестр из всех аккаунтов в БД.
+    try:
+        gscm.rebuild_registry()
+        verified_sites = gscm.all_site_urls()
+        webmasters_service = (gscm.get_service_for_site(verified_sites[0])
+                              if verified_sites else None)
+        config = load_config()
+        config['isAuthorized'] = gscm.has_any_account()
+        save_config(config)
+        log.info("GSC init: %s account(s), %s site(s)",
+                 len(gscm.list_accounts()), len(verified_sites))
+    except Exception as e:  # noqa: BLE001
+        log.exception("init_gsc failed: %s", e)
 
 # API Routes
 @app.route('/api/sites', methods=['GET'])
 def get_sites():
-    """Get verified sites"""
+    """Список верифицированных сайтов, агрегированный по всем аккаунтам."""
     global verified_sites
+    verified_sites = gscm.all_site_urls()
     return jsonify({"sites": verified_sites})
+
+
+@app.route('/api/accounts', methods=['GET'])
+def list_accounts_endpoint():
+    """Подключённые Google-аккаунты (email, число сайтов, дата)."""
+    return jsonify({"accounts": gscm.list_accounts()})
+
+
+@app.route('/api/accounts/delete', methods=['POST'])
+def delete_account_endpoint():
+    """Отключить аккаунт по email (удаляет его сайты из БД)."""
+    global verified_sites
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip()
+    if not email:
+        return jsonify({"error": "email не задан"}), 400
+    ok = gscm.delete_account(email)
+    verified_sites = gscm.all_site_urls()
+    if not ok:
+        return jsonify({"error": f"Аккаунт {email} не найден"}), 404
+    return jsonify({"success": True, "accounts": gscm.list_accounts()})
+
+
+@app.route('/api/accounts/refresh', methods=['POST'])
+def refresh_accounts_endpoint():
+    """Перетянуть список сайтов по всем аккаунтам."""
+    global verified_sites
+    total = gscm.refresh_all_sites()
+    verified_sites = gscm.all_site_urls()
+    return jsonify({"success": True, "sites": total, "accounts": gscm.list_accounts()})
 
 @app.route('/api/data', methods=['GET'])
 def get_gsc_data():
@@ -619,46 +645,56 @@ def get_gsc_data():
     
     if not all([site_url, start_date, end_date]):
         return jsonify({"error": "Missing required parameters"}), 400
-    
-    if not webmasters_service:
-        return jsonify({"error": "GSC service not initialized"}), 500
-    
+
+    service = gscm.get_service_for_site(site_url)
+    if not service:
+        return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
+    # Кэш ответа в Redis (ленивая подгрузка/ускорение под нагрузкой).
+    cache_key = "gscdata:" + ":".join(str(x) for x in [
+        site_url, start_date, end_date, ",".join(dimensions), device,
+        filter_dimension, filter_type, filter_value])
+    cached = seo_cache.cache_get_json(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     try:
         raw_data = get_data(
-            webmasters_service, 
-            site_url, 
-            start_date, 
-            end_date, 
+            service,
+            site_url,
+            start_date,
+            end_date,
             dimensions=dimensions,
             dimension_filters=dimension_filters
         )
-        
+
         cleaned_data = clean_and_export_data(raw_data, dimensions)
+        seo_cache.cache_set_json(cache_key, cleaned_data)
         return jsonify(cleaned_data)
-        
+
     except Exception as e:
-        print(f"Error in get_gsc_data: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        log.exception("Error in get_gsc_data (%s): %s", site_url, e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/top-queries', methods=['GET'])
 def get_top_queries():
     """Get top performing queries"""
-    global webmasters_service
-    
     site_url = request.args.get('siteUrl')
     start_date = request.args.get('startDate')
     end_date = request.args.get('endDate')
     limit = int(request.args.get('limit', 10))
-    
+
     if not all([site_url, start_date, end_date]):
         return jsonify({"error": "Missing required parameters"}), 400
-    
+
+    service = gscm.get_service_for_site(site_url)
+    if not service:
+        return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
     try:
         raw_data = get_data(
-            webmasters_service, 
-            site_url, 
+            service,
+            site_url,
             start_date, 
             end_date, 
             dimensions=['query'],
@@ -1025,18 +1061,21 @@ def oauth_google_callback():
         flow.fetch_token(authorization_response=request.url)
         creds = flow.credentials
 
-        with open(GSC_TOKEN_FILE, 'w') as f:
-            f.write(creds.to_json())
-
-        webmasters_service = build_gsc_service(creds)
-        verified_sites = get_verified_sites(webmasters_service)
+        # Мультиаккаунт: сохраняем токен в БД под email аккаунта и тянем его сайты.
+        email = gscm.add_or_update_account(creds)
+        verified_sites = gscm.all_site_urls()
+        webmasters_service = (gscm.get_service_for_site(verified_sites[0])
+                              if verified_sites else None)
 
         config = load_config()
-        config['isAuthorized'] = True
+        config['isAuthorized'] = gscm.has_any_account()
         save_config(config)
 
-        return _oauth_return(True, f"Авторизация прошла успешно. Найдено сайтов: {len(verified_sites)}.")
+        log.info("OAuth success for %s (%s sites total)", email, len(verified_sites))
+        return _oauth_return(
+            True, f"Аккаунт {email} подключён. Всего сайтов по всем аккаунтам: {len(verified_sites)}.")
     except Exception as e:
+        log.exception("OAuth callback failed: %s", e)
         return _oauth_return(False, f"Не удалось завершить авторизацию: {e}")
 
 
@@ -1107,11 +1146,18 @@ def clear_settings():
                 except Exception as e:
                     print(f"Error deleting {path}: {e}")
         
+        # Удалить все подключённые аккаунты из БД и перестроить реестр
+        try:
+            for acc in gscm.list_accounts():
+                gscm.delete_account(acc['email'])
+        except Exception as e:  # noqa: BLE001
+            log.warning("clear: deleting accounts failed: %s", e)
+
         # Reset global variables
         webmasters_service = None
         verified_sites = []
         openai_client = None
-        
+
         # Clear config
         config = {
             "openaiApiKey": "",
@@ -1140,35 +1186,34 @@ def clear_settings():
 @app.route('/api/url-inspect', methods=['POST'])
 def inspect_url():
     """Inspect a URL using Google Search Console URL Inspection API"""
-    global webmasters_service
-    
-    if not webmasters_service:
-        return jsonify({"error": "GSC service not initialized. Please authenticate first."}), 401
-    
     try:
         data = request.get_json()
         inspection_url = data.get('inspectionUrl')
         site_url = data.get('siteUrl')
         language_code = data.get('languageCode', 'en-US')
-        
+
         if not inspection_url:
             return jsonify({"error": "inspectionUrl is required"}), 400
-        
+
         if not site_url:
             return jsonify({"error": "siteUrl is required"}), 400
-        
+
+        service = gscm.get_service_for_site(site_url)
+        if not service:
+            return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
         # Build the request body for the URL Inspection API
         request_body = {
             'inspectionUrl': inspection_url,
             'siteUrl': site_url,
             'languageCode': language_code
         }
-        
+
         # Call the URL Inspection API
         # The API endpoint is urlInspection.index().inspect()
         try:
             # The method signature is: urlInspection().index().inspect(body={...}).execute()
-            response = webmasters_service.urlInspection().index().inspect(body=request_body).execute()
+            response = service.urlInspection().index().inspect(body=request_body).execute()
             return jsonify(response)
         except Exception as api_error:
             error_message = str(api_error)
@@ -1207,21 +1252,21 @@ def list_sitemaps():
     print(f"[SITEMAPS] Request method: {request.method}", file=sys.stderr, flush=True)
     print(f"[SITEMAPS] Request args: {dict(request.args)}", file=sys.stderr, flush=True)
     
-    if not webmasters_service:
-        print(f"[SITEMAPS] ERROR: GSC service not initialized", file=sys.stderr, flush=True)
-        return jsonify({"error": "GSC service not initialized. Please authenticate first."}), 401
-    
     try:
         site_url = request.args.get('siteUrl')
         print(f"[SITEMAPS] Site URL from request: {site_url}", file=sys.stderr, flush=True)
-        
+
         if not site_url:
             print(f"[SITEMAPS] ERROR: siteUrl is required", file=sys.stderr, flush=True)
             return jsonify({"error": "siteUrl is required"}), 400
-        
+
+        service = gscm.get_service_for_site(site_url)
+        if not service:
+            return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
         # List sitemaps
         print(f"[SITEMAPS] Calling GSC API: sitemaps().list(siteUrl={site_url})", file=sys.stderr, flush=True)
-        response = webmasters_service.sitemaps().list(siteUrl=site_url).execute()
+        response = service.sitemaps().list(siteUrl=site_url).execute()
         print(f"[SITEMAPS] API Response received:", file=sys.stderr, flush=True)
         print(json.dumps(response, indent=2), file=sys.stderr, flush=True)
         
@@ -1270,27 +1315,27 @@ def get_sitemap():
     print(f"[SITEMAPS GET] Received request to get sitemap details", file=sys.stderr, flush=True)
     print(f"[SITEMAPS GET] Request args: {dict(request.args)}", file=sys.stderr, flush=True)
     
-    if not webmasters_service:
-        print(f"[SITEMAPS GET] ERROR: GSC service not initialized", file=sys.stderr, flush=True)
-        return jsonify({"error": "GSC service not initialized. Please authenticate first."}), 401
-    
     try:
         site_url = request.args.get('siteUrl')
         feedpath = request.args.get('feedpath')
-        
+
         print(f"[SITEMAPS GET] Site URL: {site_url}", file=sys.stderr, flush=True)
         print(f"[SITEMAPS GET] Feedpath: {feedpath}", file=sys.stderr, flush=True)
-        
+
         if not site_url:
             print(f"[SITEMAPS GET] ERROR: siteUrl is required", file=sys.stderr, flush=True)
             return jsonify({"error": "siteUrl is required"}), 400
         if not feedpath:
             print(f"[SITEMAPS GET] ERROR: feedpath is required", file=sys.stderr, flush=True)
             return jsonify({"error": "feedpath is required"}), 400
-        
+
+        service = gscm.get_service_for_site(site_url)
+        if not service:
+            return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
         # Get sitemap
         print(f"[SITEMAPS GET] Calling GSC API: sitemaps().get(siteUrl={site_url}, feedpath={feedpath})", file=sys.stderr, flush=True)
-        response = webmasters_service.sitemaps().get(siteUrl=site_url, feedpath=feedpath).execute()
+        response = service.sitemaps().get(siteUrl=site_url, feedpath=feedpath).execute()
         print(f"[SITEMAPS GET] API Response:", file=sys.stderr, flush=True)
         print(json.dumps(response, indent=2), file=sys.stderr, flush=True)
         print(f"{'='*60}\n", file=sys.stderr, flush=True)
@@ -1323,26 +1368,26 @@ def submit_sitemap():
     
     print(f"[SITEMAPS SUBMIT] Received request to submit sitemap")
     
-    if not webmasters_service:
-        print(f"[SITEMAPS SUBMIT] ERROR: GSC service not initialized")
-        return jsonify({"error": "GSC service not initialized. Please authenticate first."}), 401
-    
     try:
         data = request.get_json()
         print(f"[SITEMAPS SUBMIT] Request data: {json.dumps(data, indent=2)}")
         site_url = data.get('siteUrl')
         feedpath = data.get('feedpath')
-        
+
         if not site_url:
             print(f"[SITEMAPS SUBMIT] ERROR: siteUrl is required")
             return jsonify({"error": "siteUrl is required"}), 400
         if not feedpath:
             print(f"[SITEMAPS SUBMIT] ERROR: feedpath is required")
             return jsonify({"error": "feedpath is required"}), 400
-        
+
+        service = gscm.get_service_for_site(site_url)
+        if not service:
+            return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
         print(f"[SITEMAPS SUBMIT] Calling GSC API: sitemaps().submit(siteUrl={site_url}, feedpath={feedpath})")
         # Submit sitemap
-        response = webmasters_service.sitemaps().submit(siteUrl=site_url, feedpath=feedpath).execute()
+        response = service.sitemaps().submit(siteUrl=site_url, feedpath=feedpath).execute()
         print(f"[SITEMAPS SUBMIT] API Response: {json.dumps(response, indent=2)}")
         return jsonify({"success": True, "message": "Sitemap submitted successfully"})
     except Exception as e:
@@ -1370,26 +1415,26 @@ def delete_sitemap():
     
     print(f"[SITEMAPS DELETE] Received request to delete sitemap")
     
-    if not webmasters_service:
-        print(f"[SITEMAPS DELETE] ERROR: GSC service not initialized")
-        return jsonify({"error": "GSC service not initialized. Please authenticate first."}), 401
-    
     try:
         data = request.get_json()
         print(f"[SITEMAPS DELETE] Request data: {json.dumps(data, indent=2)}")
         site_url = data.get('siteUrl')
         feedpath = data.get('feedpath')
-        
+
         if not site_url:
             print(f"[SITEMAPS DELETE] ERROR: siteUrl is required")
             return jsonify({"error": "siteUrl is required"}), 400
         if not feedpath:
             print(f"[SITEMAPS DELETE] ERROR: feedpath is required")
             return jsonify({"error": "feedpath is required"}), 400
-        
+
+        service = gscm.get_service_for_site(site_url)
+        if not service:
+            return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
         print(f"[SITEMAPS DELETE] Calling GSC API: sitemaps().delete(siteUrl={site_url}, feedpath={feedpath})")
         # Delete sitemap
-        webmasters_service.sitemaps().delete(siteUrl=site_url, feedpath=feedpath).execute()
+        service.sitemaps().delete(siteUrl=site_url, feedpath=feedpath).execute()
         print(f"[SITEMAPS DELETE] Sitemap deleted successfully")
         return jsonify({"success": True, "message": "Sitemap deleted successfully"})
     except Exception as e:
@@ -1417,11 +1462,6 @@ def trends_analyze():
       siteUrl, startDate, endDate, urlFilter, queryFilter,
       device, country, topNQueries, trendsGeoCode, timeResolution
     """
-    global webmasters_service
-
-    if not webmasters_service:
-        return jsonify({"error": "GSC service not initialized. Please authenticate first."}), 401
-
     try:
         body = request.get_json() or {}
         site_url       = body.get('siteUrl', '')
@@ -1437,6 +1477,10 @@ def trends_analyze():
 
         if not all([site_url, start_date_str, end_date_str]):
             return jsonify({"error": "siteUrl, startDate, endDate are required"}), 400
+
+        service = gscm.get_service_for_site(site_url)
+        if not service:
+            return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
 
         config = load_config()
         trends_creds_path = config.get('trendsCredentialsPath', '')
@@ -1469,7 +1513,7 @@ def trends_analyze():
         if dim_filter_groups:
             top_q_request['dimensionFilterGroups'] = dim_filter_groups
 
-        top_q_resp = webmasters_service.searchanalytics().query(
+        top_q_resp = service.searchanalytics().query(
             siteUrl=site_url, body=top_q_request).execute()
         top_q_rows = top_q_resp.get('rows', [])
         top_q_rows.sort(key=lambda r: r.get('clicks', 0), reverse=True)
@@ -1492,7 +1536,7 @@ def trends_analyze():
             'rowLimit': 25000,
             'dimensionFilterGroups': [{"filters": kw_filters}],
         }
-        kw_resp = webmasters_service.searchanalytics().query(
+        kw_resp = service.searchanalytics().query(
             siteUrl=site_url, body=kw_request).execute()
         kw_rows = kw_resp.get('rows', [])
 

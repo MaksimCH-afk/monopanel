@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faKey, faFile, faCheckCircle, faExclamationTriangle, faSpinner, faEye, faEyeSlash, faTrash, faRobot, faWandMagicSparkles } from '@fortawesome/free-solid-svg-icons';
+import { faKey, faFile, faCheckCircle, faExclamationTriangle, faSpinner, faEye, faEyeSlash, faTrash, faRobot, faWandMagicSparkles, faUsers, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { useData } from '@/contexts/DataContext';
 
 interface SettingsData {
@@ -55,6 +55,9 @@ export default function SettingsPage() {
   });
   const [availableSites, setAvailableSites] = useState<string[]>([]);
   const [siteSearchFilter, setSiteSearchFilter] = useState('');
+  // Подключённые Google-аккаунты (мультиаккаунт)
+  const [accounts, setAccounts] = useState<Array<{ email: string; sites: number; created_at: string | null }>>([]);
+  const [deletingAccount, setDeletingAccount] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
@@ -70,6 +73,7 @@ export default function SettingsPage() {
   // Load settings on mount
   useEffect(() => {
     loadSettings();
+    loadAccounts();
   }, []);
 
   // Обработка возврата после веб-авторизации Google (?gscAuth=success|error)
@@ -81,6 +85,7 @@ export default function SettingsPage() {
     if (gscAuth === 'success') {
       setMessage({ type: 'success', text: msg || 'Авторизация прошла успешно!' });
       loadSettings();
+      loadAccounts();
     } else {
       setMessage({ type: 'error', text: msg || 'Ошибка авторизации' });
     }
@@ -126,6 +131,42 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Не удалось загрузить настройки. Убедитесь, что бэкенд запущен.' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAccounts = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/accounts`);
+      if (res.ok) {
+        const data = await res.json();
+        setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+      }
+    } catch (error) {
+      console.error('Error loading accounts:', error);
+    }
+  };
+
+  const deleteAccount = async (email: string) => {
+    if (!confirm(`Отключить аккаунт ${email}? Его сайты пропадут из дашборда.`)) return;
+    setDeletingAccount(email);
+    try {
+      const res = await fetch(`${API_BASE}/api/accounts/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+        setMessage({ type: 'success', text: `Аккаунт ${email} отключён.` });
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Не удалось отключить аккаунт' });
+      }
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      setMessage({ type: 'error', text: 'Не удалось отключить аккаунт. Убедитесь, что бэкенд запущен.' });
+    } finally {
+      setDeletingAccount(null);
     }
   };
 
@@ -481,13 +522,59 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            {/* Authorization Status */}
-            {settings.isAuthorized && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2">
-                <FontAwesomeIcon icon={faCheckCircle} className="text-green-600" />
-                <span className="text-green-800 text-sm font-medium">Данные для доступа авторизованы и готовы к использованию</span>
-              </div>
-            )}
+            {/* Connected Google accounts (мультиаккаунт) */}
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 text-sm font-medium text-gray-700">
+                <FontAwesomeIcon icon={faUsers} className="text-gray-500" />
+                <span>Подключённые Google-аккаунты ({accounts.length})</span>
+              </label>
+              <p className="text-xs text-gray-500">
+                Можно подключить несколько Gmail / Search Console — сайты со всех аккаунтов
+                объединяются в общем дашборде.
+              </p>
+
+              {accounts.length > 0 ? (
+                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                  {accounts.map((acc) => (
+                    <div key={acc.email} className="flex items-center justify-between px-4 py-2">
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <FontAwesomeIcon icon={faCheckCircle} className="text-green-600 flex-shrink-0" />
+                        <span className="text-sm text-gray-800 truncate">{acc.email}</span>
+                        <span className="text-xs text-gray-500 flex-shrink-0">· сайтов: {acc.sites}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => deleteAccount(acc.email)}
+                        disabled={deletingAccount === acc.email}
+                        className="text-red-600 hover:text-red-800 disabled:opacity-50 text-sm flex items-center space-x-1 flex-shrink-0"
+                      >
+                        <FontAwesomeIcon icon={deletingAccount === acc.email ? faSpinner : faTrash}
+                          className={deletingAccount === acc.email ? 'animate-spin' : ''} />
+                        <span>Отключить</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-gray-300 rounded-lg p-4 bg-gray-50">
+                  <p className="text-sm text-gray-600">
+                    Аккаунтов пока нет. Укажите путь к client_secret.json выше, сохраните настройки
+                    и нажмите «Добавить аккаунт Google».
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={authorizeCredentials}
+                disabled={authorizing || !settings.credentialsPath}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2 text-sm"
+              >
+                {authorizing ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
+                             : <FontAwesomeIcon icon={faPlus} />}
+                <span>{authorizing ? 'Открываю Google…' : 'Добавить аккаунт Google'}</span>
+              </button>
+            </div>
 
             {/* Overview Sites Selection */}
             <div className="space-y-2">
@@ -590,15 +677,6 @@ export default function SettingsPage() {
               >
                 {saving && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
                 <span>{saving ? 'Сохранение...' : 'Сохранить настройки'}</span>
-              </button>
-
-              <button
-                onClick={authorizeCredentials}
-                disabled={authorizing || !settings.credentialsPath}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
-              >
-                {authorizing && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
-                <span>{authorizing ? 'Авторизация...' : 'Авторизовать данные'}</span>
               </button>
 
               <button
