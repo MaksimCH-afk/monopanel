@@ -1624,6 +1624,7 @@ function loadCustomWorkerStatus() {
             box.innerHTML = html;
             box.dataset.code = r.code || '';
             box.dataset.routes = routes.join(', ');
+            box.dataset.codeError = r.code_error || '';
         } else {
             box.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="fas fa-triangle-exclamation me-1"></i>Воркера на этом домене нет.</div>';
             box.dataset.code = ''; box.dataset.routes = '';
@@ -1643,7 +1644,8 @@ function loadExistingWorker() {
         ta.dispatchEvent(new Event('input'));
         showSuccess('Код и маршруты воркера загружены в форму');
     } else {
-        showError('Маршруты подставлены, но код скрипта получить не удалось (например, воркер залит вне панели или нет прав Workers Scripts:Read)');
+        const reason = box.dataset.codeError || 'нет прав Workers Scripts:Read или воркер вне панели';
+        showError('Маршруты подставлены, но код скрипта получить не удалось: ' + reason);
     }
 }
 

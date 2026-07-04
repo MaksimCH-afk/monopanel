@@ -3578,8 +3578,8 @@ function cfWorkerScriptName($domain) {
  * ['exists'=>bool, 'code'=>string, 'http_code'=>int].
  */
 function cfGetWorkerScriptContent($credentials, $accountId, $scriptName, $proxies = []) {
-    $out = ['exists' => false, 'code' => '', 'http_code' => 0];
-    if (!$accountId || !$scriptName) return $out;
+    $out = ['exists' => false, 'code' => '', 'http_code' => 0, 'error' => null];
+    if (!$accountId || !$scriptName) { $out['error'] = 'нет account_id или имени скрипта'; return $out; }
 
     $url = "https://api.cloudflare.com/client/v4/accounts/$accountId/workers/scripts/$scriptName";
     $ch = curl_init($url);
@@ -3606,8 +3606,17 @@ function cfGetWorkerScriptContent($credentials, $accountId, $scriptName, $proxie
     $ctype = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
     curl_close($ch);
 
-    if ($out['http_code'] === 404) return $out;                 // скрипта нет
-    if ($resp === false || $out['http_code'] !== 200) return $out;
+    if ($out['http_code'] === 404) { $out['error'] = 'скрипт не найден на аккаунте (404)'; return $out; }
+    if ($resp === false || $out['http_code'] !== 200) {
+        // Пытаемся достать причину от Cloudflare (права/аутентификация).
+        $bodyErr = $resp === false ? '' : substr($resp, $hsize);
+        $j = json_decode($bodyErr, true);
+        $msg = $j['errors'][0]['message'] ?? '';
+        $codeNum = $j['errors'][0]['code'] ?? null;
+        $hint = is_numeric($codeNum) && function_exists('cfHumanErrorHint') ? cfHumanErrorHint((int)$codeNum) : '';
+        $out['error'] = 'HTTP ' . $out['http_code'] . ($msg ? ": $msg" : '') . ($hint ? " — $hint" : '');
+        return $out;
+    }
 
     $body = substr($resp, $hsize);
     if (stripos($ctype, 'multipart') !== false && preg_match('/boundary=("?)([^";]+)\1/i', $ctype, $bm)) {

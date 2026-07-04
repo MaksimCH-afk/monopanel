@@ -822,12 +822,24 @@ function getCustomWorker($pdo, $userId, $data) {
     $accountId = $zoneId ? cfGetAccountId($pdo, $credentials, $zoneId, $proxies, $userId) : null;
     $code = '';
     $exists = !empty($routes);
+    $codeError = null;
 
     // Код скрипта (best-effort): того, что привязан маршрутом; если маршрутов нет —
     // проверяем, не залит ли наш скрипт без маршрута.
     if ($accountId) {
         $sc = cfGetWorkerScriptContent($credentials, $accountId, $loadScript ?: $scriptName, $proxies);
         if (!empty($sc['exists'])) { $exists = true; $code = $sc['code'] ?? ''; if (!$loadScript) $loadScript = $scriptName; }
+        else { $codeError = $sc['error'] ?? 'скрипт недоступен'; }
+        if ($exists && $code === '' && empty($sc['error']) && !empty($sc['exists'])) {
+            $codeError = 'скрипт есть, но код не распарсился (нестандартный формат)';
+        }
+    } else {
+        $codeError = 'не удалось определить account_id (нужно право Account Settings: Read у токена аккаунта)';
+    }
+
+    // Воркер есть, но код не получили — пишем в логи с конкретной причиной (раньше молчало).
+    if ($exists && $code === '' && $codeError) {
+        logAction($pdo, $userId, 'Worker: код не получен', "{$domain['domain']}: скрипт " . ($loadScript ?: $scriptName) . " — {$codeError}");
     }
 
     return [
@@ -839,6 +851,7 @@ function getCustomWorker($pdo, $userId, $data) {
         'foreign'      => $foreign,
         'routes'       => array_values(array_unique($routes)),
         'code'         => $code,
+        'code_error'   => $codeError,
     ];
 }
 
