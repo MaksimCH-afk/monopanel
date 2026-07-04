@@ -46,14 +46,25 @@ webmasters_service = None
 verified_sites = []
 openai_client = None
 
+# Default OpenAI model used for insights when none is configured
+DEFAULT_OPENAI_MODEL = "gpt-4o"
+
 # Default settings
 DEFAULT_SETTINGS = {
     "openaiApiKey": "",
+    "openaiModel": DEFAULT_OPENAI_MODEL,
     "credentialsPath": os.path.join(DATA_DIR, "client_secret.json"),
     "trendsCredentialsPath": "",
     "isAuthorized": False,
     "overviewSites": []
 }
+
+
+def get_openai_model():
+    """Return the OpenAI model configured in settings (falls back to default)."""
+    config = load_config()
+    model = config.get('openaiModel', '') or DEFAULT_OPENAI_MODEL
+    return model
 
 # ─── Google Trends helpers ────────────────────────────────────────────────────
 
@@ -629,7 +640,7 @@ def get_gpt_insights(content, analysis_type="general"):
                     "content": content
                 }
             ],
-            model="gpt-4o"
+            model=get_openai_model()
         )
         
         response_message = chat_completion.choices[0].message.content
@@ -719,6 +730,7 @@ def get_settings():
     config = load_config()
     return jsonify({
         "openaiApiKey": config.get('openaiApiKey', ''),
+        "openaiModel": config.get('openaiModel', '') or DEFAULT_OPENAI_MODEL,
         "credentialsPath": config.get('credentialsPath', ''),
         "trendsCredentialsPath": config.get('trendsCredentialsPath', ''),
         "isAuthorized": config.get('isAuthorized', False),
@@ -737,7 +749,10 @@ def save_settings():
             config['openaiApiKey'] = data['openaiApiKey']
             # Reinitialize OpenAI client with new key
             initialize_openai_client()
-        
+
+        if 'openaiModel' in data:
+            config['openaiModel'] = data['openaiModel'] or DEFAULT_OPENAI_MODEL
+
         if 'credentialsPath' in data:
             config['credentialsPath'] = data['credentialsPath']
             config['isAuthorized'] = False
@@ -758,6 +773,7 @@ def save_settings():
                 "success": True,
                 "isAuthorized": config.get('isAuthorized', False),
                 "openaiApiKey": config.get('openaiApiKey', ''),
+                "openaiModel": config.get('openaiModel', '') or DEFAULT_OPENAI_MODEL,
                 "credentialsPath": config.get('credentialsPath', ''),
                 "trendsCredentialsPath": config.get('trendsCredentialsPath', ''),
                 "overviewSites": config.get('overviewSites', [])
@@ -843,6 +859,7 @@ def clear_settings():
         # Clear config
         config = {
             "openaiApiKey": "",
+            "openaiModel": DEFAULT_OPENAI_MODEL,
             "credentialsPath": "",
             "isAuthorized": False,
             "overviewSites": []
@@ -1386,7 +1403,7 @@ Data (Date | GSC Clicks | Google Trends scaled interest):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            model="gpt-4o",
+            model=get_openai_model(),
         )
 
         return jsonify({"insights": chat_completion.choices[0].message.content})

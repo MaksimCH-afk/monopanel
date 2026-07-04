@@ -58,20 +58,20 @@ export default function OverviewPage() {
 
   // Date range options
   const dateRangeOptions = [
-    { value: '7', label: '7 days' },
-    { value: '30', label: '30 days' },
-    { value: '90', label: '90 days' },
-    { value: '180', label: '6 months' },
-    { value: '365', label: '1 year' },
-    { value: '480', label: '16 months' }
+    { value: '7', label: '7 дней' },
+    { value: '30', label: '30 дней' },
+    { value: '90', label: '90 дней' },
+    { value: '180', label: '6 месяцев' },
+    { value: '365', label: '1 год' },
+    { value: '480', label: '16 месяцев' }
   ];
 
   // Device options
   const deviceOptions = [
-    { value: 'all', label: 'All Devices' },
-    { value: 'desktop', label: 'Desktop' },
-    { value: 'mobile', label: 'Mobile' },
-    { value: 'tablet', label: 'Tablet' }
+    { value: 'all', label: 'Все устройства' },
+    { value: 'desktop', label: 'Компьютер' },
+    { value: 'mobile', label: 'Мобильный' },
+    { value: 'tablet', label: 'Планшет' }
   ];
 
   // Load overview sites from settings, don't auto-select
@@ -179,7 +179,7 @@ export default function OverviewPage() {
       setError(''); // Clear any previous errors
     } catch (error) {
       console.error('Error fetching overview data:', error);
-      setError('Failed to fetch data. Please check if the backend is running.');
+      setError('Не удалось загрузить данные. Проверьте, запущен ли бэкенд.');
     } finally {
       setOverviewLoading(false);
     }
@@ -241,7 +241,7 @@ export default function OverviewPage() {
 
       const datasets: any[] = [
         {
-          label: 'Clicks',
+          label: 'Клики',
           data: siteData.timeSeriesData.map((item: any) => item.clicks),
           borderColor: '#3B82F6',
           backgroundColor: '#3B82F620',
@@ -253,7 +253,7 @@ export default function OverviewPage() {
           yAxisID: 'y'
         },
         {
-          label: 'Impressions',
+          label: 'Показы',
           data: siteData.timeSeriesData.map((item: any) => item.impressions),
           borderColor: '#10B981',
           backgroundColor: '#10B98120',
@@ -282,7 +282,7 @@ export default function OverviewPage() {
         });
       } else if (overviewSecondaryMetric === 'position') {
         datasets.push({
-          label: 'Position',
+          label: 'Позиция',
           data: siteData.timeSeriesData.map((item: any) => item.position),
           borderColor: '#EF4444',
           backgroundColor: '#EF444420',
@@ -327,7 +327,7 @@ export default function OverviewPage() {
               position: 'left',
               title: {
                 display: true,
-                text: 'Clicks',
+                text: 'Клики',
                 color: '#3B82F6'
               },
               grid: {
@@ -340,7 +340,7 @@ export default function OverviewPage() {
               position: 'right',
               title: {
                 display: true,
-                text: 'Impressions',
+                text: 'Показы',
                 color: '#10B981'
               },
               grid: {
@@ -381,10 +381,10 @@ export default function OverviewPage() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-4xl font-bold text-gray-900 mb-2">
-                📈 Sites Overview
+                📈 Обзор сайтов
               </h1>
               <p className="text-gray-600">
-                Multi-site performance tracking and trend analysis
+                Отслеживание эффективности нескольких сайтов и анализ трендов
               </p>
             </div>
             <button
@@ -392,18 +392,18 @@ export default function OverviewPage() {
               disabled={overviewLoading}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {overviewLoading ? 'Loading...' : '🔄 Refresh Data'}
+              {overviewLoading ? 'Загрузка...' : '🔄 Обновить данные'}
             </button>
           </div>
         </div>
 
         {/* Controls */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Overview Controls</h2>
+          <h2 className="text-xl font-semibold mb-4">Параметры обзора</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label htmlFor="time-period" className="block text-sm font-medium text-gray-700 mb-2">
-                Time Period
+                Период
               </label>
               <select id="time-period" className="w-full" onChange={(e) => setOverviewPeriod(e.target.value)} value={overviewPeriod}>
                 {dateRangeOptions.map((option) => (
@@ -413,7 +413,7 @@ export default function OverviewPage() {
             </div>
             <div>
               <label htmlFor="device-type" className="block text-sm font-medium text-gray-700 mb-2">
-                Device Type
+                Тип устройства
               </label>
               <select id="device-type" className="w-full" onChange={(e) => setOverviewDevice(e.target.value)} value={overviewDevice}>
                 {deviceOptions.map((option) => (
@@ -423,14 +423,14 @@ export default function OverviewPage() {
             </div>
             <div>
               <label htmlFor="secondary-metric" className="block text-sm font-medium text-gray-700 mb-2">
-                Secondary Metric
+                Дополнительная метрика
               </label>
               <div className="flex gap-2">
                 <button
                   onClick={() => setOverviewSecondaryMetric('none')}
                   className={`px-3 py-2 text-sm rounded ${overviewSecondaryMetric === 'none' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                 >
-                  None
+                  Нет
                 </button>
                 <button
                   onClick={() => setOverviewSecondaryMetric('ctr')}
@@ -442,7 +442,7 @@ export default function OverviewPage() {
                   onClick={() => setOverviewSecondaryMetric('position')}
                   className={`px-3 py-2 text-sm rounded ${overviewSecondaryMetric === 'position' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                 >
-                  Position
+                  Позиция
                 </button>
               </div>
             </div>
@@ -452,7 +452,7 @@ export default function OverviewPage() {
         {/* Error Display */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded p-4 mb-6">
-            <h3 className="text-red-800 font-medium">Error</h3>
+            <h3 className="text-red-800 font-medium">Ошибка</h3>
             <p className="text-red-700 text-sm">{error}</p>
           </div>
         )}
@@ -461,7 +461,7 @@ export default function OverviewPage() {
         {overviewLoading && topSites.length > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded p-8 text-center mb-6">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-            <p className="text-blue-800">Loading overview data for top {topSites.length} sites...</p>
+            <p className="text-blue-800">Загрузка данных обзора для {topSites.length} сайтов...</p>
           </div>
         )}
 
@@ -470,16 +470,16 @@ export default function OverviewPage() {
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-8 text-center mb-6">
             <div className="text-4xl mb-4">📋</div>
             <h3 className="text-xl font-semibold text-yellow-900 mb-2">
-              No Sites Selected
+              Сайты не выбраны
             </h3>
             <p className="text-yellow-800 mb-4">
-              Please select sites in Settings to view their overview data.
+              Выберите сайты в настройках, чтобы увидеть данные обзора.
             </p>
             <Link 
               href="/settings"
               className="inline-flex items-center space-x-2 px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors font-medium"
             >
-              <span>Go to Settings</span>
+              <span>Перейти в настройки</span>
               <span>→</span>
             </Link>
           </div>
@@ -489,9 +489,9 @@ export default function OverviewPage() {
         {topSites.length > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-6">
             <h3 className="text-blue-800 font-medium mb-3">
-              📊 Showing Top {topSites.length} Sites
+              📊 Показаны {topSites.length} сайтов
               {overviewData.length > 0 && (
-                <span className="ml-2 text-sm font-normal">(Data cached - change settings or click refresh to update)</span>
+                <span className="ml-2 text-sm font-normal">(Данные из кэша — измените настройки или нажмите «Обновить»)</span>
               )}
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-sm text-blue-700">
@@ -516,19 +516,19 @@ export default function OverviewPage() {
                 {siteData.data && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-blue-50 p-3 rounded-lg">
-                      <div className="text-blue-600 font-medium text-sm">Total Clicks</div>
+                      <div className="text-blue-600 font-medium text-sm">Всего кликов</div>
                       <div className="text-lg font-bold text-blue-800">{formatNumber(siteData.data.totalClicks)}</div>
                     </div>
                     <div className="bg-green-50 p-3 rounded-lg">
-                      <div className="text-green-600 font-medium text-sm">Total Impressions</div>
+                      <div className="text-green-600 font-medium text-sm">Всего показов</div>
                       <div className="text-lg font-bold text-green-800">{formatNumber(siteData.data.totalImpressions)}</div>
                     </div>
                     <div className="bg-orange-50 p-3 rounded-lg">
-                      <div className="text-orange-600 font-medium text-sm">Average CTR</div>
+                      <div className="text-orange-600 font-medium text-sm">Средний CTR</div>
                       <div className="text-lg font-bold text-orange-800">{(siteData.data.avgCtr * 100).toFixed(2)}%</div>
                     </div>
                     <div className="bg-red-50 p-3 rounded-lg">
-                      <div className="text-red-600 font-medium text-sm">Average Position</div>
+                      <div className="text-red-600 font-medium text-sm">Средняя позиция</div>
                       <div className="text-lg font-bold text-red-800">{siteData.data.avgPosition.toFixed(1)}</div>
                     </div>
                   </div>
@@ -548,7 +548,7 @@ export default function OverviewPage() {
                   <div className="h-full flex items-center justify-center text-gray-400">
                     <div className="text-center">
                       <div className="text-2xl mb-2">📊</div>
-                      <div>No data available for this time period</div>
+                      <div>Нет данных за этот период</div>
                     </div>
                   </div>
                 )}
@@ -560,41 +560,41 @@ export default function OverviewPage() {
         {/* Legend and Instructions */}
         {overviewData.length > 0 && (
           <div className="mt-6 bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold mb-4">📖 Chart Legend & Instructions</h3>
+            <h3 className="text-lg font-semibold mb-4">📖 Легенда графика и инструкция</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <h4 className="font-medium text-gray-900 mb-3">Chart Elements:</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Элементы графика:</h4>
                 <ul className="space-y-2 text-sm text-gray-700">
                   <li className="flex items-center gap-2">
                     <div className="w-4 h-0.5 bg-blue-500"></div>
-                    <span><strong>Blue Line:</strong> Clicks (left axis)</span>
+                    <span><strong>Синяя линия:</strong> Клики (левая ось)</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <div className="w-4 h-0.5 bg-green-500"></div>
-                    <span><strong>Green Line:</strong> Impressions (right axis)</span>
+                    <span><strong>Зелёная линия:</strong> Показы (правая ось)</span>
                   </li>
                   {overviewSecondaryMetric === 'ctr' && (
                     <li className="flex items-center gap-2">
                       <div className="w-4 h-0.5 bg-orange-500 border-dashed border-t"></div>
-                      <span><strong>Orange Dashed:</strong> CTR % (no axis)</span>
+                      <span><strong>Оранжевый пунктир:</strong> CTR % (без оси)</span>
                     </li>
                   )}
                   {overviewSecondaryMetric === 'position' && (
                     <li className="flex items-center gap-2">
                       <div className="w-4 h-0.5 bg-red-500 border-dashed border-t"></div>
-                      <span><strong>Red Dashed:</strong> Average Position (no axis)</span>
+                      <span><strong>Красный пунктир:</strong> Средняя позиция (без оси)</span>
                     </li>
                   )}
                 </ul>
               </div>
               <div>
-                <h4 className="font-medium text-gray-900 mb-3">How to Use:</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Как пользоваться:</h4>
                 <ul className="space-y-1 text-sm text-gray-700">
-                  <li>• <strong>Time Period:</strong> Adjust to view different date ranges (up to 16 months)</li>
-                  <li>• <strong>Device Filter:</strong> Focus on specific device performance</li>
-                  <li>• <strong>Secondary Metrics:</strong> Overlay CTR or Position trends</li>
-                  <li>• <strong>Hover:</strong> See exact values at any data point</li>
-                  <li>• <strong>Dual Axis:</strong> Compare clicks vs impressions with proper scaling</li>
+                  <li>• <strong>Период:</strong> измените, чтобы посмотреть разные диапазоны дат (до 16 месяцев)</li>
+                  <li>• <strong>Фильтр устройств:</strong> сфокусируйтесь на эффективности конкретного устройства</li>
+                  <li>• <strong>Дополнительные метрики:</strong> наложите тренды CTR или позиции</li>
+                  <li>• <strong>Наведение:</strong> смотрите точные значения в любой точке данных</li>
+                  <li>• <strong>Две оси:</strong> сравнивайте клики и показы с корректным масштабированием</li>
                 </ul>
               </div>
             </div>

@@ -5,11 +5,11 @@ import { usePathname } from 'next/navigation';
 import { Home, BarChart, LayoutDashboard, Table, Settings, HelpCircle } from 'lucide-react';
 
 const sidebarItems = [
-  { label: 'Sites Overview', href: '/overview', icon: LayoutDashboard },
-  { label: 'Traffic Performance', href: '/', icon: BarChart },
-  { label: 'Correlation Matrix', href: '/performance', icon: Table },
-  { label: 'Settings', href: '/settings', icon: Settings },
-  { label: 'Help', href: '/help', icon: HelpCircle },
+  { label: 'Обзор сайтов', href: '/overview', icon: LayoutDashboard },
+  { label: 'Показатели трафика', href: '/', icon: BarChart },
+  { label: 'Матрица корреляции', href: '/performance', icon: Table },
+  { label: 'Настройки', href: '/settings', icon: Settings },
+  { label: 'Помощь', href: '/help', icon: HelpCircle },
 ];
 
 const Sidebar: React.FC = () => {

@@ -67,12 +67,12 @@ export default function UrlInspectionPage() {
 
   const handleInspect = async () => {
     if (!inspectionUrl.trim()) {
-      setError('Please enter a URL to inspect');
+      setError('Введите URL для проверки');
       return;
     }
 
     if (!selectedSite) {
-      setError('Please select a site');
+      setError('Выберите сайт');
       return;
     }
 
@@ -80,7 +80,7 @@ export default function UrlInspectionPage() {
     try {
       new URL(inspectionUrl);
     } catch {
-      setError('Please enter a valid URL (e.g., https://example.com/page)');
+      setError('Введите корректный URL (например, https://example.com/page)');
       return;
     }
 
@@ -104,14 +104,14 @@ export default function UrlInspectionPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Failed to inspect URL');
+        setError(data.error || 'Не удалось проверить URL');
         return;
       }
 
       setResult(data);
     } catch (err) {
       console.error('Error inspecting URL:', err);
-      setError('Failed to inspect URL. Make sure the backend is running on port 5001.');
+      setError('Не удалось проверить URL. Убедитесь, что бэкенд запущен на порту 5001.');
     } finally {
       setLoading(false);
     }
@@ -160,21 +160,21 @@ export default function UrlInspectionPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            🔍 URL Inspection
+            🔍 Проверка URL
           </h1>
           <p className="text-gray-600">
-            Inspect the index status of a URL in Google Search Console
+            Проверьте статус индексации URL в Google Search Console
           </p>
         </div>
 
         {/* Input Section */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Inspect URL</h2>
+          <h2 className="text-xl font-semibold mb-4">Проверка URL</h2>
           
           <div className="space-y-4">
             <div>
               <label htmlFor="site-select" className="block text-sm font-medium text-gray-700 mb-2">
-                Site ({sites.length} available)
+                Сайт (доступно: {sites.length})
               </label>
               <select
                 id="site-select"
@@ -182,7 +182,7 @@ export default function UrlInspectionPage() {
                 onChange={(e) => setSelectedSite(e.target.value)}
                 className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="">Select a site...</option>
+                <option value="">Выберите сайт...</option>
                 {sites.map((site) => (
                   <option key={site} value={site}>
                     {site.replace('https://', '').replace('http://', '')}
@@ -193,7 +193,7 @@ export default function UrlInspectionPage() {
 
             <div>
               <label htmlFor="url-input" className="block text-sm font-medium text-gray-700 mb-2">
-                URL to Inspect
+                URL для проверки
               </label>
               <input
                 id="url-input"
@@ -218,12 +218,12 @@ export default function UrlInspectionPage() {
               {loading ? (
                 <>
                   <FontAwesomeIcon icon={faSpinner} className="mr-2 animate-spin" />
-                  Inspecting...
+                  Проверка...
                 </>
               ) : (
                 <>
                   <FontAwesomeIcon icon={faMagnifyingGlass} className="mr-2" />
-                  Inspect URL
+                  Проверить URL
                 </>
               )}
             </Button>
@@ -243,19 +243,19 @@ export default function UrlInspectionPage() {
         {/* Results Display */}
         {result && result.inspectionResult && (
           <div className="bg-white rounded-lg shadow p-6 space-y-6">
-            <h2 className="text-2xl font-semibold text-gray-900">Inspection Results</h2>
+            <h2 className="text-2xl font-semibold text-gray-900">Результаты проверки</h2>
 
             {/* Index Status Result */}
             {result.inspectionResult.indexStatusResult && (
               <div className="border border-gray-200 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <FontAwesomeIcon icon={faInfoCircle} className="mr-2 text-blue-600" />
-                  Index Status
+                  Статус индексации
                 </h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Verdict</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Вердикт</p>
                     <div className="flex items-center">
                       <FontAwesomeIcon 
                         icon={getVerdictIcon(result.inspectionResult.indexStatusResult.verdict)} 
@@ -268,54 +268,54 @@ export default function UrlInspectionPage() {
                   </div>
 
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Coverage State</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Состояние покрытия</p>
                     <p className="text-gray-900">{result.inspectionResult.indexStatusResult.coverageState || 'N/A'}</p>
                   </div>
 
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Indexing State</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Состояние индексации</p>
                     <p className="text-gray-900">{result.inspectionResult.indexStatusResult.indexingState || 'N/A'}</p>
                   </div>
 
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Page Fetch State</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Состояние загрузки страницы</p>
                     <p className="text-gray-900">{result.inspectionResult.indexStatusResult.pageFetchState || 'N/A'}</p>
                   </div>
 
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Last Crawl Time</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Время последнего сканирования</p>
                     <p className="text-gray-900">{formatDate(result.inspectionResult.indexStatusResult.lastCrawlTime)}</p>
                   </div>
 
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Robots.txt State</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Состояние robots.txt</p>
                     <p className="text-gray-900">{result.inspectionResult.indexStatusResult.robotsTxtState || 'N/A'}</p>
                   </div>
 
                   {result.inspectionResult.indexStatusResult.googleCanonical && (
                     <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">Google Canonical</p>
+                      <p className="text-sm font-medium text-gray-700 mb-1">Каноническая (Google)</p>
                       <p className="text-gray-900 break-all">{result.inspectionResult.indexStatusResult.googleCanonical}</p>
                     </div>
                   )}
 
                   {result.inspectionResult.indexStatusResult.userCanonical && (
                     <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">User Canonical</p>
+                      <p className="text-sm font-medium text-gray-700 mb-1">Каноническая (пользователь)</p>
                       <p className="text-gray-900 break-all">{result.inspectionResult.indexStatusResult.userCanonical}</p>
                     </div>
                   )}
 
                   {result.inspectionResult.indexStatusResult.crawledAs && (
                     <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">Crawled As</p>
+                      <p className="text-sm font-medium text-gray-700 mb-1">Просканировано как</p>
                       <p className="text-gray-900">{result.inspectionResult.indexStatusResult.crawledAs}</p>
                     </div>
                   )}
 
                   {result.inspectionResult.indexStatusResult.referringUrls && result.inspectionResult.indexStatusResult.referringUrls.length > 0 && (
                     <div className="md:col-span-2">
-                      <p className="text-sm font-medium text-gray-700 mb-1">Referring URLs</p>
+                      <p className="text-sm font-medium text-gray-700 mb-1">Ссылающиеся URL</p>
                       <ul className="list-disc list-inside space-y-1">
                         {result.inspectionResult.indexStatusResult.referringUrls.map((url, index) => (
                           <li key={index} className="text-gray-900 break-all">{url}</li>
@@ -326,7 +326,7 @@ export default function UrlInspectionPage() {
 
                   {result.inspectionResult.indexStatusResult.sitemap && result.inspectionResult.indexStatusResult.sitemap.length > 0 && (
                     <div className="md:col-span-2">
-                      <p className="text-sm font-medium text-gray-700 mb-1">Sitemap</p>
+                      <p className="text-sm font-medium text-gray-700 mb-1">Карта сайта</p>
                       <ul className="list-disc list-inside space-y-1">
                         {result.inspectionResult.indexStatusResult.sitemap.map((sitemap, index) => (
                           <li key={index} className="text-gray-900 break-all">{sitemap}</li>
@@ -341,11 +341,11 @@ export default function UrlInspectionPage() {
             {/* AMP Result */}
             {result.inspectionResult.ampResult && (
               <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">AMP Result</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Результат AMP</h3>
                 
                 <div className="space-y-3">
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Verdict</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Вердикт</p>
                     <div className="flex items-center">
                       <FontAwesomeIcon 
                         icon={getVerdictIcon(result.inspectionResult.ampResult.verdict)} 
@@ -359,19 +359,19 @@ export default function UrlInspectionPage() {
 
                   {result.inspectionResult.ampResult.ampIndexable !== undefined && (
                     <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">AMP Indexable</p>
-                      <p className="text-gray-900">{result.inspectionResult.ampResult.ampIndexable ? 'Yes' : 'No'}</p>
+                      <p className="text-sm font-medium text-gray-700 mb-1">AMP индексируется</p>
+                      <p className="text-gray-900">{result.inspectionResult.ampResult.ampIndexable ? 'Да' : 'Нет'}</p>
                     </div>
                   )}
 
                   {result.inspectionResult.ampResult.issues && result.inspectionResult.ampResult.issues.length > 0 && (
                     <div>
-                      <p className="text-sm font-medium text-gray-600 mb-2">Issues</p>
+                      <p className="text-sm font-medium text-gray-600 mb-2">Проблемы</p>
                       <ul className="space-y-2">
                         {result.inspectionResult.ampResult.issues.map((issue, index) => (
                           <li key={index} className="bg-yellow-50 border border-yellow-200 rounded p-2">
                             <p className="text-sm font-medium text-gray-800">
-                              {issue.severity || 'Issue'}: {issue.issueMessage || 'N/A'}
+                              {issue.severity || 'Проблема'}: {issue.issueMessage || 'N/A'}
                             </p>
                           </li>
                         ))}
@@ -385,11 +385,11 @@ export default function UrlInspectionPage() {
             {/* Mobile Usability Result */}
             {result.inspectionResult.mobileUsabilityResult && (
               <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Mobile Usability</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Удобство для мобильных</h3>
                 
                 <div className="space-y-3">
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Verdict</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Вердикт</p>
                     <div className="flex items-center">
                       <FontAwesomeIcon 
                         icon={getVerdictIcon(result.inspectionResult.mobileUsabilityResult.verdict)} 
@@ -403,12 +403,12 @@ export default function UrlInspectionPage() {
 
                   {result.inspectionResult.mobileUsabilityResult.issues && result.inspectionResult.mobileUsabilityResult.issues.length > 0 && (
                     <div>
-                      <p className="text-sm font-medium text-gray-600 mb-2">Issues</p>
+                      <p className="text-sm font-medium text-gray-600 mb-2">Проблемы</p>
                       <ul className="space-y-2">
                         {result.inspectionResult.mobileUsabilityResult.issues.map((issue, index) => (
                           <li key={index} className="bg-yellow-50 border border-yellow-200 rounded p-2">
                             <p className="text-sm font-medium text-gray-800">
-                              {issue.severity || 'Issue'}: {issue.issueMessage || 'N/A'}
+                              {issue.severity || 'Проблема'}: {issue.issueMessage || 'N/A'}
                             </p>
                           </li>
                         ))}
@@ -422,11 +422,11 @@ export default function UrlInspectionPage() {
             {/* Rich Results Result */}
             {result.inspectionResult.richResultsResult && (
               <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Rich Results</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Расширенные результаты</h3>
                 
                 <div className="space-y-3">
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Verdict</p>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Вердикт</p>
                     <div className="flex items-center">
                       <FontAwesomeIcon 
                         icon={getVerdictIcon(result.inspectionResult.richResultsResult.verdict)} 
@@ -440,12 +440,12 @@ export default function UrlInspectionPage() {
 
                   {result.inspectionResult.richResultsResult.detectedItems && result.inspectionResult.richResultsResult.detectedItems.length > 0 && (
                     <div>
-                      <p className="text-sm font-medium text-gray-600 mb-2">Detected Items</p>
+                      <p className="text-sm font-medium text-gray-600 mb-2">Обнаруженные элементы</p>
                       <div className="space-y-4">
                         {result.inspectionResult.richResultsResult.detectedItems.map((item, index) => (
                           <div key={index} className="bg-blue-50 border border-blue-200 rounded p-3">
                             <p className="text-sm font-semibold text-gray-800 mb-2">
-                              Type: {item.richResultType || 'Unknown'}
+                              Тип: {item.richResultType || 'Неизвестно'}
                             </p>
                             {item.items && item.items.length > 0 && (
                               <ul className="space-y-1">

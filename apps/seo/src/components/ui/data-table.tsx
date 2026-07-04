@@ -119,7 +119,7 @@ export function DataTable<TData, TValue>({
   columns,
   data,
   searchKey,
-  searchPlaceholder = "Search...",
+  searchPlaceholder = "Поиск...",
   showColumnToggle = true,
   showPagination = true,
   showSearch = true,
@@ -209,20 +209,20 @@ export function DataTable<TData, TValue>({
   const getOperatorOptions = (columnType: string) => {
     if (columnType === 'query' || columnType === 'page') {
       return [
-        { value: 'contains', label: 'Contains' },
-        { value: 'not-contains', label: 'Not Contains' },
-        { value: 'exact', label: 'Exact Match' },
-        { value: 'starts-with', label: 'Starts With' },
-        { value: 'ends-with', label: 'Ends With' },
+        { value: 'contains', label: 'Содержит' },
+        { value: 'not-contains', label: 'Не содержит' },
+        { value: 'exact', label: 'Точное совпадение' },
+        { value: 'starts-with', label: 'Начинается с' },
+        { value: 'ends-with', label: 'Заканчивается на' },
       ]
     } else {
       return [
-        { value: 'equals', label: 'Equals' },
-        { value: 'not-equals', label: 'Not Equals' },
-        { value: 'greater-than', label: 'Greater Than' },
-        { value: 'less-than', label: 'Less Than' },
-        { value: 'greater-than-equals', label: 'Greater Than or Equal' },
-        { value: 'less-than-equals', label: 'Less Than or Equal' },
+        { value: 'equals', label: 'Равно' },
+        { value: 'not-equals', label: 'Не равно' },
+        { value: 'greater-than', label: 'Больше' },
+        { value: 'less-than', label: 'Меньше' },
+        { value: 'greater-than-equals', label: 'Больше или равно' },
+        { value: 'less-than-equals', label: 'Меньше или равно' },
       ]
     }
   }
@@ -234,7 +234,7 @@ export function DataTable<TData, TValue>({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline">
-                Columns <ChevronDown className="ml-2 h-4 w-4" />
+                Столбцы <ChevronDown className="ml-2 h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -267,7 +267,7 @@ export function DataTable<TData, TValue>({
             className="flex items-center gap-2"
           >
             <Filter className="h-4 w-4" />
-            Filters
+            Фильтры
             {advancedFilters.length > 0 && (
               <span className="ml-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
                 {advancedFilters.length}
@@ -281,7 +281,7 @@ export function DataTable<TData, TValue>({
       {showFilters && showAdvancedFilters && (
         <div className="mb-4 p-4 border rounded-lg bg-gray-50">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-medium">Advanced Filters</h3>
+            <h3 className="text-sm font-medium">Расширенные фильтры</h3>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -289,21 +289,21 @@ export function DataTable<TData, TValue>({
                 onClick={clearAllFilters}
                 disabled={advancedFilters.length === 0}
               >
-                Clear All
+                Очистить всё
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={addFilter}
               >
-                Add Filter
+                Добавить фильтр
               </Button>
             </div>
           </div>
           
           {advancedFilters.length === 0 && (
             <p className="text-sm text-gray-500 mb-4">
-              No filters applied. Click "Add Filter" to start filtering your data.
+              Фильтры не применены. Нажмите «Добавить фильтр», чтобы начать фильтрацию данных.
             </p>
           )}
           
@@ -315,7 +315,7 @@ export function DataTable<TData, TValue>({
                   onValueChange={(value) => updateFilter(index, 'column', value)}
                 >
                   <SelectTrigger className="w-32">
-                    <SelectValue placeholder="Column" />
+                    <SelectValue placeholder="Столбец" />
                   </SelectTrigger>
                   <SelectContent>
                     {getColumnOptions().map(option => (
@@ -331,7 +331,7 @@ export function DataTable<TData, TValue>({
                   onValueChange={(value) => updateFilter(index, 'operator', value)}
                 >
                   <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Operator" />
+                    <SelectValue placeholder="Оператор" />
                   </SelectTrigger>
                   <SelectContent>
                     {getOperatorOptions(filter.column).map(option => (
@@ -343,7 +343,7 @@ export function DataTable<TData, TValue>({
                 </Select>
                 
                 <Input
-                  placeholder="Value"
+                  placeholder="Значение"
                   value={filter.value}
                   onChange={(e) => updateFilter(index, 'value', e.target.value)}
                   className="flex-1"
@@ -406,7 +406,7 @@ export function DataTable<TData, TValue>({
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  Нет результатов.
                 </TableCell>
               </TableRow>
             )}
@@ -416,8 +416,8 @@ export function DataTable<TData, TValue>({
       {showPagination && (
         <div className="flex items-center justify-end space-x-2 py-4">
           <div className="flex-1 text-sm text-muted-foreground">
-            {table.getFilteredSelectedRowModel().rows.length} of{" "}
-            {table.getFilteredRowModel().rows.length} row(s) selected.
+            Выбрано строк: {table.getFilteredSelectedRowModel().rows.length} из{" "}
+            {table.getFilteredRowModel().rows.length}.
           </div>
           <div className="space-x-2">
             <Button
@@ -426,7 +426,7 @@ export function DataTable<TData, TValue>({
               onClick={() => table.previousPage()}
               disabled={!table.getCanPreviousPage()}
             >
-              Previous
+              Назад
             </Button>
             <Button
               variant="outline"
@@ -434,7 +434,7 @@ export function DataTable<TData, TValue>({
               onClick={() => table.nextPage()}
               disabled={!table.getCanNextPage()}
             >
-              Next
+              Вперёд
             </Button>
           </div>
         </div>

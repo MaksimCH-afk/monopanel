@@ -580,16 +580,16 @@ export default function Dashboard() {
       chart.options.scales.y3.display = false;
       
       // Check if CTR or Position are visible
-      const hasCTROrPosition = visibleLabels.includes('CTR (%)') || visibleLabels.includes('Position');
+      const hasCTROrPosition = visibleLabels.includes('CTR (%)') || visibleLabels.includes('Позиция');
       
       // Assign axes based on visibility rules
-      if (visibleLabels.includes('Clicks') || visibleLabels.includes('Impressions')) {
+      if (visibleLabels.includes('Клики') || visibleLabels.includes('Показы')) {
         // Primary rule: Clicks = left, Impressions = right
-        if (visibleLabels.includes('Clicks')) {
-          const clicksDataset = datasets.find((d: any) => d.label === 'Clicks');
+        if (visibleLabels.includes('Клики')) {
+          const clicksDataset = datasets.find((d: any) => d.label === 'Клики');
           if (clicksDataset) clicksDataset.yAxisID = 'y';
           chart.options.scales.y.display = true;
-          chart.options.scales.y.title.text = 'Clicks';
+          chart.options.scales.y.title.text = 'Клики';
           
           // If CTR or Position are also visible, hide axis numbers
           if (hasCTROrPosition) {
@@ -601,11 +601,11 @@ export default function Dashboard() {
           }
         }
         
-        if (visibleLabels.includes('Impressions')) {
-          const impressionsDataset = datasets.find((d: any) => d.label === 'Impressions');
+        if (visibleLabels.includes('Показы')) {
+          const impressionsDataset = datasets.find((d: any) => d.label === 'Показы');
           if (impressionsDataset) impressionsDataset.yAxisID = 'y1';
           chart.options.scales.y1.display = true;
-          chart.options.scales.y1.title.text = 'Impressions';
+          chart.options.scales.y1.title.text = 'Показы';
           
           // If CTR or Position are also visible, hide axis numbers
           if (hasCTROrPosition) {
@@ -627,21 +627,21 @@ export default function Dashboard() {
           chart.options.scales.y2.grid.display = false;
         }
         
-        if (visibleLabels.includes('Position')) {
-          const positionDataset = datasets.find((d: any) => d.label === 'Position');
+        if (visibleLabels.includes('Позиция')) {
+          const positionDataset = datasets.find((d: any) => d.label === 'Позиция');
           if (positionDataset) positionDataset.yAxisID = 'y3'; // Use separate axis for Position
           chart.options.scales.y3.display = true;
-          chart.options.scales.y3.title.text = 'Position';
+          chart.options.scales.y3.title.text = 'Позиция';
           chart.options.scales.y3.ticks.display = false;
           chart.options.scales.y3.grid.display = false;
         }
         
       } else {
         // Secondary rule: Only CTR and/or Position visible
-        if (visibleLabels.includes('CTR (%)') && visibleLabels.includes('Position')) {
+        if (visibleLabels.includes('CTR (%)') && visibleLabels.includes('Позиция')) {
           // Both CTR and Position: CTR = left, Position = right
           const ctrDataset = datasets.find((d: any) => d.label === 'CTR (%)');
-          const positionDataset = datasets.find((d: any) => d.label === 'Position');
+          const positionDataset = datasets.find((d: any) => d.label === 'Позиция');
           
           if (ctrDataset) ctrDataset.yAxisID = 'y';
           if (positionDataset) positionDataset.yAxisID = 'y1';
@@ -649,7 +649,7 @@ export default function Dashboard() {
           chart.options.scales.y.display = true;
           chart.options.scales.y.title.text = 'CTR (%)';
           chart.options.scales.y1.display = true;
-          chart.options.scales.y1.title.text = 'Position';
+          chart.options.scales.y1.title.text = 'Позиция';
           
           // Show axis numbers when only CTR and Position are visible
           chart.options.scales.y.ticks.display = true;
@@ -668,12 +668,12 @@ export default function Dashboard() {
           chart.options.scales.y.ticks.display = true;
           chart.options.scales.y.grid.display = true;
           
-        } else if (visibleLabels.includes('Position')) {
+        } else if (visibleLabels.includes('Позиция')) {
           // Only Position: use left axis
-          const positionDataset = datasets.find((d: any) => d.label === 'Position');
+          const positionDataset = datasets.find((d: any) => d.label === 'Позиция');
           if (positionDataset) positionDataset.yAxisID = 'y';
           chart.options.scales.y.display = true;
-          chart.options.scales.y.title.text = 'Position';
+          chart.options.scales.y.title.text = 'Позиция';
           
           // Show axis numbers when only Position is visible
           chart.options.scales.y.ticks.display = true;
@@ -689,7 +689,7 @@ export default function Dashboard() {
       plugins: {
         title: {
           display: true,
-          text: 'Daily Performance Trends',
+          text: 'Динамика показателей по дням',
           font: {
             size: 16,
             weight: 'bold'
@@ -722,7 +722,7 @@ export default function Dashboard() {
           display: true,
           title: {
             display: true,
-            text: 'Date'
+            text: 'Дата'
           }
         },
         y: {
@@ -731,7 +731,7 @@ export default function Dashboard() {
           position: 'left',
           title: {
             display: true,
-            text: 'Clicks'
+            text: 'Клики'
           }
         },
         y1: {
@@ -740,7 +740,7 @@ export default function Dashboard() {
           position: 'right',
           title: {
             display: true,
-            text: 'Impressions'
+            text: 'Показы'
           },
           grid: {
             drawOnChartArea: false,
@@ -764,7 +764,7 @@ export default function Dashboard() {
           position: 'right',
           title: {
             display: true,
-            text: 'Position'
+            text: 'Позиция'
           },
           grid: {
             drawOnChartArea: false,
@@ -818,7 +818,7 @@ export default function Dashboard() {
         labels: chartLabels,
         datasets: [
           {
-            label: 'Clicks',
+            label: 'Клики',
             data: dailyData.map((item: DailyData) => item.clicks),
             borderColor: 'rgb(59, 130, 246)',
             backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -827,7 +827,7 @@ export default function Dashboard() {
             hidden: false
           },
           {
-            label: 'Impressions',
+            label: 'Показы',
             data: dailyData.map((item: DailyData) => item.impressions),
             borderColor: 'rgb(34, 197, 94)',
             backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -844,7 +844,7 @@ export default function Dashboard() {
             yAxisID: undefined // Will be hidden initially
           },
           {
-            label: 'Position',
+            label: 'Позиция',
             data: dailyData.map((item: DailyData) => item.position.toFixed(1)),
             borderColor: 'rgb(249, 115, 22)',
             backgroundColor: 'rgba(249, 115, 22, 0.1)',
@@ -1088,7 +1088,7 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Failed to fetch data. Backend may not be running on port 5001.');
+      setError('Не удалось загрузить данные. Возможно, бэкенд не запущен на порту 5001.');
     } finally {
       setPerformanceLoading(false);
     }
@@ -1396,7 +1396,7 @@ export default function Dashboard() {
   // Download utility functions
   const downloadCSV = (data: any[], filename: string) => {
     if (!data || data.length === 0) {
-      alert('No data to download');
+      alert('Нет данных для скачивания');
       return;
     }
 
@@ -1431,16 +1431,16 @@ export default function Dashboard() {
   // Download daily data
   const downloadDailyData = () => {
     if (!data?.dailyData) {
-      alert('No daily data available to download');
+      alert('Нет ежедневных данных для скачивания');
       return;
     }
 
     const csvData = data.dailyData.map(item => ({
-      Date: item.date,
-      Clicks: item.clicks,
-      Impressions: item.impressions,
+      'Дата': item.date,
+      'Клики': item.clicks,
+      'Показы': item.impressions,
       'CTR (%)': (item.ctr * 100).toFixed(2),
-      'Avg Position': item.position.toFixed(1)
+      'Средняя позиция': item.position.toFixed(1)
     }));
 
     const siteName = selectedSite.replace('https://', '').replace('http://', '').replace(/[^a-zA-Z0-9]/g, '_');
@@ -1451,17 +1451,17 @@ export default function Dashboard() {
   // Download query data (filtered and sorted)
   const downloadQueryData = () => {
     if (!filteredQueries || filteredQueries.length === 0) {
-      alert('No query data available to download');
+      alert('Нет данных по запросам для скачивания');
       return;
     }
 
     const csvData = sortedQueries.map((query, index) => ({
-      Rank: index + 1,
-      Query: query.keys?.[0] || 'Unknown',
-      Clicks: query.clicks || 0,
-      Impressions: query.impressions || 0,
+      '№': index + 1,
+      'Запрос': query.keys?.[0] || 'Неизвестно',
+      'Клики': query.clicks || 0,
+      'Показы': query.impressions || 0,
       'CTR (%)': query.ctr ? (query.ctr * 100).toFixed(2) : '0.00',
-      'Avg Position': query.position ? query.position.toFixed(1) : 'N/A'
+      'Средняя позиция': query.position ? query.position.toFixed(1) : 'N/A'
     }));
 
     const siteName = selectedSite.replace('https://', '').replace('http://', '').replace(/[^a-zA-Z0-9]/g, '_');
@@ -1473,7 +1473,7 @@ export default function Dashboard() {
   // Get insights for daily chart data
   const getDailyInsights = async () => {
     if (!data?.dailyData || data.dailyData.length === 0) {
-      alert('No daily data available for analysis');
+      alert('Нет ежедневных данных для анализа');
       return;
     }
 
@@ -1496,14 +1496,14 @@ export default function Dashboard() {
       const result = await response.json();
       
       if (result.error) {
-        alert('Error getting insights: ' + result.error);
+        alert('Ошибка получения аналитики: ' + result.error);
       } else {
         setInsights({...insights, daily: result.insights});
         setShowInsights({...showInsights, daily: true});
       }
     } catch (error) {
       console.error('Error getting daily insights:', error);
-      alert('Failed to get insights. Make sure the backend is running.');
+      alert('Не удалось получить аналитику. Убедитесь, что бэкенд запущен.');
     } finally {
       setInsightsLoading({...insightsLoading, daily: false});
     }
@@ -1512,7 +1512,7 @@ export default function Dashboard() {
   // Get insights for currently visible queries
   const getQueryInsights = async () => {
     if (paginatedQueries.length === 0) {
-      alert('No queries available for analysis');
+      alert('Нет запросов для анализа');
       return;
     }
 
@@ -1535,14 +1535,14 @@ export default function Dashboard() {
       const result = await response.json();
       
       if (result.error) {
-        alert('Error getting insights: ' + result.error);
+        alert('Ошибка получения аналитики: ' + result.error);
       } else {
         setInsights({...insights, queries: result.insights});
         setShowInsights({...showInsights, queries: true});
       }
     } catch (error) {
       console.error('Error getting query insights:', error);
-      alert('Failed to get insights. Make sure the backend is running.');
+      alert('Не удалось получить аналитику. Убедитесь, что бэкенд запущен.');
     } finally {
       setInsightsLoading({...insightsLoading, queries: false});
     }
@@ -1553,12 +1553,12 @@ export default function Dashboard() {
       {/* Page Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Traffic Performance</h1>
-          <p className="text-gray-600 mt-2">Monitor your website's search performance with real-time insights</p>
+          <h1 className="text-3xl font-bold text-gray-900">Показатели трафика</h1>
+          <p className="text-gray-600 mt-2">Отслеживайте эффективность вашего сайта в поиске в реальном времени</p>
           {performanceData && (
             <div className="mt-2 flex items-center space-x-2 text-sm text-blue-600">
               <FontAwesomeIcon icon={faDownload} />
-              <span>Data cached - showing results for {performanceData.site} from {performanceData.startDate} to {performanceData.endDate}</span>
+              <span>Данные из кэша — показаны результаты для {performanceData.site} с {performanceData.startDate} по {performanceData.endDate}</span>
             </div>
           )}
         </div>
@@ -1570,7 +1570,7 @@ export default function Dashboard() {
             className="flex items-center space-x-2"
           >
             <FontAwesomeIcon icon={faRefresh} />
-            <span>{performanceLoading ? 'Loading...' : 'Load Data'}</span>
+            <span>{performanceLoading ? 'Загрузка...' : 'Загрузить данные'}</span>
           </Button>
         </div>
       </div>
@@ -1608,7 +1608,7 @@ export default function Dashboard() {
           <div className="flex items-center space-x-3">
             <span className="text-red-500"><FontAwesomeIcon icon={faExclamationTriangle} /></span>
             <div>
-              <h3 className="text-red-800 font-medium">Error</h3>
+              <h3 className="text-red-800 font-medium">Ошибка</h3>
               <p className="text-red-700 text-sm">{error}</p>
             </div>
           </div>
@@ -1619,12 +1619,12 @@ export default function Dashboard() {
       {data && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <MetricCard
-            title="Clicks"
+            title="Клики"
             value={data.totalClicks?.toLocaleString() || '0'}
             icon={<FontAwesomeIcon icon={faMouse} />}
           />
           <MetricCard
-            title="Impressions"
+            title="Показы"
             value={data.totalImpressions?.toLocaleString() || '0'}
             icon={<FontAwesomeIcon icon={faEye} />}
           />
@@ -1634,7 +1634,7 @@ export default function Dashboard() {
             icon={<FontAwesomeIcon icon={faChartLine} />}
           />
           <MetricCard
-            title="Avg. Ranking"
+            title="Средняя позиция"
             value={data.avgPosition ? data.avgPosition.toFixed(1) : '0'}
             icon={<FontAwesomeIcon icon={faTrophy} />}
           />
@@ -1646,9 +1646,9 @@ export default function Dashboard() {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h3 className="text-xl font-semibold text-gray-900">Daily Performance Trends</h3>
+              <h3 className="text-xl font-semibold text-gray-900">Динамика показателей по дням</h3>
               <p className="text-gray-600">
-                Showing {data.dailyData.length} days of data from {startDate} to {endDate}
+                Показано дней: {data.dailyData.length}, с {startDate} по {endDate}
               </p>
             </div>
             <div className="flex items-center space-x-3">
@@ -1659,7 +1659,7 @@ export default function Dashboard() {
                   onChange={e => setShowAlgorithmUpdates(e.target.checked)}
                   className="w-4 h-4 text-blue-600 border-gray-300 rounded"
                 />
-                Show Algorithm Updates
+                Показать обновления алгоритмов
               </label>
               <Button
                 onClick={downloadDailyData}
@@ -1677,7 +1677,7 @@ export default function Dashboard() {
               >
                 {insightsLoading.daily && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
                 <FontAwesomeIcon icon={faBrain} />
-                <span>{insightsLoading.daily ? 'Analyzing...' : 'Get Daily Insights'}</span>
+                <span>{insightsLoading.daily ? 'Анализ...' : 'Аналитика по дням'}</span>
               </Button>
             </div>
           </div>
@@ -1690,7 +1690,7 @@ export default function Dashboard() {
           {showInsights.daily && insights.daily && (
             <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
               <div className="flex justify-between items-start mb-4">
-                <h4 className="text-lg font-medium text-blue-900">AI Performance Analysis</h4>
+                <h4 className="text-lg font-medium text-blue-900">AI-анализ эффективности</h4>
                 <Button
                   onClick={() => setShowInsights({...showInsights, daily: false})}
                   variant="ghost"
@@ -1766,7 +1766,7 @@ export default function Dashboard() {
                 }`}
               >
                 <FontAwesomeIcon icon={faMagnifyingGlass} />
-                <span>Keywords ({topQueries.length})</span>
+                <span>Ключевые слова ({topQueries.length})</span>
               </button>
               <button
                 onClick={() => {
@@ -1806,7 +1806,7 @@ export default function Dashboard() {
                 }`}
               >
                 <FontAwesomeIcon icon={faMapPin} />
-                <span>Pages ({topPages.length})</span>
+                <span>Страницы ({topPages.length})</span>
               </button>
               <button
                 onClick={() => {
@@ -1846,7 +1846,7 @@ export default function Dashboard() {
                 }`}
               >
                 <FontAwesomeIcon icon={faGlobe} />
-                <span>Countries ({topCountries.length})</span>
+                <span>Страны ({topCountries.length})</span>
               </button>
             </div>
           </div>
@@ -1856,7 +1856,7 @@ export default function Dashboard() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center justify-between px-4 pt-4 mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  {activeTab === 'queries' ? 'Top Keywords' : 'Top Pages'}
+                  {activeTab === 'queries' ? 'Топ ключевых слов' : activeTab === 'pages' ? 'Топ страниц' : 'Топ стран'}
                 </h3>
                 <div className="flex items-center space-x-3">
                   <Button
@@ -1866,7 +1866,7 @@ export default function Dashboard() {
                     className="flex items-center space-x-2"
                   >
                     <FontAwesomeIcon icon={faDownload} />
-                    <span>Download CSV</span>
+                    <span>Скачать CSV</span>
                   </Button>
                   <Button
                     onClick={getQueryInsights}
@@ -1877,7 +1877,7 @@ export default function Dashboard() {
                   >
                     {insightsLoading.queries && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>}
                     <FontAwesomeIcon icon={faBrain} />
-                    <span>{insightsLoading.queries ? 'Analyzing...' : 'Get Insights'}</span>
+                    <span>{insightsLoading.queries ? 'Анализ...' : 'Получить аналитику'}</span>
                   </Button>
                 </div>
               </div>
@@ -1897,7 +1897,7 @@ export default function Dashboard() {
               {showInsights.queries && insights.queries && (
                 <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-lg border border-green-200">
                   <div className="flex justify-between items-start mb-4">
-                    <h4 className="text-lg font-medium text-green-900">AI Analysis</h4>
+                    <h4 className="text-lg font-medium text-green-900">AI-анализ</h4>
                     <Button
                       onClick={() => setShowInsights({...showInsights, queries: false})}
                       variant="ghost"
@@ -1935,12 +1935,12 @@ export default function Dashboard() {
                   <FontAwesomeIcon icon={activeTab === 'queries' ? faMagnifyingGlass : faMapPin} />
                 </div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No {activeTab === 'queries' ? 'Queries' : 'Pages'} Data
+                  {activeTab === 'queries' ? 'Нет данных по запросам' : 'Нет данных по страницам'}
                 </h3>
                 <p className="text-gray-600">
-                  {activeTab === 'queries' 
-                    ? 'No query data available for the selected period or filters.'
-                    : 'No page data available for the selected period or filters.'}
+                  {activeTab === 'queries'
+                    ? 'Нет данных по запросам за выбранный период или по заданным фильтрам.'
+                    : 'Нет данных по страницам за выбранный период или по заданным фильтрам.'}
                 </p>
                 <Button
                   onClick={() => {
@@ -1952,7 +1952,7 @@ export default function Dashboard() {
                   variant="default"
                   className="mt-4"
                 >
-                  Refresh Data
+                  Обновить данные
                 </Button>
               </div>
             </div>
@@ -1966,9 +1966,9 @@ export default function Dashboard() {
           <div className="text-6xl mb-4 text-gray-400">
             <FontAwesomeIcon icon={faChartLine} />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">Ready to Analyze!</h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Готово к анализу!</h3>
           <p className="text-gray-600 mb-6">
-            Select a website and date range to view your GSC analytics with daily trends
+            Выберите сайт и диапазон дат, чтобы просмотреть аналитику GSC с ежедневной динамикой
           </p>
           <Button 
             onClick={() => fetchData()} 
@@ -1976,7 +1976,7 @@ export default function Dashboard() {
             variant="default"
             size="lg"
           >
-            Load Data
+            Загрузить данные
           </Button>
         </div>
       )}

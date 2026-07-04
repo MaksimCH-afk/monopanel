@@ -145,7 +145,7 @@ export default function TrendsAnalysisPage() {
   }, [result, showAlgoUpdates, algorithmUpdates]);
 
   const runAnalysis = async () => {
-    if (!config.siteUrl) { setError('Please select a site.'); return; }
+    if (!config.siteUrl) { setError('Выберите сайт.'); return; }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -171,11 +171,11 @@ export default function TrendsAnalysisPage() {
         }),
       });
       const data = await resp.json();
-      if (!resp.ok) { setError(data.error || 'Analysis failed.'); return; }
+      if (!resp.ok) { setError(data.error || 'Ошибка анализа.'); return; }
       setResult(data);
       if (config.siteUrl !== selectedSite) setSelectedSite(config.siteUrl);
     } catch (e: any) {
-      setError(e.message || 'Network error.');
+      setError(e.message || 'Ошибка сети.');
     } finally {
       setLoading(false);
     }
@@ -271,7 +271,7 @@ export default function TrendsAnalysisPage() {
         labels,
         datasets: [
           {
-            label: 'GSC Clicks',
+            label: 'Клики GSC',
             data: gscValues,
             borderColor: '#1d4ed8',
             backgroundColor: 'rgba(29,78,216,0.08)',
@@ -284,7 +284,7 @@ export default function TrendsAnalysisPage() {
             yAxisID: 'y',
           },
           {
-            label: 'Google Trends (avg)',
+            label: 'Google Trends (среднее)',
             data: trendsValues,
             borderColor: '#dc2626',
             backgroundColor: 'rgba(220,38,38,0.06)',
@@ -321,14 +321,14 @@ export default function TrendsAnalysisPage() {
           y: {
             type: 'linear',
             position: 'left',
-            title: { display: true, text: 'GSC Clicks', color: '#1d4ed8', font: { size: 12 } },
+            title: { display: true, text: 'Клики GSC', color: '#1d4ed8', font: { size: 12 } },
             grid: { color: 'rgba(0,0,0,0.06)' },
             ticks: { color: '#1d4ed8' },
           },
           y1: {
             type: 'linear',
             position: 'right',
-            title: { display: true, text: 'Trends (scaled interest)', color: '#dc2626', font: { size: 12 } },
+            title: { display: true, text: 'Trends (масштаб. интерес)', color: '#dc2626', font: { size: 12 } },
             grid: { drawOnChartArea: false },
             ticks: { color: '#dc2626' },
           },
@@ -366,10 +366,10 @@ export default function TrendsAnalysisPage() {
         }),
       });
       const data = await resp.json();
-      if (!resp.ok) { setInsights(`Error: ${data.error}`); return; }
+      if (!resp.ok) { setInsights(`Ошибка: ${data.error}`); return; }
       setInsights(data.insights);
     } catch (e: any) {
-      setInsights(`Error: ${e.message}`);
+      setInsights(`Ошибка: ${e.message}`);
     } finally {
       setInsightsLoading(false);
     }
@@ -384,97 +384,97 @@ export default function TrendsAnalysisPage() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
           <FontAwesomeIcon icon={faChartArea} className="text-blue-600" />
-          Trends Analysis
+          Анализ трендов
         </h1>
         <p className="text-gray-500 mt-1 text-sm">
-          Overlay GSC traffic with Google Trends search interest to distinguish seasonal demand from structural SEO issues.
+          Наложите трафик GSC на поисковый интерес Google Trends, чтобы отличить сезонный спрос от структурных SEO-проблем.
         </p>
       </div>
 
       {/* Config panel */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
-        <h2 className="font-semibold text-gray-800 text-base">Configuration</h2>
+        <h2 className="font-semibold text-gray-800 text-base">Настройка</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Site</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Сайт</label>
             <select
               value={config.siteUrl}
               onChange={e => updateConfig('siteUrl', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
             >
-              <option value="">Select a site…</option>
+              <option value="">Выберите сайт…</option>
               {sites.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Start Date</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Дата начала</label>
             <input type="date" value={config.startDate} max={maxDate}
               onChange={e => updateConfig('startDate', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">End Date</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Дата окончания</label>
             <input type="date" value={config.endDate} max={maxDate}
               onChange={e => updateConfig('endDate', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">URL Filter (contains)</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Фильтр URL (содержит)</label>
             <input type="text" placeholder="e.g. /blog/" value={config.urlFilter}
               onChange={e => updateConfig('urlFilter', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Query Filter (contains)</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Фильтр запросов (содержит)</label>
             <input type="text" placeholder="e.g. figma" value={config.queryFilter}
               onChange={e => updateConfig('queryFilter', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Device</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Устройство</label>
             <select value={config.device} onChange={e => updateConfig('device', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="">All Devices</option>
-              <option value="desktop">Desktop</option>
-              <option value="mobile">Mobile</option>
-              <option value="tablet">Tablet</option>
+              <option value="">Все устройства</option>
+              <option value="desktop">Компьютер</option>
+              <option value="mobile">Мобильный</option>
+              <option value="tablet">Планшет</option>
             </select>
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Country (GSC 3-letter code)</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Страна (3-буквенный код GSC)</label>
             <input type="text" placeholder="e.g. usa" value={config.country}
               onChange={e => updateConfig('country', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Top N Queries</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Топ N запросов</label>
             <input type="number" min={1} max={50} value={config.topNQueries}
               onChange={e => updateConfig('topNQueries', parseInt(e.target.value) || 15)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Trends Geo (2-letter ISO)</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Гео Trends (2-буквенный ISO)</label>
             <input type="text" placeholder="e.g. US" value={config.trendsGeoCode}
               onChange={e => updateConfig('trendsGeoCode', e.target.value.toUpperCase())}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Time Resolution</label>
+            <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Интервал</label>
             <select value={config.timeResolution} onChange={e => updateConfig('timeResolution', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="DAY">Day</option>
-              <option value="WEEK">Week</option>
-              <option value="MONTH">Month</option>
+              <option value="DAY">День</option>
+              <option value="WEEK">Неделя</option>
+              <option value="MONTH">Месяц</option>
             </select>
           </div>
         </div>
@@ -483,19 +483,19 @@ export default function TrendsAnalysisPage() {
           <button onClick={runAnalysis} disabled={loading || !config.siteUrl}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium text-sm transition-colors">
             {loading ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" /> : <FontAwesomeIcon icon={faPlay} />}
-            {loading ? 'Running…' : 'Run Analysis'}
+            {loading ? 'Выполняется…' : 'Запустить анализ'}
           </button>
 
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
             <input type="checkbox" checked={showAlgoUpdates}
               onChange={e => setShowAlgoUpdates(e.target.checked)}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded" />
-            Show Algorithm Updates
+            Показать обновления алгоритмов
           </label>
 
           {loading && (
             <span className="text-sm text-gray-500 italic">
-              Fetching GSC data &amp; Google Trends — this may take 30–60 s…
+              Загрузка данных GSC и Google Trends — это может занять 30–60 с…
             </span>
           )}
         </div>
@@ -506,7 +506,7 @@ export default function TrendsAnalysisPage() {
         <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
           <FontAwesomeIcon icon={faExclamationTriangle} className="text-red-500 mt-0.5 shrink-0" />
           <div>
-            <p className="font-medium">Analysis failed</p>
+            <p className="font-medium">Ошибка анализа</p>
             <p className="mt-1 text-red-700">{error}</p>
           </div>
         </div>
@@ -519,7 +519,7 @@ export default function TrendsAnalysisPage() {
             <div className="flex items-start gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
               <FontAwesomeIcon icon={faInfoCircle} className="text-yellow-500 mt-0.5 shrink-0" />
               <div>
-                <p className="font-medium">Some queries could not fetch Trends data</p>
+                <p className="font-medium">Для некоторых запросов не удалось получить данные Trends</p>
                 <ul className="mt-1 list-disc list-inside text-yellow-700 space-y-0.5">
                   {result.errors.map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
@@ -531,9 +531,9 @@ export default function TrendsAnalysisPage() {
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h2 className="font-semibold text-gray-800">GSC Clicks vs Google Trends</h2>
+                <h2 className="font-semibold text-gray-800">Клики GSC против Google Trends</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Blue = GSC clicks (left axis) · Red dashed = Trends scaled interest (right axis)
+                  Синий = клики GSC (левая ось) · Красный пунктир = масштаб. интерес Trends (правая ось)
                 </p>
               </div>
               <div className="flex items-center gap-4">
@@ -556,7 +556,7 @@ export default function TrendsAnalysisPage() {
                   {insightsLoading
                     ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
                     : <FontAwesomeIcon icon={faBrain} />}
-                  {insightsLoading ? 'Analyzing…' : 'AI Insights'}
+                  {insightsLoading ? 'Анализ…' : 'AI-аналитика'}
                 </button>
               </div>
             </div>
@@ -565,8 +565,8 @@ export default function TrendsAnalysisPage() {
               <canvas ref={chartRef} />
             </div>
             <p className="text-xs text-gray-400 mt-3 italic">
-              Lines tracking together → seasonal / demand-driven.
-              Lines diverging (traffic down, Trends flat) → possible structural SEO issue.
+              Линии движутся вместе → сезонность / зависит от спроса.
+              Линии расходятся (трафик падает, Trends без изменений) → возможна структурная SEO-проблема.
             </p>
           </div>
 
@@ -576,7 +576,7 @@ export default function TrendsAnalysisPage() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-semibold text-gray-800 flex items-center gap-2">
                   <FontAwesomeIcon icon={faBrain} className="text-purple-600" />
-                  AI Diagnosis
+                  AI-диагностика
                 </h2>
                 <button
                   onClick={getInsights}
@@ -584,14 +584,14 @@ export default function TrendsAnalysisPage() {
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                 >
                   <FontAwesomeIcon icon={faRefresh} className={insightsLoading ? 'animate-spin' : ''} />
-                  Regenerate
+                  Сгенерировать заново
                 </button>
               </div>
 
               {insightsLoading ? (
                 <div className="flex items-center gap-3 text-gray-500 py-8 justify-center">
                   <FontAwesomeIcon icon={faSpinner} className="animate-spin text-purple-500 text-xl" />
-                  <span>Analyzing GSC vs Trends patterns…</span>
+                  <span>Анализ паттернов GSC и Trends…</span>
                 </div>
               ) : insights ? (
                 <div className="prose prose-sm max-w-none text-gray-700
@@ -607,15 +607,15 @@ export default function TrendsAnalysisPage() {
           {/* Top Queries table */}
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
             <h2 className="font-semibold text-gray-800 mb-4">
-              Top {result.topQueries.length} Queries Used in Analysis
+              Топ {result.topQueries.length} запросов, использованных в анализе
             </h2>
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead>
                   <tr className="border-b border-gray-200 text-xs uppercase text-gray-500">
                     <th className="pb-2 pr-4">#</th>
-                    <th className="pb-2 pr-4">Query</th>
-                    <th className="pb-2 text-right">Trends data points</th>
+                    <th className="pb-2 pr-4">Запрос</th>
+                    <th className="pb-2 text-right">Точек данных Trends</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -639,10 +639,10 @@ export default function TrendsAnalysisPage() {
       {!result && !loading && !error && (
         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
           <FontAwesomeIcon icon={faChartArea} className="text-5xl mb-4 opacity-30" />
-          <p className="text-base">Configure the parameters above and click <strong>Run Analysis</strong>.</p>
+          <p className="text-base">Задайте параметры выше и нажмите <strong>«Запустить анализ»</strong>.</p>
           <p className="text-sm mt-1 opacity-70">
-            Make sure your Google Trends credentials path is set in{' '}
-            <a href="/settings" className="text-blue-500 hover:underline">Settings</a>.
+            Убедитесь, что путь к учётным данным Google Trends указан в разделе{' '}
+            <a href="/settings" className="text-blue-500 hover:underline">Настройки</a>.
           </p>
         </div>
       )}

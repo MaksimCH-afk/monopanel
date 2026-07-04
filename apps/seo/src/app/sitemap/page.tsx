@@ -72,7 +72,7 @@ export default function SitemapPage() {
 
       if (!response.ok) {
         console.error('[FRONTEND] Error response:', data);
-        setError(data.error || 'Failed to load sitemaps');
+        setError(data.error || 'Не удалось загрузить карты сайта');
         setSitemaps([]);
         return;
       }
@@ -91,7 +91,7 @@ export default function SitemapPage() {
       }
     } catch (err) {
       console.error('[FRONTEND] Error loading sitemaps:', err);
-      setError('Failed to load sitemaps. Make sure the backend is running on port 5001.');
+      setError('Не удалось загрузить карты сайта. Убедитесь, что бэкенд запущен на порту 5001.');
       setSitemaps([]);
     } finally {
       setLoading(false);
@@ -100,12 +100,12 @@ export default function SitemapPage() {
 
   const handleSubmit = async () => {
     if (!newSitemapPath.trim()) {
-      setError('Please enter a sitemap path');
+      setError('Введите путь к карте сайта');
       return;
     }
 
     if (!selectedSite) {
-      setError('Please select a site');
+      setError('Выберите сайт');
       return;
     }
 
@@ -128,18 +128,18 @@ export default function SitemapPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Failed to submit sitemap');
+        setError(data.error || 'Не удалось отправить карту сайта');
         return;
       }
 
-      setSuccess('Sitemap submitted successfully!');
+      setSuccess('Карта сайта успешно отправлена!');
       setNewSitemapPath('');
       setShowSubmitForm(false);
       // Reload sitemaps list
       await loadSitemaps();
     } catch (err) {
       console.error('Error submitting sitemap:', err);
-      setError('Failed to submit sitemap. Make sure the backend is running on port 5001.');
+      setError('Не удалось отправить карту сайта. Убедитесь, что бэкенд запущен на порту 5001.');
     } finally {
       setSubmitting(false);
     }
@@ -147,11 +147,11 @@ export default function SitemapPage() {
 
   const handleDelete = async (feedpath: string) => {
     if (!selectedSite) {
-      setError('Please select a site');
+      setError('Выберите сайт');
       return;
     }
 
-    if (!confirm(`Are you sure you want to delete the sitemap "${feedpath}"?`)) {
+    if (!confirm(`Вы уверены, что хотите удалить карту сайта «${feedpath}»?`)) {
       return;
     }
 
@@ -174,16 +174,16 @@ export default function SitemapPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Failed to delete sitemap');
+        setError(data.error || 'Не удалось удалить карту сайта');
         return;
       }
 
-      setSuccess('Sitemap deleted successfully!');
+      setSuccess('Карта сайта успешно удалена!');
       // Reload sitemaps list
       await loadSitemaps();
     } catch (err) {
       console.error('Error deleting sitemap:', err);
-      setError('Failed to delete sitemap. Make sure the backend is running on port 5001.');
+      setError('Не удалось удалить карту сайта. Убедитесь, что бэкенд запущен на порту 5001.');
     } finally {
       setDeleting(null);
     }
@@ -201,7 +201,7 @@ export default function SitemapPage() {
 
   const handleViewDetails = async (sitemap: Sitemap) => {
     if (!selectedSite) {
-      setDetailError('Please select a site');
+      setDetailError('Выберите сайт');
       return;
     }
 
@@ -217,14 +217,14 @@ export default function SitemapPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setDetailError(data.error || 'Failed to load sitemap details');
+        setDetailError(data.error || 'Не удалось загрузить сведения о карте сайта');
         return;
       }
 
       setSelectedSitemapDetail(data);
     } catch (err) {
       console.error('Error loading sitemap details:', err);
-      setDetailError('Failed to load sitemap details. Make sure the backend is running on port 5001.');
+      setDetailError('Не удалось загрузить сведения о карте сайта. Убедитесь, что бэкенд запущен на порту 5001.');
     } finally {
       setDetailLoading(false);
     }
@@ -240,12 +240,12 @@ export default function SitemapPage() {
   };
 
   const getStatusText = (sitemap: Sitemap) => {
-    if (sitemap.isPending) return 'Pending';
+    if (sitemap.isPending) return 'Ожидание';
     const errors = sitemap.errors ? parseInt(String(sitemap.errors)) : 0;
     const warnings = sitemap.warnings ? parseInt(String(sitemap.warnings)) : 0;
-    if (errors > 0) return `Errors: ${errors}`;
-    if (warnings > 0) return `Warnings: ${warnings}`;
-    return 'OK';
+    if (errors > 0) return `Ошибки: ${errors}`;
+    if (warnings > 0) return `Предупреждения: ${warnings}`;
+    return 'ОК';
   };
 
   return (
@@ -256,10 +256,10 @@ export default function SitemapPage() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-4xl font-bold text-gray-900 mb-2">
-                🗺️ Sitemap Management
+                🗺️ Управление картами сайта
               </h1>
               <p className="text-gray-600">
-                View, submit, and manage sitemaps for your Google Search Console properties
+                Просматривайте, отправляйте и управляйте картами сайта для ваших ресурсов в Google Search Console
               </p>
             </div>
             <div className="flex gap-3">
@@ -268,7 +268,7 @@ export default function SitemapPage() {
                 className="bg-green-600 hover:bg-green-700 text-white"
               >
                 <FontAwesomeIcon icon={faPlus} className="mr-2" />
-                Submit Sitemap
+                Отправить карту сайта
               </Button>
               <Button
                 onClick={loadSitemaps}
@@ -276,7 +276,7 @@ export default function SitemapPage() {
                 className="bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-400"
               >
                 <FontAwesomeIcon icon={faRefresh} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                Обновить
               </Button>
             </div>
           </div>
@@ -285,7 +285,7 @@ export default function SitemapPage() {
         {/* Site Selector */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <label htmlFor="site-select" className="block text-sm font-medium text-gray-700 mb-2">
-            Site ({sites.length} available)
+            Сайт (доступно: {sites.length})
           </label>
           <select
             id="site-select"
@@ -293,7 +293,7 @@ export default function SitemapPage() {
             onChange={(e) => setSelectedSite(e.target.value)}
             className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            <option value="">Select a site...</option>
+            <option value="">Выберите сайт...</option>
             {sites.map((site) => (
               <option key={site} value={site}>
                 {site.replace('https://', '').replace('http://', '')}
@@ -305,11 +305,11 @@ export default function SitemapPage() {
         {/* Submit Form */}
         {showSubmitForm && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Submit New Sitemap</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Отправить новую карту сайта</h2>
             <div className="space-y-4">
               <div>
                 <label htmlFor="sitemap-path" className="block text-sm font-medium text-gray-700 mb-2">
-                  Sitemap Path
+                  Путь к карте сайта
                 </label>
                 <input
                   id="sitemap-path"
@@ -325,7 +325,7 @@ export default function SitemapPage() {
                   }}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Enter the path relative to your site URL (e.g., "sitemap.xml") or the full URL
+                  Укажите путь относительно URL сайта (например, «sitemap.xml») или полный URL
                 </p>
               </div>
               <div className="flex gap-3">
@@ -337,12 +337,12 @@ export default function SitemapPage() {
                   {submitting ? (
                     <>
                       <FontAwesomeIcon icon={faSpinner} className="mr-2 animate-spin" />
-                      Submitting...
+                      Отправка...
                     </>
                   ) : (
                     <>
                       <FontAwesomeIcon icon={faCheckCircle} className="mr-2" />
-                      Submit
+                      Отправить
                     </>
                   )}
                 </Button>
@@ -355,7 +355,7 @@ export default function SitemapPage() {
                   variant="outline"
                   className="border-gray-300"
                 >
-                  Cancel
+                  Отмена
                 </Button>
               </div>
             </div>
@@ -386,7 +386,7 @@ export default function SitemapPage() {
         {loading && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-8 text-center mb-6">
             <FontAwesomeIcon icon={faSpinner} className="animate-spin text-blue-600 text-2xl mb-4" />
-            <p className="text-blue-800">Loading sitemaps...</p>
+            <p className="text-blue-800">Загрузка карт сайта...</p>
           </div>
         )}
 
@@ -395,15 +395,15 @@ export default function SitemapPage() {
           <div className="bg-white rounded-lg shadow">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-xl font-semibold text-gray-900">
-                Sitemaps ({sitemaps.length})
+                Карты сайта ({sitemaps.length})
               </h2>
             </div>
 
             {sitemaps.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <FontAwesomeIcon icon={faSitemap} className="text-4xl mb-4 text-gray-300" />
-                <p>No sitemaps found for this site.</p>
-                <p className="text-sm mt-2">Click "Submit Sitemap" to add one.</p>
+                <p>Для этого сайта карты сайта не найдены.</p>
+                <p className="text-sm mt-2">Нажмите «Отправить карту сайта», чтобы добавить.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -411,28 +411,28 @@ export default function SitemapPage() {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-1/3">
-                        Sitemap Path
+                        Путь к карте сайта
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-16">
-                        Type
+                        Тип
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-24">
-                        Status
+                        Статус
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-32">
-                        Submitted
+                        Отправлено
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-32">
-                        Downloaded
+                        Загружено
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-28">
-                        Contents
+                        Содержимое
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-20">
-                        Issues
+                        Проблемы
                       </th>
                       <th className="px-3 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider w-24">
-                        Actions
+                        Действия
                       </th>
                     </tr>
                   </thead>
@@ -446,7 +446,7 @@ export default function SitemapPage() {
                             </span>
                             {sitemap.isSitemapsIndex && (
                               <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded flex-shrink-0">
-                                Index
+                                Индекс
                               </span>
                             )}
                           </div>
@@ -461,7 +461,7 @@ export default function SitemapPage() {
                             </span>
                             {sitemap.isPending && (
                               <span className="px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded w-fit">
-                                Pending
+                                Ожидание
                               </span>
                             )}
                           </div>
@@ -504,7 +504,7 @@ export default function SitemapPage() {
                             )}
                             {(!sitemap.errors || parseInt(String(sitemap.errors)) === 0) && 
                              (!sitemap.warnings || parseInt(String(sitemap.warnings)) === 0) && (
-                              <span className="text-gray-400">None</span>
+                              <span className="text-gray-400">Нет</span>
                             )}
                           </div>
                         </td>
@@ -522,7 +522,7 @@ export default function SitemapPage() {
                               ) : (
                                 <>
                                   <FontAwesomeIcon icon={faEye} className="mr-1" />
-                                  View
+                                  Просмотр
                                 </>
                               )}
                             </Button>
@@ -538,7 +538,7 @@ export default function SitemapPage() {
                               ) : (
                                 <>
                                   <FontAwesomeIcon icon={faTrash} className="mr-1" />
-                                  Delete
+                                  Удалить
                                 </>
                               )}
                             </Button>
@@ -556,7 +556,7 @@ export default function SitemapPage() {
         {!selectedSite && !loading && (
           <div className="bg-white rounded-lg shadow p-8 text-center">
             <FontAwesomeIcon icon={faSitemap} className="text-4xl mb-4 text-gray-300" />
-            <p className="text-gray-500">Please select a site to view sitemaps</p>
+            <p className="text-gray-500">Выберите сайт, чтобы просмотреть карты сайта</p>
           </div>
         )}
 
@@ -565,7 +565,7 @@ export default function SitemapPage() {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
-                <h2 className="text-2xl font-semibold text-gray-900">Sitemap Details</h2>
+                <h2 className="text-2xl font-semibold text-gray-900">Сведения о карте сайта</h2>
                 <Button
                   onClick={() => {
                     setSelectedSitemapDetail(null);
@@ -593,50 +593,50 @@ export default function SitemapPage() {
                   <>
                     {/* Basic Information */}
                     <div className="border border-gray-200 rounded-lg p-4">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Basic Information</h3>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Основная информация</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Path</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Путь</p>
                           <p className="text-sm text-gray-900 break-all">{selectedSitemapDetail.path}</p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Type</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Тип</p>
                           <p className="text-sm text-gray-900">{selectedSitemapDetail.type || 'N/A'}</p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Status</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Статус</p>
                           <div className="flex items-center gap-2">
                             <span className={`text-sm font-medium ${getStatusColor(selectedSitemapDetail)}`}>
                               {getStatusText(selectedSitemapDetail)}
                             </span>
                             {selectedSitemapDetail.isPending && (
                               <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
-                                Pending
+                                Ожидание
                               </span>
                             )}
                             {selectedSitemapDetail.isSitemapsIndex && (
                               <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
-                                Index
+                                Индекс
                               </span>
                             )}
                           </div>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Last Submitted</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Последняя отправка</p>
                           <p className="text-sm text-gray-900">{formatDate(selectedSitemapDetail.lastSubmitted)}</p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Last Downloaded</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Последняя загрузка</p>
                           <p className="text-sm text-gray-900">{formatDate(selectedSitemapDetail.lastDownloaded)}</p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Errors</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Ошибки</p>
                           <p className="text-sm text-gray-900">
                             {selectedSitemapDetail.errors !== undefined ? selectedSitemapDetail.errors : '0'}
                           </p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Warnings</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Предупреждения</p>
                           <p className="text-sm text-gray-900">
                             {selectedSitemapDetail.warnings !== undefined ? selectedSitemapDetail.warnings : '0'}
                           </p>
@@ -647,7 +647,7 @@ export default function SitemapPage() {
                     {/* Contents */}
                     {selectedSitemapDetail.contents && selectedSitemapDetail.contents.length > 0 && (
                       <div className="border border-gray-200 rounded-lg p-4">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Contents</h3>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Содержимое</h3>
                         <div className="space-y-3">
                           {selectedSitemapDetail.contents.map((content, index) => (
                             <div key={index} className="bg-gray-50 rounded p-3">
@@ -655,14 +655,14 @@ export default function SitemapPage() {
                                 <span className="text-sm font-medium text-gray-900">{content.type}</span>
                                 <div className="flex gap-4 text-sm">
                                   <div>
-                                    <span className="text-gray-600">Submitted: </span>
+                                    <span className="text-gray-600">Отправлено: </span>
                                     <span className="font-medium text-gray-900">
                                       {parseInt(String(content.submitted)).toLocaleString()}
                                     </span>
                                   </div>
                                   {content.indexed !== undefined && (
                                     <div>
-                                      <span className="text-gray-600">Indexed: </span>
+                                      <span className="text-gray-600">Проиндексировано: </span>
                                       <span className="font-medium text-gray-900">
                                         {parseInt(String(content.indexed)).toLocaleString()}
                                       </span>
@@ -678,7 +678,7 @@ export default function SitemapPage() {
 
                     {/* Raw Data (for debugging) */}
                     <div className="border border-gray-200 rounded-lg p-4">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Raw Data</h3>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Исходные данные</h3>
                       <pre className="bg-gray-50 rounded p-3 text-xs overflow-x-auto">
                         {JSON.stringify(selectedSitemapDetail, null, 2)}
                       </pre>

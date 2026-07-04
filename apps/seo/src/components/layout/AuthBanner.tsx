@@ -59,24 +59,24 @@ export default function AuthBanner() {
             />
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-yellow-900 mb-1">
-                Authentication Required
+                Требуется авторизация
               </h3>
               <p className="text-sm text-yellow-800 mb-2">
-                To use the dashboard, you need to authenticate with Google Search Console. 
-                Please go to Settings and follow these steps:
+                Чтобы пользоваться дашбордом, необходимо пройти аутентификацию в Google Search Console.
+                Перейдите в «Настройки» и выполните следующие шаги:
               </p>
               <ol className="text-sm text-yellow-800 list-decimal list-inside space-y-1 mb-3">
-                <li>Enter your OpenAI API key</li>
-                <li>Enter the path to your Google Search Console credentials file (client_secret.json)</li>
-                <li>Click "Save Settings"</li>
-                <li>Click "Authorize Credentials" to authenticate with Google</li>
+                <li>Введите свой API-ключ OpenAI</li>
+                <li>Укажите путь к файлу учётных данных Google Search Console (client_secret.json)</li>
+                <li>Нажмите «Сохранить настройки»</li>
+                <li>Нажмите «Авторизовать данные», чтобы пройти аутентификацию в Google</li>
               </ol>
-              <Link 
+              <Link
                 href="/settings"
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm font-medium"
               >
                 <FontAwesomeIcon icon={faCog} />
-                <span>Go to Settings</span>
+                <span>Перейти в настройки</span>
                 <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
               </Link>
             </div>
@@ -84,7 +84,7 @@ export default function AuthBanner() {
           <button
             onClick={() => setDismissed(true)}
             className="ml-4 text-yellow-600 hover:text-yellow-800 transition-colors flex-shrink-0"
-            aria-label="Dismiss"
+            aria-label="Закрыть"
           >
             <FontAwesomeIcon icon={faTimes} />
           </button>

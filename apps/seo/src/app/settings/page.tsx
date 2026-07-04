@@ -3,22 +3,41 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faKey, faFile, faCheckCircle, faExclamationTriangle, faSpinner, faEye, faEyeSlash, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faKey, faFile, faCheckCircle, faExclamationTriangle, faSpinner, faEye, faEyeSlash, faTrash, faRobot } from '@fortawesome/free-solid-svg-icons';
 import { useData } from '@/contexts/DataContext';
 
 interface SettingsData {
   openaiApiKey: string;
+  openaiModel: string;
   credentialsPath: string;
   trendsCredentialsPath: string;
   isAuthorized: boolean;
   overviewSites: string[];
 }
 
+// Список моделей OpenAI, доступных для выбора. Значение "custom" позволяет
+// ввести название модели вручную.
+const OPENAI_MODELS = [
+  { value: 'gpt-4o', label: 'GPT-4o' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
+  { value: 'gpt-4.1', label: 'GPT-4.1' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+  { value: 'o3', label: 'o3' },
+  { value: 'o3-mini', label: 'o3-mini' },
+  { value: 'o1', label: 'o1' },
+  { value: 'o1-mini', label: 'o1-mini' },
+];
+
+const DEFAULT_MODEL = 'gpt-4o';
+
 export default function SettingsPage() {
   const router = useRouter();
   const { clearAllData } = useData();
   const [settings, setSettings] = useState<SettingsData>({
     openaiApiKey: '',
+    openaiModel: DEFAULT_MODEL,
     credentialsPath: '',
     trendsCredentialsPath: '',
     isAuthorized: false,
@@ -31,6 +50,8 @@ export default function SettingsPage() {
   const [authorizing, setAuthorizing] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [showApiKey, setShowApiKey] = useState(true);
+  // true, когда модель не входит в список готовых вариантов и вводится вручную
+  const [customModel, setCustomModel] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Load settings on mount
@@ -45,22 +66,25 @@ export default function SettingsPage() {
         fetch('http://localhost:5001/api/settings'),
         fetch('http://localhost:5001/api/sites')
       ]);
-      
+
       if (settingsResponse.ok) {
         const data = await settingsResponse.json();
         console.log('Loaded settings from backend:', data); // Debug log
         // Ensure all values are strings (not null/undefined) to prevent controlled/uncontrolled input warnings
+        const loadedModel = String(data.openaiModel || DEFAULT_MODEL);
+        setCustomModel(!OPENAI_MODELS.some((m) => m.value === loadedModel));
         setSettings({
           openaiApiKey: String(data.openaiApiKey || ''),
+          openaiModel: loadedModel,
           credentialsPath: String(data.credentialsPath || ''),
           trendsCredentialsPath: String(data.trendsCredentialsPath || ''),
           isAuthorized: Boolean(data.isAuthorized || false),
           overviewSites: Array.isArray(data.overviewSites) ? data.overviewSites : []
         });
       } else {
-        setMessage({ type: 'error', text: 'Failed to load settings' });
+        setMessage({ type: 'error', text: 'Не удалось загрузить настройки' });
       }
-      
+
       if (sitesResponse.ok) {
         const sitesData = await sitesResponse.json();
         setAvailableSites(sitesData.sites || []);
@@ -70,7 +94,7 @@ export default function SettingsPage() {
       }
     } catch (error) {
       console.error('Error loading settings:', error);
-      setMessage({ type: 'error', text: 'Failed to load settings. Make sure the backend is running.' });
+      setMessage({ type: 'error', text: 'Не удалось загрузить настройки. Убедитесь, что бэкенд запущен.' });
     } finally {
       setLoading(false);
     }
@@ -87,6 +111,7 @@ export default function SettingsPage() {
         },
         body: JSON.stringify({
           openaiApiKey: settings.openaiApiKey,
+          openaiModel: settings.openaiModel || DEFAULT_MODEL,
           credentialsPath: settings.credentialsPath,
           trendsCredentialsPath: settings.trendsCredentialsPath,
           overviewSites: settings.overviewSites
@@ -102,6 +127,7 @@ export default function SettingsPage() {
         // Always use the values from the backend response, ensuring they're strings
         const updatedSettings = {
           openaiApiKey: String(result.openaiApiKey !== undefined && result.openaiApiKey !== null ? result.openaiApiKey : settings.openaiApiKey || ''),
+          openaiModel: String(result.openaiModel !== undefined && result.openaiModel !== null ? result.openaiModel : settings.openaiModel || DEFAULT_MODEL),
           credentialsPath: String(result.credentialsPath !== undefined && result.credentialsPath !== null ? result.credentialsPath : settings.credentialsPath || ''),
           trendsCredentialsPath: String(result.trendsCredentialsPath !== undefined && result.trendsCredentialsPath !== null ? result.trendsCredentialsPath : settings.trendsCredentialsPath || ''),
           isAuthorized: Boolean(result.isAuthorized !== undefined ? result.isAuthorized : settings.isAuthorized),
@@ -109,14 +135,14 @@ export default function SettingsPage() {
         };
         console.log('Updated settings:', updatedSettings); // Debug log
         setSettings(updatedSettings);
-        setMessage({ type: 'success', text: 'Settings saved successfully!' });
+        setMessage({ type: 'success', text: 'Настройки успешно сохранены!' });
       } else {
         const error = await response.json();
-        setMessage({ type: 'error', text: error.error || 'Failed to save settings' });
+        setMessage({ type: 'error', text: error.error || 'Не удалось сохранить настройки' });
       }
     } catch (error) {
       console.error('Error saving settings:', error);
-      setMessage({ type: 'error', text: 'Failed to save settings. Make sure the backend is running.' });
+      setMessage({ type: 'error', text: 'Не удалось сохранить настройки. Убедитесь, что бэкенд запущен.' });
     } finally {
       setSaving(false);
     }
@@ -140,24 +166,24 @@ export default function SettingsPage() {
         const result = await response.json();
         setSettings({ ...settings, isAuthorized: result.authorized || false });
         if (result.authorized) {
-          setMessage({ type: 'success', text: 'Credentials authorized successfully! You can now use the dashboard.' });
+          setMessage({ type: 'success', text: 'Данные для доступа успешно авторизованы! Теперь вы можете пользоваться дашбордом.' });
         } else {
-          setMessage({ type: 'error', text: result.message || 'Authorization failed' });
+          setMessage({ type: 'error', text: result.message || 'Ошибка авторизации' });
         }
       } else {
         const error = await response.json();
-        setMessage({ type: 'error', text: error.error || 'Failed to authorize credentials' });
+        setMessage({ type: 'error', text: error.error || 'Не удалось авторизовать данные для доступа' });
       }
     } catch (error) {
       console.error('Error authorizing credentials:', error);
-      setMessage({ type: 'error', text: 'Failed to authorize credentials. Make sure the backend is running.' });
+      setMessage({ type: 'error', text: 'Не удалось авторизовать данные для доступа. Убедитесь, что бэкенд запущен.' });
     } finally {
       setAuthorizing(false);
     }
   };
 
   const clearAllSettings = async () => {
-    if (!confirm('Are you sure you want to clear all credentials and authentication? This will remove your API key, credentials path, and authorized credentials file.')) {
+    if (!confirm('Вы уверены, что хотите удалить все данные для доступа и авторизацию? Это удалит ваш API-ключ, путь к учётным данным и файл авторизованных данных.')) {
       return;
     }
 
@@ -173,33 +199,35 @@ export default function SettingsPage() {
 
       if (response.ok) {
         const result = await response.json();
+        setCustomModel(false);
         setSettings({
           openaiApiKey: '',
+          openaiModel: DEFAULT_MODEL,
           credentialsPath: '',
           trendsCredentialsPath: '',
           isAuthorized: false,
           overviewSites: []
         });
-        
+
         // Clear all data from DataContext
         clearAllData();
-        
+
         // Clear available sites
         setAvailableSites([]);
-        
-        setMessage({ type: 'success', text: result.message || 'All credentials and data cleared successfully!' });
-        
+
+        setMessage({ type: 'success', text: result.message || 'Все данные для доступа и данные успешно удалены!' });
+
         // Refresh the page after a short delay to show the cleared state
         setTimeout(() => {
           router.refresh();
         }, 1000);
       } else {
         const error = await response.json();
-        setMessage({ type: 'error', text: error.error || 'Failed to clear settings' });
+        setMessage({ type: 'error', text: error.error || 'Не удалось очистить настройки' });
       }
     } catch (error) {
       console.error('Error clearing settings:', error);
-      setMessage({ type: 'error', text: 'Failed to clear settings. Make sure the backend is running.' });
+      setMessage({ type: 'error', text: 'Не удалось очистить настройки. Убедитесь, что бэкенд запущен.' });
     } finally {
       setClearing(false);
     }
@@ -209,19 +237,19 @@ export default function SettingsPage() {
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Page Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-600 mt-2">Configure your API keys and credentials</p>
+        <h1 className="text-3xl font-bold text-gray-900">Настройки</h1>
+        <p className="text-gray-600 mt-2">Настройте свои API-ключи и данные для доступа</p>
       </div>
 
       {/* Message Display */}
       {message && (
         <div className={`p-4 rounded-lg flex items-center space-x-2 ${
-          message.type === 'success' 
-            ? 'bg-green-50 text-green-800 border border-green-200' 
+          message.type === 'success'
+            ? 'bg-green-50 text-green-800 border border-green-200'
             : 'bg-red-50 text-red-800 border border-red-200'
         }`}>
-          <FontAwesomeIcon 
-            icon={message.type === 'success' ? faCheckCircle : faExclamationTriangle} 
+          <FontAwesomeIcon
+            icon={message.type === 'success' ? faCheckCircle : faExclamationTriangle}
             className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}
           />
           <span>{message.text}</span>
@@ -233,7 +261,7 @@ export default function SettingsPage() {
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <FontAwesomeIcon icon={faSpinner} className="animate-spin text-blue-600 text-2xl" />
-            <span className="ml-3 text-gray-600">Loading settings...</span>
+            <span className="ml-3 text-gray-600">Загрузка настроек...</span>
           </div>
         ) : (
           <>
@@ -241,7 +269,7 @@ export default function SettingsPage() {
             <div className="space-y-2">
               <label htmlFor="openai-key" className="flex items-center space-x-2 text-sm font-medium text-gray-700">
                 <FontAwesomeIcon icon={faKey} className="text-gray-500" />
-                <span>OpenAI API Key</span>
+                <span>API-ключ OpenAI</span>
               </label>
               <div className="relative">
                 <input
@@ -256,16 +284,56 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => setShowApiKey(!showApiKey)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                  aria-label={showApiKey ? "Скрыть API-ключ" : "Показать API-ключ"}
                 >
                   <FontAwesomeIcon icon={showApiKey ? faEyeSlash : faEye} />
                 </button>
               </div>
               <p className="text-xs text-gray-500">
-                Your OpenAI API key is used to generate insights. Get your key from{' '}
+                Ваш API-ключ OpenAI используется для генерации аналитики. Получить ключ можно на{' '}
                 <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                  OpenAI Platform
+                  платформе OpenAI
                 </a>
+              </p>
+            </div>
+
+            {/* OpenAI Model */}
+            <div className="space-y-2">
+              <label htmlFor="openai-model" className="flex items-center space-x-2 text-sm font-medium text-gray-700">
+                <FontAwesomeIcon icon={faRobot} className="text-gray-500" />
+                <span>Модель OpenAI</span>
+              </label>
+              <select
+                id="openai-model"
+                value={customModel ? 'custom' : settings.openaiModel}
+                onChange={(e) => {
+                  if (e.target.value === 'custom') {
+                    setCustomModel(true);
+                  } else {
+                    setCustomModel(false);
+                    setSettings({ ...settings, openaiModel: e.target.value });
+                  }
+                }}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              >
+                {OPENAI_MODELS.map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
+                  </option>
+                ))}
+                <option value="custom">Другая (ввести вручную)…</option>
+              </select>
+              {customModel && (
+                <input
+                  type="text"
+                  value={settings.openaiModel}
+                  onChange={(e) => setSettings({ ...settings, openaiModel: e.target.value })}
+                  placeholder="например, gpt-4.1-nano"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              )}
+              <p className="text-xs text-gray-500">
+                Модель, которая будет использоваться для генерации аналитики. Убедитесь, что она доступна для вашего API-ключа.
               </p>
             </div>
 
@@ -273,7 +341,7 @@ export default function SettingsPage() {
             <div className="space-y-2">
               <label htmlFor="credentials-path" className="flex items-center space-x-2 text-sm font-medium text-gray-700">
                 <FontAwesomeIcon icon={faFile} className="text-gray-500" />
-                <span>Google Search Console Credentials Path</span>
+                <span>Путь к учётным данным Google Search Console</span>
               </label>
               <input
                 id="credentials-path"
@@ -284,7 +352,7 @@ export default function SettingsPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <p className="text-xs text-gray-500">
-                Path to your Google Search Console client_secret.json file. Download it from{' '}
+                Путь к файлу client_secret.json для Google Search Console. Скачать его можно в{' '}
                 <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                   Google Cloud Console
                 </a>
@@ -295,7 +363,7 @@ export default function SettingsPage() {
             <div className="space-y-2">
               <label htmlFor="trends-credentials-path" className="flex items-center space-x-2 text-sm font-medium text-gray-700">
                 <FontAwesomeIcon icon={faFile} className="text-gray-500" />
-                <span>Google Trends Credentials Path</span>
+                <span>Путь к учётным данным Google Trends</span>
               </label>
               <input
                 id="trends-credentials-path"
@@ -306,7 +374,7 @@ export default function SettingsPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <p className="text-xs text-gray-500">
-                Path to your Google Trends OAuth client_secret.json. Must have the <code>searchtrends</code> scope enabled in Google Cloud Console.
+                Путь к файлу client_secret.json OAuth для Google Trends. В Google Cloud Console должен быть включён доступ (scope) <code>searchtrends</code>.
               </p>
             </div>
 
@@ -314,7 +382,7 @@ export default function SettingsPage() {
             {settings.isAuthorized && (
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2">
                 <FontAwesomeIcon icon={faCheckCircle} className="text-green-600" />
-                <span className="text-green-800 text-sm font-medium">Credentials are authorized and ready to use</span>
+                <span className="text-green-800 text-sm font-medium">Данные для доступа авторизованы и готовы к использованию</span>
               </div>
             )}
 
@@ -322,17 +390,17 @@ export default function SettingsPage() {
             <div className="space-y-2">
               <label className="flex items-center space-x-2 text-sm font-medium text-gray-700">
                 <FontAwesomeIcon icon={faFile} className="text-gray-500" />
-                <span>Sites Overview Selection</span>
+                <span>Выбор сайтов для обзора</span>
               </label>
               <p className="text-xs text-gray-500 mb-3">
-                Select up to 6 sites to display in the Sites Overview page ({settings.overviewSites.length}/6 selected)
+                Выберите до 6 сайтов для отображения на странице «Обзор сайтов» (выбрано {settings.overviewSites.length}/6)
               </p>
               {availableSites.length === 0 ? (
                 <div className="border border-gray-300 rounded-lg p-4 bg-gray-50">
                   <p className="text-sm text-gray-600">
-                    {settings.isAuthorized 
-                      ? "Loading sites..." 
-                      : "Please authorize your credentials first to see available sites."}
+                    {settings.isAuthorized
+                      ? "Загрузка сайтов..."
+                      : "Сначала авторизуйте данные для доступа, чтобы увидеть доступные сайты."}
                   </p>
                 </div>
               ) : (
@@ -343,30 +411,30 @@ export default function SettingsPage() {
                       type="text"
                       value={siteSearchFilter}
                       onChange={(e) => setSiteSearchFilter(e.target.value)}
-                      placeholder="Search sites (e.g., a.com)..."
+                      placeholder="Поиск сайтов (например, a.com)..."
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  
+
                   {/* Filtered Sites List */}
                   <div className="border border-gray-300 rounded-lg p-4 max-h-64 overflow-y-auto">
                     {availableSites
-                      .filter(site => 
+                      .filter(site =>
                         site.toLowerCase().includes(siteSearchFilter.toLowerCase())
                       )
                       .length === 0 ? (
                         <p className="text-sm text-gray-500 text-center py-4">
-                          No sites found matching "{siteSearchFilter}"
+                          Не найдено сайтов по запросу «{siteSearchFilter}»
                         </p>
                       ) : (
                         availableSites
-                          .filter(site => 
+                          .filter(site =>
                             site.toLowerCase().includes(siteSearchFilter.toLowerCase())
                           )
                           .map((site) => {
                             const isSelected = settings.overviewSites.includes(site);
                             const canSelect = isSelected || settings.overviewSites.length < 6;
-                            
+
                             return (
                               <label
                                 key={site}
@@ -403,7 +471,7 @@ export default function SettingsPage() {
                   </div>
                   {settings.overviewSites.length === 6 && (
                     <p className="text-xs text-yellow-600 mt-2">
-                      Maximum of 6 sites selected. Unselect a site to choose a different one.
+                      Выбрано максимум 6 сайтов. Снимите отметку с одного, чтобы выбрать другой.
                     </p>
                   )}
                 </>
@@ -418,7 +486,7 @@ export default function SettingsPage() {
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
               >
                 {saving && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
-                <span>{saving ? 'Saving...' : 'Save Settings'}</span>
+                <span>{saving ? 'Сохранение...' : 'Сохранить настройки'}</span>
               </button>
 
               <button
@@ -427,7 +495,7 @@ export default function SettingsPage() {
                 className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
               >
                 {authorizing && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
-                <span>{authorizing ? 'Authorizing...' : 'Authorize Credentials'}</span>
+                <span>{authorizing ? 'Авторизация...' : 'Авторизовать данные'}</span>
               </button>
 
               <button
@@ -436,7 +504,7 @@ export default function SettingsPage() {
                 className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed flex items-center space-x-2"
               >
                 {loading && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
-                <span>Refresh</span>
+                <span>Обновить</span>
               </button>
 
               <button
@@ -446,7 +514,7 @@ export default function SettingsPage() {
               >
                 {clearing && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
                 <FontAwesomeIcon icon={faTrash} />
-                <span>{clearing ? 'Clearing...' : 'Clear All'}</span>
+                <span>{clearing ? 'Очистка...' : 'Очистить всё'}</span>
               </button>
             </div>
           </>
@@ -455,17 +523,17 @@ export default function SettingsPage() {
 
       {/* Instructions */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-blue-900 mb-3">Setup Instructions</h2>
+        <h2 className="text-lg font-semibold text-blue-900 mb-3">Инструкция по настройке</h2>
         <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
-          <li>Get your OpenAI API key from the OpenAI Platform and paste it above</li>
-          <li>Download your Google Search Console credentials (client_secret.json) from Google Cloud Console</li>
-          <li>Enter the full path to your client_secret.json file</li>
-          <li>Click "Save Settings" to save your configuration</li>
-          <li>Click "Authorize Credentials" to authenticate with Google (this will open a browser window)</li>
-          <li>Once authorized, you can start using the dashboard!</li>
+          <li>Получите API-ключ OpenAI на платформе OpenAI и вставьте его выше</li>
+          <li>Выберите модель OpenAI, которую хотите использовать для аналитики</li>
+          <li>Скачайте учётные данные Google Search Console (client_secret.json) из Google Cloud Console</li>
+          <li>Укажите полный путь к файлу client_secret.json</li>
+          <li>Нажмите «Сохранить настройки», чтобы сохранить конфигурацию</li>
+          <li>Нажмите «Авторизовать данные», чтобы пройти аутентификацию в Google (откроется окно браузера)</li>
+          <li>После авторизации можно начинать работу с дашбордом!</li>
         </ol>
       </div>
     </div>
   );
 }
-

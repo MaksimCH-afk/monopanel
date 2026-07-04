@@ -49,19 +49,19 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
   onFetchData
 }) => {
   const dateRangePresets = [
-    { label: '7 Days', value: '7-days' },
-    { label: '30 Days', value: '30-days' },
-    { label: '3 Months', value: '3-months' },
-    { label: '6 Months', value: '6-months' },
-    { label: '12 Months', value: '12-months' },
-    { label: '16 Months', value: '16-months' }
+    { label: '7 дней', value: '7-days' },
+    { label: '30 дней', value: '30-days' },
+    { label: '3 месяца', value: '3-months' },
+    { label: '6 месяцев', value: '6-months' },
+    { label: '12 месяцев', value: '12-months' },
+    { label: '16 месяцев', value: '16-months' }
   ];
 
   const deviceOptions = [
-    { label: 'All Devices', value: 'all' },
-    { label: 'Desktop', value: 'desktop' },
-    { label: 'Mobile', value: 'mobile' },
-    { label: 'Tablet', value: 'tablet' }
+    { label: 'Все устройства', value: 'all' },
+    { label: 'Компьютер', value: 'desktop' },
+    { label: 'Мобильный', value: 'mobile' },
+    { label: 'Планшет', value: 'tablet' }
   ];
 
   const clearAdvancedFilter = () => {
@@ -82,14 +82,14 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
           {/* Site Selection */}
           <div className="lg:col-span-3">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Website
+              Сайт
             </label>
             <select
               value={selectedSite}
               onChange={(e) => onSiteChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             >
-              <option value="">Select a website</option>
+              <option value="">Выберите сайт</option>
               {sites.map((site) => (
                 <option key={site} value={site}>
                   {site}
@@ -101,7 +101,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
           {onDeviceChange && (
             <div className="lg:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Device Type
+                Тип устройства
               </label>
               <select
                 value={device}
@@ -119,14 +119,14 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
           {/* Date Range Presets */}
           <div className={onDeviceChange ? "lg:col-span-2" : "lg:col-span-3"}>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Quick Ranges
+              Быстрые диапазоны
             </label>
             <select
               value={selectedPreset}
               onChange={(e) => onPresetChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             >
-              <option value="">Custom Range</option>
+              <option value="">Свой диапазон</option>
               {dateRangePresets.map((preset) => (
                 <option key={preset.value} value={preset.value}>
                   {preset.label}
@@ -137,7 +137,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
           {/* Start Date */}
           <div className="lg:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Start Date
+              Дата начала
             </label>
             <input
               type="date"
@@ -149,7 +149,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
           {/* End Date */}
           <div className="lg:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              End Date
+              Дата окончания
             </label>
             <input
               type="date"
@@ -168,9 +168,9 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 bg-white"
               />
               <span className="text-sm text-gray-700">
-                Fetch All Rows
+                Загрузить все строки
                 <div className="text-xs text-gray-500">
-                  {fetchAll ? 'Get complete dataset (slower)' : 'Limit to 25k rows (faster)'}
+                  {fetchAll ? 'Полный набор данных (медленнее)' : 'Ограничить 25 тыс. строк (быстрее)'}
                 </div>
               </span>
             </label>
@@ -185,7 +185,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
             className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-3 hover:text-blue-600"
             aria-expanded={showAdvanced}
           >
-            <span>Advanced Filters</span>
+            <span>Расширенные фильтры</span>
             {showAdvanced ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
           </Button>
           {showAdvanced && (
@@ -193,7 +193,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
               {/* Filter Dimension */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Filter By
+                  Фильтровать по
                 </label>
                 <select
                   value={advancedFilter.dimension}
@@ -203,17 +203,17 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                   })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                 >
-                  <option value="">No Filter</option>
-                  <option value="query">Query</option>
-                  <option value="page">Page</option>
-                  <option value="country">Country</option>
-                  <option value="device">Device</option>
+                  <option value="">Без фильтра</option>
+                  <option value="query">Запрос</option>
+                  <option value="page">Страница</option>
+                  <option value="country">Страна</option>
+                  <option value="device">Устройство</option>
                 </select>
               </div>
               {/* Filter Type */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Match Type
+                  Тип совпадения
                 </label>
                 <select
                   value={advancedFilter.type}
@@ -224,15 +224,15 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                   disabled={!advancedFilter.dimension}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 disabled:bg-gray-100"
                 >
-                  <option value="contains">Contains</option>
-                  <option value="exact">Exact Match</option>
-                  <option value="not-contains">Does Not Contain</option>
+                  <option value="contains">Содержит</option>
+                  <option value="exact">Точное совпадение</option>
+                  <option value="not-contains">Не содержит</option>
                 </select>
               </div>
               {/* Filter Value */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Filter Value
+                  Значение фильтра
                 </label>
                 <input
                   type="text"
@@ -242,7 +242,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                     value: e.target.value
                   })}
                   disabled={!advancedFilter.dimension}
-                  placeholder={advancedFilter.dimension ? `Enter ${advancedFilter.dimension}...` : 'Select filter type first'}
+                  placeholder={advancedFilter.dimension ? 'Введите значение...' : 'Сначала выберите тип фильтра'}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 disabled:bg-gray-100"
                 />
               </div>
@@ -256,7 +256,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                   size="sm"
                   className="w-full"
                 >
-                  Clear Filter
+                  Сбросить фильтр
                 </Button>
               </div>
               {/* Fetch Data Button */}
@@ -270,7 +270,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                   className="w-full flex items-center justify-center space-x-2"
                 >
                   {loading && <span className="animate-spin">⏳</span>}
-                  <span>{loading ? 'Loading...' : 'Fetch Data'}</span>
+                  <span>{loading ? 'Загрузка...' : 'Загрузить данные'}</span>
                 </Button>
               </div>
             </div>
@@ -280,7 +280,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
             <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-blue-800">
-                  <strong>Active Filter:</strong> {advancedFilter.dimension} {advancedFilter.type.replace('-', ' ')} "{advancedFilter.value}"
+                  <strong>Активный фильтр:</strong> {advancedFilter.dimension} {advancedFilter.type.replace('-', ' ')} «{advancedFilter.value}»
                 </span>
                 <Button
                   type="button"
@@ -289,7 +289,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
                   size="sm"
                   className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                 >
-                  Remove
+                  Удалить
                 </Button>
               </div>
             </div>
@@ -306,7 +306,7 @@ const DashboardControls: React.FC<DashboardControlsProps> = ({
             className="w-full flex items-center justify-center space-x-2"
           >
             {loading && <span className="animate-spin">⏳</span>}
-            <span>{loading ? 'Loading...' : 'Load Data'}</span>
+            <span>{loading ? 'Загрузка...' : 'Загрузить данные'}</span>
           </Button>
         </div>
       </div>

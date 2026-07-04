@@ -24,7 +24,7 @@ export const queryColumns: ColumnDef<GSCDataRow>[] = [
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           className="h-auto p-0 font-medium"
         >
-          Query
+          Запрос
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       )
@@ -50,7 +50,7 @@ export const queryColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Clicks
+            Клики
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -72,7 +72,7 @@ export const queryColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Impressions
+            Показы
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -116,7 +116,7 @@ export const queryColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Position
+            Позиция
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -141,7 +141,7 @@ export const pageColumns: ColumnDef<GSCDataRow>[] = [
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           className="h-auto p-0 font-medium"
         >
-          Page
+          Страница
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       )
@@ -167,7 +167,7 @@ export const pageColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Clicks
+            Клики
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -189,7 +189,7 @@ export const pageColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Impressions
+            Показы
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -233,7 +233,7 @@ export const pageColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Position
+            Позиция
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -258,7 +258,7 @@ export const countryColumns: ColumnDef<GSCDataRow>[] = [
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           className="h-auto p-0 font-medium"
         >
-          Country
+          Страна
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       )
@@ -293,7 +293,7 @@ export const countryColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Clicks
+            Клики
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -315,7 +315,7 @@ export const countryColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Impressions
+            Показы
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>
@@ -359,7 +359,7 @@ export const countryColumns: ColumnDef<GSCDataRow>[] = [
             onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
             className="h-auto p-0 font-medium"
           >
-            Position
+            Позиция
             <ArrowUpDown className="ml-2 h-4 w-4" />
           </Button>
         </div>

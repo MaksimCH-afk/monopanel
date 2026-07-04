@@ -15,11 +15,11 @@ interface QueriesTableProps {
 }
 
 const columns = [
-  { label: 'Query', field: 'query' },
-  { label: 'Clicks', field: 'clicks' },
-  { label: 'Impressions', field: 'impressions' },
+  { label: 'Запрос', field: 'query' },
+  { label: 'Клики', field: 'clicks' },
+  { label: 'Показы', field: 'impressions' },
   { label: 'CTR', field: 'ctr' },
-  { label: 'Position', field: 'position' },
+  { label: 'Позиция', field: 'position' },
 ];
 
 const QueriesTable: React.FC<QueriesTableProps> = ({ data, loading, onSort, sortField, sortOrder, filter, onFilterChange }) => {
@@ -27,7 +27,7 @@ const QueriesTable: React.FC<QueriesTableProps> = ({ data, loading, onSort, sort
     <Card className="mt-6">
       <div className="flex items-center justify-between px-4 pt-4">
         <input
-          placeholder="Filter queries..."
+          placeholder="Фильтр запросов..."
           value={filter}
           onChange={(e) => onFilterChange(e.target.value)}
           className="w-64 px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
@@ -57,13 +57,13 @@ const QueriesTable: React.FC<QueriesTableProps> = ({ data, loading, onSort, sort
             {loading ? (
               <tr>
                 <td colSpan={columns.length} className="px-6 py-4 text-center">
-                  Loading...
+                  Загрузка...
                 </td>
               </tr>
             ) : data.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="px-6 py-4 text-center">
-                  No queries found.
+                  Запросы не найдены.
                 </td>
               </tr>
             ) : (

@@ -103,7 +103,7 @@ export default function TrafficInsightsPage() {
       data: {
         labels: chartData.map(item => item.name),
         datasets: [{
-          label: '% Change',
+          label: '% изменения',
           data: chartData.map(item => item.changePercent),
           backgroundColor: chartData.map(item => 
             item.changePercent >= 0 
@@ -125,7 +125,7 @@ export default function TrafficInsightsPage() {
         plugins: {
           title: {
             display: true,
-            text: 'Keyword Contribution to Click Change',
+            text: 'Вклад ключевых слов в изменение кликов',
             font: {
               size: 18,
               weight: 'bold'
@@ -143,11 +143,11 @@ export default function TrafficInsightsPage() {
               label: function(context: any) {
                 const item = chartData[context.dataIndex];
                 return [
-                  `Keyword: ${item.name}`,
-                  `% Change: ${item.changePercent >= 0 ? '+' : ''}${item.changePercent.toFixed(1)}%`,
-                  `Clicks Change: ${item.change >= 0 ? '+' : ''}${item.change.toLocaleString()}`,
-                  `Start Date Clicks: ${item.firstHalfClicks.toLocaleString()}`,
-                  `End Date Clicks: ${item.secondHalfClicks.toLocaleString()}`
+                  `Ключевое слово: ${item.name}`,
+                  `% изменения: ${item.changePercent >= 0 ? '+' : ''}${item.changePercent.toFixed(1)}%`,
+                  `Изменение кликов: ${item.change >= 0 ? '+' : ''}${item.change.toLocaleString()}`,
+                  `Клики на дату начала: ${item.firstHalfClicks.toLocaleString()}`,
+                  `Клики на дату окончания: ${item.secondHalfClicks.toLocaleString()}`
                 ];
               }
             }
@@ -157,7 +157,7 @@ export default function TrafficInsightsPage() {
           x: {
             title: {
               display: true,
-              text: 'Click Change (%)',
+              text: 'Изменение кликов (%)',
               font: {
                 size: 14,
                 weight: 'bold'
@@ -184,7 +184,7 @@ export default function TrafficInsightsPage() {
           y: {
             title: {
               display: true,
-              text: 'Keywords',
+              text: 'Ключевые слова',
               font: {
                 size: 14,
                 weight: 'bold'
@@ -248,12 +248,12 @@ export default function TrafficInsightsPage() {
 
   const calculateWinnersLosers = async () => {
     if (!selectedSite) {
-      alert('Please select a site first');
+      alert('Сначала выберите сайт');
       return;
     }
 
     if (!winnersLosersStartDate || !winnersLosersEndDate) {
-      alert('Please select a date range');
+      alert('Выберите диапазон дат');
       return;
     }
 
@@ -285,7 +285,7 @@ export default function TrafficInsightsPage() {
       if (!queriesFirstRes.ok) {
         const errorText = await queriesFirstRes.text();
         console.error('API Error (first date):', errorText);
-        throw new Error(`Failed to fetch queries for first date: ${queriesFirstRes.status}`);
+        throw new Error(`Не удалось загрузить запросы за дату начала: ${queriesFirstRes.status}`);
       }
 
       const queriesFirstData = await queriesFirstRes.json();
@@ -313,7 +313,7 @@ export default function TrafficInsightsPage() {
       if (!queriesLastRes.ok) {
         const errorText = await queriesLastRes.text();
         console.error('API Error (second date):', errorText);
-        throw new Error(`Failed to fetch queries for second date: ${queriesLastRes.status}`);
+        throw new Error(`Не удалось загрузить запросы за дату окончания: ${queriesLastRes.status}`);
       }
 
       const queriesLastData = await queriesLastRes.json();
@@ -407,7 +407,7 @@ export default function TrafficInsightsPage() {
       if (!pagesFirstRes.ok) {
         const errorText = await pagesFirstRes.text();
         console.error('API Error (pages first date):', errorText);
-        throw new Error(`Failed to fetch pages for first date: ${pagesFirstRes.status}`);
+        throw new Error(`Не удалось загрузить страницы за дату начала: ${pagesFirstRes.status}`);
       }
 
       const pagesFirstData = await pagesFirstRes.json();
@@ -435,7 +435,7 @@ export default function TrafficInsightsPage() {
       if (!pagesLastRes.ok) {
         const errorText = await pagesLastRes.text();
         console.error('API Error (pages second date):', errorText);
-        throw new Error(`Failed to fetch pages for second date: ${pagesLastRes.status}`);
+        throw new Error(`Не удалось загрузить страницы за дату окончания: ${pagesLastRes.status}`);
       }
 
       const pagesLastData = await pagesLastRes.json();
@@ -529,7 +529,7 @@ export default function TrafficInsightsPage() {
       
     } catch (error: any) {
       console.error('Error calculating winners/losers:', error);
-      setError(`Failed to calculate winners/losers: ${error.message || error}. Make sure the backend is running.`);
+      setError(`Не удалось рассчитать лидеров/аутсайдеров: ${error.message || error}. Убедитесь, что бэкенд запущен.`);
       setWinnersLosersData({
         queries: { winners: [], losers: [] },
         pages: { winners: [], losers: [] }
@@ -546,10 +546,10 @@ export default function TrafficInsightsPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 flex items-center space-x-3">
             <FontAwesomeIcon icon={faTrophy} className="text-green-600" />
-            <span>Traffic Insights</span>
+            <span>Аналитика трафика</span>
           </h1>
           <p className="mt-2 text-gray-600">
-            Analyze winners and losers in your Google Search Console traffic
+            Анализируйте лидеров и аутсайдеров в трафике вашего Google Search Console
           </p>
         </div>
 
@@ -559,7 +559,7 @@ export default function TrafficInsightsPage() {
             <div className="flex items-start space-x-3">
               <FontAwesomeIcon icon={faExclamationTriangle} className="text-red-600 mt-1" />
               <div>
-                <h3 className="text-red-800 font-medium">Error</h3>
+                <h3 className="text-red-800 font-medium">Ошибка</h3>
                 <p className="text-red-700 text-sm mt-1">{error}</p>
               </div>
             </div>
@@ -568,12 +568,12 @@ export default function TrafficInsightsPage() {
 
         {/* Winners & Losers Controls */}
         <div className="mb-6 bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Winners & Losers Analysis</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Анализ лидеров и аутсайдеров</h3>
           
           {/* Date Range Preset Selector */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Date Range
+              Диапазон дат
             </label>
             <div className="flex flex-wrap gap-2">
               <button
@@ -584,7 +584,7 @@ export default function TrafficInsightsPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                30 Days
+                30 дней
               </button>
               <button
                 onClick={() => handleDateRangePreset('3months')}
@@ -594,7 +594,7 @@ export default function TrafficInsightsPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                3 Months
+                3 месяца
               </button>
               <button
                 onClick={() => handleDateRangePreset('6months')}
@@ -604,7 +604,7 @@ export default function TrafficInsightsPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                6 Months
+                6 месяцев
               </button>
               <button
                 onClick={() => handleDateRangePreset('9months')}
@@ -614,7 +614,7 @@ export default function TrafficInsightsPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                9 Months
+                9 месяцев
               </button>
               <button
                 onClick={() => handleDateRangePreset('12months')}
@@ -624,7 +624,7 @@ export default function TrafficInsightsPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                12 Months
+                12 месяцев
               </button>
               <button
                 onClick={() => {
@@ -636,7 +636,7 @@ export default function TrafficInsightsPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                Custom
+                Свой
               </button>
             </div>
           </div>
@@ -644,14 +644,14 @@ export default function TrafficInsightsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Site ({sites.length} available)
+                Сайт (доступно: {sites.length})
               </label>
               <select
                 value={selectedSite}
                 onChange={(e) => setSelectedSite(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
               >
-                <option value="">Select a site...</option>
+                <option value="">Выберите сайт...</option>
                 {sites.map((site) => (
                   <option key={site} value={site}>
                     {site.replace('https://', '').replace('http://', '')}
@@ -661,7 +661,7 @@ export default function TrafficInsightsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Start Date
+                Дата начала
               </label>
               <input
                 type="date"
@@ -675,7 +675,7 @@ export default function TrafficInsightsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                End Date <span className="text-xs text-gray-500">(3 days ago due to API lag)</span>
+                Дата окончания <span className="text-xs text-gray-500">(3 дня назад из-за задержки API)</span>
               </label>
               <input
                 type="date"
@@ -700,12 +700,12 @@ export default function TrafficInsightsPage() {
               >
                 {winnersLosersLoading && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>}
                 <FontAwesomeIcon icon={faTrophy} />
-                <span>{winnersLosersLoading ? 'Calculating...' : 'Calculate'}</span>
+                <span>{winnersLosersLoading ? 'Расчёт...' : 'Рассчитать'}</span>
               </button>
             </div>
           </div>
           <p className="text-sm text-gray-500">
-            Compares clicks on the start date vs end date. Winners are the top 20 keywords/URLs that grew, losers are the top 20 that didn't grow. End date defaults to 3 days ago to account for Google Search Console API data lag.
+            Сравнивает клики на дату начала и дату окончания. Лидеры — это топ-20 ключевых слов/URL, которые выросли, аутсайдеры — топ-20, которые не выросли. Дата окончания по умолчанию — 3 дня назад, чтобы учесть задержку данных API Google Search Console.
           </p>
         </div>
 
@@ -713,10 +713,10 @@ export default function TrafficInsightsPage() {
         {/* Debug Info */}
         {winnersLosersData && (
           <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-xs">
-            <strong>Debug:</strong> Data loaded - Queries Winners: {winnersLosersData.queries.winners.length}, 
-            Queries Losers: {winnersLosersData.queries.losers.length}, 
-            Pages Winners: {winnersLosersData.pages.winners.length}, 
-            Pages Losers: {winnersLosersData.pages.losers.length}
+            <strong>Отладка:</strong> Данные загружены — лидеры (запросы): {winnersLosersData.queries.winners.length},
+            аутсайдеры (запросы): {winnersLosersData.queries.losers.length},
+            лидеры (страницы): {winnersLosersData.pages.winners.length},
+            аутсайдеры (страницы): {winnersLosersData.pages.losers.length}
           </div>
         )}
 
@@ -725,25 +725,25 @@ export default function TrafficInsightsPage() {
           <div className="space-y-6">
             {/* Keywords Section */}
             <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-2xl font-semibold text-gray-900 mb-6">Keywords Analysis</h2>
+              <h2 className="text-2xl font-semibold text-gray-900 mb-6">Анализ ключевых слов</h2>
               
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Winners - Keywords */}
                 <div>
                   <h3 className="text-lg font-semibold text-green-700 mb-4 flex items-center space-x-2">
                     <FontAwesomeIcon icon={faTrophy} />
-                    <span>Winners (Growth in Clicks)</span>
+                    <span>Лидеры (рост кликов)</span>
                   </h3>
                   {winnersLosersData.queries.winners.length > 0 ? (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersStartDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersEndDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% Change</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ключевое слово</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersStartDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersEndDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Изменение</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% изменения</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -760,7 +760,7 @@ export default function TrafficInsightsPage() {
                       </table>
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-sm">No winners found</p>
+                    <p className="text-gray-500 text-sm">Лидеры не найдены</p>
                   )}
                 </div>
 
@@ -768,18 +768,18 @@ export default function TrafficInsightsPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-red-700 mb-4 flex items-center space-x-2">
                     <FontAwesomeIcon icon={faArrowDown} />
-                    <span>Losers (Decrease in Clicks)</span>
+                    <span>Аутсайдеры (снижение кликов)</span>
                   </h3>
                   {winnersLosersData.queries.losers.length > 0 ? (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersStartDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersEndDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% Change</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ключевое слово</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersStartDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersEndDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Изменение</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% изменения</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -796,7 +796,7 @@ export default function TrafficInsightsPage() {
                       </table>
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-sm">No losers found</p>
+                    <p className="text-gray-500 text-sm">Аутсайдеры не найдены</p>
                   )}
                 </div>
               </div>
@@ -804,7 +804,7 @@ export default function TrafficInsightsPage() {
               {/* Contribution Chart */}
               {winnersLosersData && (winnersLosersData.queries.winners.length > 0 || winnersLosersData.queries.losers.length > 0) && (
                 <div className="mt-8">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Keyword Contribution to Click Change</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Вклад ключевых слов в изменение кликов</h3>
                   <div className="bg-white rounded-lg p-4" style={{ height: '600px' }}>
                     <canvas ref={contributionChartRef}></canvas>
                   </div>
@@ -814,14 +814,14 @@ export default function TrafficInsightsPage() {
 
             {/* URLs Section */}
             <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-2xl font-semibold text-gray-900 mb-6">URLs Analysis</h2>
+              <h2 className="text-2xl font-semibold text-gray-900 mb-6">Анализ URL</h2>
               
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Winners - URLs */}
                 <div>
                   <h3 className="text-lg font-semibold text-green-700 mb-4 flex items-center space-x-2">
                     <FontAwesomeIcon icon={faTrophy} />
-                    <span>Winners (Growth in Clicks)</span>
+                    <span>Лидеры (рост кликов)</span>
                   </h3>
                   {winnersLosersData.pages.winners.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -829,10 +829,10 @@ export default function TrafficInsightsPage() {
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">URL</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersStartDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersEndDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% Change</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersStartDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersEndDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Изменение</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% изменения</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -849,7 +849,7 @@ export default function TrafficInsightsPage() {
                       </table>
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-sm">No winners found</p>
+                    <p className="text-gray-500 text-sm">Лидеры не найдены</p>
                   )}
                 </div>
 
@@ -857,7 +857,7 @@ export default function TrafficInsightsPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-red-700 mb-4 flex items-center space-x-2">
                     <FontAwesomeIcon icon={faArrowDown} />
-                    <span>Losers (Decrease in Clicks)</span>
+                    <span>Аутсайдеры (снижение кликов)</span>
                   </h3>
                   {winnersLosersData.pages.losers.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -865,10 +865,10 @@ export default function TrafficInsightsPage() {
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">URL</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersStartDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks ({winnersLosersEndDate})</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Change</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% Change</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersStartDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клики ({winnersLosersEndDate})</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Изменение</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% изменения</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -885,7 +885,7 @@ export default function TrafficInsightsPage() {
                       </table>
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-sm">No losers found</p>
+                    <p className="text-gray-500 text-sm">Аутсайдеры не найдены</p>
                   )}
                 </div>
               </div>
@@ -897,9 +897,9 @@ export default function TrafficInsightsPage() {
         {!winnersLosersData && !winnersLosersLoading && (
           <div className="bg-white rounded-lg shadow p-12 text-center">
             <FontAwesomeIcon icon={faTrophy} className="text-gray-400 text-6xl mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No Analysis Yet</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Анализ ещё не выполнен</h3>
             <p className="text-gray-600 mb-6">
-              Select a site and date range above, then click "Calculate" to see winners and losers.
+              Выберите сайт и диапазон дат выше, затем нажмите «Рассчитать», чтобы увидеть лидеров и аутсайдеров.
             </p>
           </div>
         )}

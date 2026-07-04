@@ -243,7 +243,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
       }
     } catch (error) {
       console.error('Error fetching sites:', error);
-      setError('Failed to fetch sites. Backend may not be running on port 5001.');
+      setError('Не удалось загрузить сайты. Возможно, бэкенд не запущен на порту 5001.');
     } finally {
       setSitesLoading(false);
     }

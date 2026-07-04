@@ -58,10 +58,10 @@ export default function PerformancePage() {
   // Metrics for correlation matrix
   const metrics = ['clicks', 'impressions', 'ctr', 'position'] as const;
   const metricLabels: {[key: string]: string} = {
-    clicks: 'Clicks',
-    impressions: 'Impressions', 
+    clicks: 'Клики',
+    impressions: 'Показы',
     ctr: 'CTR (%)',
-    position: 'Avg Position'
+    position: 'Средняя позиция'
   };
 
   // Load cached performance data if available and matches current settings
@@ -147,7 +147,7 @@ export default function PerformancePage() {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Failed to fetch data. Backend may not be running on port 5001.');
+      setError('Не удалось загрузить данные. Возможно, бэкенд не запущен на порту 5001.');
     } finally {
       setPerformanceLoading(false);
     }
@@ -248,7 +248,7 @@ export default function PerformancePage() {
                     const dataIndex = context.dataIndex;
                     const item = filteredData[dataIndex];
                     return [
-                      `Query: ${item.query.substring(0, 30)}...`,
+                      `Запрос: ${item.query.substring(0, 30)}...`,
                       `${metricLabels[xMetric]}: ${context.parsed.x}`,
                       `${metricLabels[yMetric]}: ${context.parsed.y}`
                     ];
@@ -312,15 +312,15 @@ export default function PerformancePage() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-4xl font-bold text-gray-900 mb-2">
-                📊 Performance Correlation Matrix
+                📊 Матрица корреляции показателей
               </h1>
               <p className="text-gray-600">
-                Analyze relationships between GSC metrics with correlation scatter plots
+                Анализируйте связи между метриками GSC с помощью диаграмм рассеяния
               </p>
               {performanceData && performanceData.dimensions === 'query' && (
                 <div className="mt-2 flex items-center space-x-2 text-sm text-blue-600">
                   <span>💾</span>
-                  <span>Data cached - showing results for {performanceData.site} from {performanceData.startDate} to {performanceData.endDate}</span>
+                  <span>Данные из кэша — показаны результаты для {performanceData.site} с {performanceData.startDate} по {performanceData.endDate}</span>
                 </div>
               )}
             </div>
@@ -330,18 +330,18 @@ export default function PerformancePage() {
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
             >
               <span>🔄</span>
-              <span>{performanceLoading ? 'Loading...' : 'Refresh Data'}</span>
+              <span>{performanceLoading ? 'Загрузка...' : 'Обновить данные'}</span>
             </button>
           </div>
         </div>
 
         {/* Controls */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Controls</h2>
+          <h2 className="text-xl font-semibold mb-4">Параметры</h2>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <label htmlFor="site-select" className="block text-sm font-medium text-gray-700 mb-2">
-                Website ({sites.length} available)
+                Сайт (доступно: {sites.length})
               </label>
               <select 
                 id="site-select" 
@@ -349,7 +349,7 @@ export default function PerformancePage() {
                 value={selectedSite}
                 className="w-full p-2 border rounded"
               >
-                <option value="">Select a site...</option>
+                <option value="">Выберите сайт...</option>
                 {sites.map((site) => (
                   <option key={site} value={site}>
                     {site.replace('https://', '').replace('http://', '')}
@@ -359,7 +359,7 @@ export default function PerformancePage() {
             </div>
             <div>
               <label htmlFor="device-select" className="block text-sm font-medium text-gray-700 mb-2">
-                Device Type
+                Тип устройства
               </label>
               <select 
                 id="device-select" 
@@ -367,15 +367,15 @@ export default function PerformancePage() {
                 value={device}
                 className="w-full p-2 border rounded"
               >
-                <option value="all">All Devices</option>
-                <option value="desktop">Desktop</option>
-                <option value="mobile">Mobile</option>
-                <option value="tablet">Tablet</option>
+                <option value="all">Все устройства</option>
+                <option value="desktop">Компьютер</option>
+                <option value="mobile">Мобильный</option>
+                <option value="tablet">Планшет</option>
               </select>
             </div>
             <div>
               <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 mb-2">
-                Start Date
+                Дата начала
               </label>
               <input
                 type="date" 
@@ -387,7 +387,7 @@ export default function PerformancePage() {
             </div>
             <div>
               <label htmlFor="end-date" className="block text-sm font-medium text-gray-700 mb-2">
-                End Date
+                Дата окончания
               </label>
               <input
                 type="date" 
@@ -403,7 +403,7 @@ export default function PerformancePage() {
                 disabled={performanceLoading || !selectedSite}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300"
               >
-                {performanceLoading ? 'Loading...' : 'Generate Matrix'}
+                {performanceLoading ? 'Загрузка...' : 'Построить матрицу'}
               </button>
             </div>
           </div>
@@ -412,7 +412,7 @@ export default function PerformancePage() {
         {/* Error Display */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded p-4 mb-6">
-            <h3 className="text-red-800 font-medium">Error</h3>
+            <h3 className="text-red-800 font-medium">Ошибка</h3>
             <p className="text-red-700 text-sm">{error}</p>
           </div>
         )}
@@ -421,7 +421,7 @@ export default function PerformancePage() {
         {performanceLoading && (
           <div className="bg-blue-50 border border-blue-200 rounded p-8 text-center mb-6">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-            <p className="text-blue-800">Fetching comprehensive data for correlation analysis...</p>
+            <p className="text-blue-800">Загрузка полных данных для корреляционного анализа...</p>
           </div>
         )}
 
@@ -429,35 +429,35 @@ export default function PerformancePage() {
         {data && data.rows && (
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold">Correlation Matrix</h2>
+              <h2 className="text-xl font-semibold">Матрица корреляции</h2>
               <div className="text-sm text-gray-600">
-                Data points: {data.rows.length.toLocaleString()}
+                Точек данных: {data.rows.length.toLocaleString()}
               </div>
             </div>
             
             {/* Legend */}
             <div className="mb-6 p-4 bg-gray-50 rounded">
-              <h3 className="font-medium mb-2">Correlation Strength:</h3>
+              <h3 className="font-medium mb-2">Сила корреляции:</h3>
               <div className="flex flex-wrap gap-4 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  <span>Strong Positive (≥0.7)</span>
+                  <span>Сильная положительная (≥0.7)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                  <span>Medium Positive (0.4-0.7)</span>
+                  <span>Средняя положительная (0.4–0.7)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-gray-500 rounded-full"></div>
-                  <span>Weak (-0.4 to 0.4)</span>
+                  <span>Слабая (от −0.4 до 0.4)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                  <span>Medium Negative (-0.7 to -0.4)</span>
+                  <span>Средняя отрицательная (от −0.7 до −0.4)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                  <span>Strong Negative (≤-0.7)</span>
+                  <span>Сильная отрицательная (≤−0.7)</span>
                 </div>
               </div>
             </div>
@@ -465,11 +465,11 @@ export default function PerformancePage() {
             {/* 4x4 Matrix Grid */}
             <div className="mb-6">
               <h3 className="text-lg font-semibold text-gray-800 mb-4">
-                Correlation Matrix: How GSC Metrics Relate to Each Other
+                Матрица корреляции: как метрики GSC связаны друг с другом
               </h3>
               <p className="text-sm text-gray-600 mb-6">
-                Each chart shows the relationship between two metrics. The diagonal shows metric distributions, 
-                while off-diagonal charts show correlations (r-values).
+                Каждый график показывает связь между двумя метриками. По диагонали — распределения метрик,
+                а вне диагонали — корреляции (значения r).
               </p>
               
               {/* Matrix with headers */}
@@ -482,7 +482,7 @@ export default function PerformancePage() {
                       <div className="bg-blue-100 px-2 py-1 rounded text-sm font-medium text-blue-800">
                         {metricLabels[metric]}
                       </div>
-                      <div className="text-xs text-gray-500 mt-1">X-axis →</div>
+                      <div className="text-xs text-gray-500 mt-1">Ось X →</div>
                     </div>
                   ))}
                 </div>
@@ -494,7 +494,7 @@ export default function PerformancePage() {
                     <div className="flex items-center justify-center">
                       <div className="bg-green-100 px-2 py-1 rounded text-sm font-medium text-green-800 text-center min-h-[48px] flex flex-col justify-center">
                         <div>{metricLabels[yMetric]}</div>
-                        <div className="text-xs text-gray-500">↑ Y-axis</div>
+                        <div className="text-xs text-gray-500">↑ Ось Y</div>
                       </div>
                     </div>
                     
@@ -509,8 +509,8 @@ export default function PerformancePage() {
                         />
                         {/* Chart description overlay */}
                         <div className="absolute top-1 right-1 bg-white bg-opacity-90 px-1 py-0.5 rounded text-xs text-gray-600">
-                          {xMetric === yMetric ? 
-                            'Distribution' : 
+                          {xMetric === yMetric ?
+                            'Распределение' :
                             `${metricLabels[yMetric]} vs ${metricLabels[xMetric]}`
                           }
                         </div>
@@ -526,23 +526,23 @@ export default function PerformancePage() {
               <div className="mt-6 space-y-4">
                 {/* How to Read This Matrix */}
                 <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <h3 className="font-medium text-blue-900 mb-3">📖 How to Read This Matrix</h3>
+                  <h3 className="font-medium text-blue-900 mb-3">📖 Как читать эту матрицу</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-800">
                     <div>
-                      <h4 className="font-medium mb-2">🔍 Chart Types:</h4>
+                      <h4 className="font-medium mb-2">🔍 Типы графиков:</h4>
                       <ul className="space-y-1">
-                        <li>• <strong>Diagonal charts:</strong> Show individual metric distributions</li>
-                        <li>• <strong>Off-diagonal charts:</strong> Show correlations between different metrics</li>
-                        <li>• <strong>Scatter points:</strong> Each dot represents one search query</li>
+                        <li>• <strong>Диагональные графики:</strong> показывают распределения отдельных метрик</li>
+                        <li>• <strong>Внедиагональные графики:</strong> показывают корреляции между разными метриками</li>
+                        <li>• <strong>Точки рассеяния:</strong> каждая точка — это один поисковый запрос</li>
                       </ul>
                     </div>
                     <div>
-                      <h4 className="font-medium mb-2">📊 Reading Correlations:</h4>
+                      <h4 className="font-medium mb-2">📊 Чтение корреляций:</h4>
                       <ul className="space-y-1">
-                        <li>• <strong>r = 1.0:</strong> Perfect positive correlation</li>
-                        <li>• <strong>r = 0.0:</strong> No correlation</li>
-                        <li>• <strong>r = -1.0:</strong> Perfect negative correlation</li>
-                        <li>• <strong>Colors:</strong> Indicate correlation strength (see legend above)</li>
+                        <li>• <strong>r = 1.0:</strong> идеальная положительная корреляция</li>
+                        <li>• <strong>r = 0.0:</strong> корреляции нет</li>
+                        <li>• <strong>r = -1.0:</strong> идеальная отрицательная корреляция</li>
+                        <li>• <strong>Цвета:</strong> обозначают силу корреляции (см. легенду выше)</li>
                       </ul>
                     </div>
                   </div>
@@ -550,13 +550,13 @@ export default function PerformancePage() {
 
                 {/* Quick Insights */}
                 <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                  <h3 className="font-medium text-green-900 mb-2">💡 What to Look For</h3>
+                  <h3 className="font-medium text-green-900 mb-2">💡 На что обратить внимание</h3>
                   <ul className="text-sm text-green-800 space-y-1">
-                    <li>• <strong>Position correlations:</strong> Usually negative (lower position = better = more clicks/impressions)</li>
-                    <li>• <strong>CTR vs Clicks:</strong> Often positive (higher CTR typically leads to more clicks)</li>
-                    <li>• <strong>Impressions vs Position:</strong> Usually negative (better positions get more visibility)</li>
-                    <li>• <strong>Strong correlations (|r| &gt;= 0.7):</strong> Indicate predictable relationships between metrics</li>
-                    <li>• <strong>Weak correlations (|r| &lt; 0.4):</strong> Suggest metrics behave independently</li>
+                    <li>• <strong>Корреляции с позицией:</strong> обычно отрицательные (позиция выше = лучше = больше кликов/показов)</li>
+                    <li>• <strong>CTR и клики:</strong> часто положительные (высокий CTR обычно ведёт к большему числу кликов)</li>
+                    <li>• <strong>Показы и позиция:</strong> обычно отрицательные (лучшие позиции дают больше видимости)</li>
+                    <li>• <strong>Сильные корреляции (|r| &gt;= 0.7):</strong> указывают на предсказуемые связи между метриками</li>
+                    <li>• <strong>Слабые корреляции (|r| &lt; 0.4):</strong> говорят о том, что метрики ведут себя независимо</li>
                   </ul>
                 </div>
               </div>

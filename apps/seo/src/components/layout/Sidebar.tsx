@@ -13,42 +13,42 @@ const Sidebar = () => {
   const menuItems = [
     {
       icon: <FontAwesomeIcon icon={faChartLine} />,
-      label: 'Sites Overview',
+      label: 'Обзор сайтов',
       href: '/overview',
     },
     {
       icon: <FontAwesomeIcon icon={faChartBar} />,
-      label: 'Traffic Performance',
+      label: 'Показатели трафика',
       href: '/',
     },
     {
       icon: <FontAwesomeIcon icon={faMicroscope} />,
-      label: 'Correlation Matrix',
+      label: 'Матрица корреляции',
       href: '/performance',
     },
     {
       icon: <FontAwesomeIcon icon={faBrain} />,
-      label: 'Traffic Insights',
+      label: 'Аналитика трафика',
       href: '/traffic-insights',
     },
     {
       icon: <FontAwesomeIcon icon={faMagnifyingGlass} />,
-      label: 'URL Inspection',
+      label: 'Проверка URL',
       href: '/url-inspection',
     },
     {
       icon: <FontAwesomeIcon icon={faChartArea} />,
-      label: 'Trends Analysis',
+      label: 'Анализ трендов',
       href: '/trends-analysis',
     },
     {
       icon: <FontAwesomeIcon icon={faSitemap} />,
-      label: 'Sitemap',
+      label: 'Карта сайта',
       href: '/sitemap',
     },
     {
       icon: <FontAwesomeIcon icon={faCog} />,
-      label: 'Settings',
+      label: 'Настройки',
       href: '/settings',
     }
   ];
