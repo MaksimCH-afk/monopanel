@@ -1665,7 +1665,7 @@ function deleteCustomWorker() {
     .done(function(response) {
         hideLoading();
         if (response.success) {
-            showSuccess(`Worker удалён: ${response.domain || domainName} (маршрутов снято: ${response.routes_removed || 0}${response.script_deleted ? ', скрипт удалён' : ''})`);
+            showSuccess(`Worker удалён: ${response.domain || domainName} (маршрутов снято: ${response.routes_removed || 0}, скриптов удалено: ${response.scripts_deleted || 0})`);
         } else {
             showError(response.error || 'Не удалось удалить Worker');
         }

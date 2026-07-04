@@ -148,7 +148,7 @@ include 'sidebar.php';
                             <tr>
                                 <th style="width: 180px;">Время</th>
                                 <th style="width: 200px;">Действие</th>
-                                <th class="text-end">Детали</th>
+                                <th>Детали</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -164,7 +164,7 @@ include 'sidebar.php';
                                             <?php echo htmlspecialchars($log['action']); ?>
                                         </span>
                                     </td>
-                                    <td class="text-end">
+                                    <td class="text-start">
                                         <span style="white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, monospace; font-size: 0.82rem;">
                                             <?php echo htmlspecialchars($log['details'] ?? '-'); ?>
                                         </span>

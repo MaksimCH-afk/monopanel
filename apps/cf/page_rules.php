@@ -43,15 +43,14 @@ include 'sidebar.php';
                     
                     <div class="mb-4">
                         <label for="domainSelect" class="form-label">Выберите домен</label>
-                        <select id="domainSelect" class="form-select">
-                            <option value="">-- Выберите домен --</option>
+                        <input type="text" id="domainSelect" class="form-control" list="prDomainList"
+                               placeholder="Начните вводить домен…" autocomplete="off" spellcheck="false">
+                        <datalist id="prDomainList">
                             <?php foreach ($domains as $domain): ?>
-                                <option value="<?php echo $domain['id']; ?>" data-domain="<?php echo htmlspecialchars($domain['domain']); ?>">
-                                    <?php echo htmlspecialchars($domain['domain']); ?>
-                                    <?php echo $domain['group_name'] ? " ({$domain['group_name']})" : ''; ?>
-                                </option>
+                                <option value="<?php echo htmlspecialchars($domain['domain']); ?>"><?php echo htmlspecialchars($domain['group_name'] ? $domain['group_name'] : ''); ?></option>
                             <?php endforeach; ?>
-                        </select>
+                        </datalist>
+                        <script>window.__prDomains = <?php echo json_encode(array_column($domains, 'id', 'domain'), JSON_UNESCAPED_UNICODE); ?>;</script>
                     </div>
                     
                     <div class="d-grid gap-3">
@@ -164,10 +163,10 @@ include 'sidebar.php';
 
             <div class="row g-2 align-items-end">
                 <div class="col-md-5">
-                    <label class="form-label small mb-1">Откуда (путь)</label>
+                    <label class="form-label small mb-1">Откуда — только путь <span class="text-muted">(пусто = весь сайт)</span></label>
                     <div class="input-group input-group-sm">
                         <span class="input-group-text redir-host-prefix">https://домен</span>
-                        <input type="text" id="redir301Source" class="form-control" placeholder="/en-au/ (пусто = весь сайт)">
+                        <input type="text" id="redir301Source" class="form-control" placeholder="пусто = весь сайт, либо /page">
                     </div>
                 </div>
                 <div class="col-md-5">
@@ -193,7 +192,8 @@ include 'sidebar.php';
                 <ul class="mb-0 mt-1 ps-3">
                     <li><strong>Внутри домена:</strong> пишешь только пути, напр. <code>/en-au/</code> → <code>/en-au2/</code> — домен подставляется сам.</li>
                     <li><strong>На другой адрес:</strong> «Куда» — полный URL, можно на чужой сайт.</li>
-                    <li>«Откуда» пусто = весь сайт целиком уходит на «Куда». <strong>404/410</strong> — вкладка Cloudflare Workers.</li>
+                    <li><strong>Весь сайт → на внутреннюю страницу другого домена:</strong> режим <em>«На другой адрес»</em>, «Откуда» оставь <u>пустым</u>, «Куда» = <code>https://other-domain.com/mobile-app/</code>.</li>
+                    <li>«Откуда» — <strong>только путь</strong> (<code>/page</code>). Если вставить полный URL — панель сама возьмёт из него путь. <strong>404/410</strong> — вкладка Cloudflare Workers.</li>
                 </ul>
                 <span class="text-danger">Требует право токена «Single Redirect» / «Dynamic URL Redirects» (Edit).</span>
             </div>
@@ -234,11 +234,18 @@ function clearLog() {
     document.getElementById('operationLog').innerHTML = '<div class="text-muted">Лог очищен...</div>';
 }
 
+// Домен теперь текстовое поле с поиском (input+datalist). Возвращает {name, id}.
+function prGetDomain() {
+    const inp = document.getElementById('domainSelect');
+    const name = (inp?.value || '').trim();
+    if (!name) return null;
+    const id = (window.__prDomains || {})[name] || null;
+    return { name, id };
+}
 // Текущий домен в префиксах input-group + переключение режима
 function currentRedirHost() {
-    const select = document.getElementById('domainSelect');
-    const opt = select.options[select.selectedIndex];
-    return (opt && opt.dataset.domain) ? opt.dataset.domain : 'домен';
+    const dom = prGetDomain();
+    return dom && dom.name ? dom.name : 'домен';
 }
 function updateRedirMode() {
     const mode = document.querySelector('input[name="redirMode"]:checked').value;
@@ -261,13 +268,24 @@ function updateRedirMode() {
 document.addEventListener('DOMContentLoaded', function() {
     updateRedirMode();
     const ds = document.getElementById('domainSelect');
-    if (ds) ds.addEventListener('change', updateRedirMode);
+    if (ds) { ds.addEventListener('change', updateRedirMode); ds.addEventListener('input', updateRedirMode); }
+    // «Откуда» — только путь: если вставили полный URL/host, оставляем лишь путь.
+    const src = document.getElementById('redir301Source');
+    if (src) src.addEventListener('blur', function () {
+        let v = this.value.trim();
+        if (!v) return;
+        if (/^https?:\/\//i.test(v)) { try { v = new URL(v).pathname; } catch (e) {} }
+        const host = currentRedirHost();
+        if (host && host !== 'домен' && v.toLowerCase().indexOf(host.toLowerCase()) === 0) v = v.slice(host.length);
+        if (v === '' || v === '/') { this.value = ''; return; }
+        this.value = '/' + v.replace(/^\/+/, '');
+    });
 });
 
 async function applyRedirect301() {
-    const select = document.getElementById('domainSelect');
-    const domainId = select.value;
-    if (!domainId) { showToast('Выберите домен', 'warning'); return; }
+    const dom = prGetDomain();
+    if (!dom || !dom.id) { showToast('Выберите домен из списка', 'warning'); return; }
+    const domainId = dom.id;
     const mode = document.querySelector('input[name="redirMode"]:checked').value;
     const source = document.getElementById('redir301Source').value.trim();
     const target = document.getElementById('redir301Target').value.trim();
@@ -276,7 +294,7 @@ async function applyRedirect301() {
     if (mode === 'absolute' && !/^https?:\/\//i.test(target)) {
         showToast('Для режима «на другой адрес» укажите полный URL (https://…)', 'warning'); return;
     }
-    const domainName = select.options[select.selectedIndex].dataset.domain;
+    const domainName = dom.name;
     const shownTarget = (mode === 'relative') ? ('https://' + domainName + '/' + target.replace(/^\/+/, '')) : target;
     logMessage(`Применяем 301 (${mode === 'relative' ? 'внутри домена' : 'на другой адрес'}) для ${domainName}: ${source || 'весь сайт'} → ${shownTarget} ...`, 'info');
     try {
@@ -294,15 +312,13 @@ async function applyRedirect301() {
 }
 
 async function applyRule(ruleType) {
-    const select = document.getElementById('domainSelect');
-    const domainId = select.value;
-    
-    if (!domainId) {
-        showToast('Выберите домен', 'warning');
+    const dom = prGetDomain();
+    if (!dom || !dom.id) {
+        showToast('Выберите домен из списка', 'warning');
         return;
     }
-    
-    const domainName = select.options[select.selectedIndex].dataset.domain;
+    const domainId = dom.id;
+    const domainName = dom.name;
     const ruleNames = {
         'cache_everything': 'Cache Everything',
         'redirect_https': 'Always Use HTTPS',

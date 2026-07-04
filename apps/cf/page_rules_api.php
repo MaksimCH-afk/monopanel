@@ -4,6 +4,24 @@ require_once 'functions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
+/**
+ * Приводит «Откуда/Куда» к пути на домене. Пользователь мог вставить полный URL
+ * (https://host/path) или host/path — берём только путь. '' и '/' → весь сайт ('').
+ */
+function prNormalizePath($v, $host) {
+    $v = trim($v);
+    if ($v === '') return '';
+    if (preg_match('~^https?://~i', $v)) {
+        $p = parse_url($v, PHP_URL_PATH);
+        $v = ($p === null || $p === false) ? '' : $p;
+    } elseif ($host !== '' && stripos($v, $host) === 0) {
+        $v = substr($v, strlen($host)); // "host/path" без схемы
+    }
+    $v = trim($v);
+    if ($v === '' || $v === '/' || $v === '/*') return '';
+    return '/' . ltrim($v, '/');
+}
+
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
     echo json_encode(['success' => false, 'error' => 'Не авторизован']);
@@ -87,16 +105,20 @@ try {
             $source   = trim($_POST['source'] ?? '');          // исходный путь (пусто = весь сайт)
             $mode     = ($_POST['mode'] ?? 'absolute') === 'relative' ? 'relative' : 'absolute';
             $preserve = ($_POST['preserve_query'] ?? '0') === '1';
-            $whole    = empty($source) || $source === '/' || $source === '/*';
             if ($target === '') throw new Exception('Укажите «Куда» (target)');
 
             $host = $domain['domain'];
+
+            // «Откуда» → путь (терпимо к вставленному полному URL/host). Пусто = весь сайт.
+            $source = prNormalizePath($source, $host);
+            $whole  = ($source === '');
 
             // Целевой URL по режиму:
             //  - relative: «Куда» — путь на ЭТОМ ЖЕ домене → https://<host>/<path>
             //  - absolute: «Куда» — уже полный URL (можно на другой сайт)
             if ($mode === 'relative') {
-                $targetUrl = 'https://' . $host . '/' . ltrim($target, '/');
+                $tPath = prNormalizePath($target, $host);
+                $targetUrl = 'https://' . $host . ($tPath === '' ? '/' : $tPath);
             } else {
                 if (!preg_match('~^https?://~i', $target)) {
                     throw new Exception('Для режима «на другой адрес» нужен полный URL (https://…)');
@@ -108,9 +130,8 @@ try {
                 $expr = '(http.host eq "' . addslashes($host) . '")';
                 $desc = "301 весь сайт -> $targetUrl";
             } else {
-                $src = '/' . ltrim($source, '/');
-                $expr = '(http.host eq "' . addslashes($host) . '" and http.request.uri.path eq "' . addslashes($src) . '")';
-                $desc = "301 $src -> $targetUrl";
+                $expr = '(http.host eq "' . addslashes($host) . '" and http.request.uri.path eq "' . addslashes($source) . '")';
+                $desc = "301 $source -> $targetUrl";
             }
             $res = cfAddRedirectRule($pdo, $domain['email'], $domain['api_key'], $zoneId, $expr, $targetUrl, $desc, 301, $preserve, $proxies, $_SESSION['user_id']);
             if (!$res['success']) throw new Exception('Не удалось применить редирект: ' . $res['error']);
