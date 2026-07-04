@@ -610,6 +610,160 @@ def dashboard_status():
     """Статус фонового прогона (для прогресс-бара)."""
     return jsonify(seo_dashboard.job_status())
 
+
+# ─── Заметки на графике (беклинки/работы/изменения) ────────────────────────────
+@app.route('/api/annotations', methods=['GET'])
+def list_annotations():
+    """Заметки сайта. Опционально фильтр по url (плюс события по всему сайту)."""
+    from db import Annotation
+    site_url = request.args.get('siteUrl', '')
+    url = request.args.get('url')
+    if not site_url:
+        return jsonify({"error": "siteUrl обязателен"}), 400
+    with seo_db.session_scope() as s:
+        q = s.query(Annotation).filter_by(site_url=site_url)
+        if url:
+            # события конкретной страницы + события по всему сайту (url IS NULL)
+            q = q.filter((Annotation.url == url) | (Annotation.url.is_(None)))
+        rows = q.order_by(Annotation.date.asc()).all()
+        out = [{
+            "id": a.id, "site_url": a.site_url, "url": a.url, "date": a.date,
+            "text": a.text, "category": a.category,
+        } for a in rows]
+    return jsonify({"annotations": out})
+
+
+@app.route('/api/annotations', methods=['POST'])
+def create_annotation():
+    """Создать заметку: {siteUrl, date, text, category?, url?}."""
+    from db import Annotation
+    data = request.get_json(silent=True) or {}
+    site_url = (data.get('siteUrl') or '').strip()
+    date_str = (data.get('date') or '').strip()
+    text = (data.get('text') or '').strip()
+    if not all([site_url, date_str, text]):
+        return jsonify({"error": "siteUrl, date, text обязательны"}), 400
+    category = (data.get('category') or 'note').strip()
+    url = (data.get('url') or '').strip() or None
+    with seo_db.session_scope() as s:
+        a = Annotation(site_url=site_url, url=url, date=date_str, text=text, category=category)
+        s.add(a); s.flush()
+        new_id = a.id
+    log.info("Annotation created id=%s site=%s date=%s cat=%s", new_id, site_url, date_str, category)
+    return jsonify({"success": True, "id": new_id})
+
+
+@app.route('/api/annotations/delete', methods=['POST'])
+def delete_annotation():
+    """Удалить заметку по id."""
+    from db import Annotation
+    data = request.get_json(silent=True) or {}
+    ann_id = data.get('id')
+    if ann_id is None:
+        return jsonify({"error": "id обязателен"}), 400
+    with seo_db.session_scope() as s:
+        a = s.query(Annotation).filter_by(id=ann_id).first()
+        if not a:
+            return jsonify({"error": "Заметка не найдена"}), 404
+        s.delete(a)
+    return jsonify({"success": True})
+
+
+# ─── Статистика по страницам (период + сравнение было/стало) ───────────────────
+@app.route('/api/pages/summary', methods=['GET'])
+def pages_summary():
+    """
+    По каждой странице сайта: клики/показы/CTR/позиция за период и за предыдущий
+    (для сравнения было/стало). Кэшируется в Redis.
+    """
+    site_url = request.args.get('siteUrl', '')
+    period = int(request.args.get('period', 28))
+    limit = int(request.args.get('limit', 200))
+    if not site_url:
+        return jsonify({"error": "siteUrl обязателен"}), 400
+
+    service = gscm.get_service_for_site(site_url)
+    if not service:
+        return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
+    cache_key = f"pages:{site_url}:{period}:{limit}"
+    cached = seo_cache.cache_get_json(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
+    start, end, prev_start, prev_end = seo_dashboard.period_ranges(period)
+
+    def by_page(s_date, e_date):
+        rows = get_data(service, site_url, s_date, e_date, dimensions=['page'], row_limit=25000)
+        d = {}
+        for r in rows:
+            keys = r.get('keys', [])
+            if not keys:
+                continue
+            d[keys[0]] = {
+                "clicks": r.get('clicks', 0), "impressions": r.get('impressions', 0),
+                "ctr": r.get('ctr', 0), "position": r.get('position', 0),
+            }
+        return d
+
+    cur = by_page(start, end)
+    prev = by_page(prev_start, prev_end)
+
+    pages = []
+    for url, c in cur.items():
+        p = prev.get(url, {"clicks": 0, "impressions": 0, "ctr": 0, "position": 0})
+        pages.append({
+            "url": url,
+            "clicks": c["clicks"], "impressions": c["impressions"],
+            "ctr": c["ctr"], "position": c["position"],
+            "prev_clicks": p["clicks"], "prev_impressions": p["impressions"],
+            "prev_ctr": p["ctr"], "prev_position": p["position"],
+        })
+    pages.sort(key=lambda x: x["clicks"], reverse=True)
+    result = {"site_url": site_url, "period": period, "pages": pages[:limit]}
+    seo_cache.cache_set_json(cache_key, result)
+    return jsonify(result)
+
+
+@app.route('/api/page/details', methods=['GET'])
+def page_details():
+    """
+    Детальный разбор одного URL: дневной ряд кликов/показов + топ-запросы.
+    """
+    site_url = request.args.get('siteUrl', '')
+    url = request.args.get('url', '')
+    period = int(request.args.get('period', 28))
+    if not site_url or not url:
+        return jsonify({"error": "siteUrl и url обязательны"}), 400
+
+    service = gscm.get_service_for_site(site_url)
+    if not service:
+        return jsonify({"error": f"Нет авторизованного аккаунта для сайта {site_url}"}), 400
+
+    start, end, _, _ = seo_dashboard.period_ranges(period)
+    page_filter = [{"filters": [{"dimension": "page", "operator": "equals", "expression": url}]}]
+
+    ts_rows = get_data(service, site_url, start, end, dimensions=['date'],
+                       dimension_filters=page_filter, row_limit=25000)
+    timeseries = [{
+        "date": r.get('keys', ['?'])[0],
+        "clicks": r.get('clicks', 0), "impressions": r.get('impressions', 0),
+        "ctr": r.get('ctr', 0), "position": r.get('position', 0),
+    } for r in ts_rows]
+    timeseries.sort(key=lambda x: x["date"])
+
+    q_rows = get_data(service, site_url, start, end, dimensions=['query'],
+                      dimension_filters=page_filter, row_limit=100)
+    queries = [{
+        "query": r.get('keys', ['?'])[0],
+        "clicks": r.get('clicks', 0), "impressions": r.get('impressions', 0),
+        "ctr": r.get('ctr', 0), "position": r.get('position', 0),
+    } for r in q_rows]
+    queries.sort(key=lambda x: x["clicks"], reverse=True)
+
+    return jsonify({"url": url, "period": period,
+                    "timeseries": timeseries, "queries": queries[:25]})
+
 @app.route('/api/data', methods=['GET'])
 def get_gsc_data():
     """Get GSC analytics data"""

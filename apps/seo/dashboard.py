@@ -45,6 +45,11 @@ def _period_ranges(period_days):
     return start.strftime(fmt), end.strftime(fmt), prev_start.strftime(fmt), prev_end.strftime(fmt)
 
 
+def period_ranges(period_days):
+    """Публичная обёртка: (start, end, prev_start, prev_end) для периода."""
+    return _period_ranges(period_days)
+
+
 def _totals(service, site_url, start, end):
     """Суммарные метрики сайта за период (один запрос без измерений)."""
     body = {"startDate": start, "endDate": end, "dimensions": [], "rowLimit": 1, "type": "web"}

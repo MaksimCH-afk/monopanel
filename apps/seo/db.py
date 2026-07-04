@@ -93,6 +93,23 @@ class SiteSummary(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Annotation(Base):
+    """
+    Заметка/событие на графике: простановка беклинков, выполненные работы,
+    изменения по проекту. Привязана к сайту; опционально — к конкретному URL
+    (тогда показывается и на графике страницы).
+    """
+    __tablename__ = 'annotations'
+
+    id = Column(Integer, primary_key=True)
+    site_url = Column(String(2048), nullable=False, index=True)
+    url = Column(String(2048))                       # None = событие по всему сайту
+    date = Column(String(10), nullable=False)        # YYYY-MM-DD (дата события)
+    text = Column(Text, nullable=False)
+    category = Column(String(32), default='note')    # backlink | work | change | note
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Создать таблицы, если их нет. Идемпотентно."""
     Base.metadata.create_all(engine)

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChartBar, faChartLine, faMicroscope, faMagnifyingGlass, faCog, faSitemap, faBrain, faChartArea, faTableColumns } from '@fortawesome/free-solid-svg-icons';
+import { faChartBar, faChartLine, faMicroscope, faMagnifyingGlass, faCog, faSitemap, faBrain, faChartArea, faTableColumns, faFileLines } from '@fortawesome/free-solid-svg-icons';
 
 const Sidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
@@ -20,6 +20,11 @@ const Sidebar = () => {
       icon: <FontAwesomeIcon icon={faChartLine} />,
       label: 'Обзор сайтов',
       href: '/overview',
+    },
+    {
+      icon: <FontAwesomeIcon icon={faFileLines} />,
+      label: 'Страницы',
+      href: '/pages',
     },
     {
       icon: <FontAwesomeIcon icon={faChartBar} />,
