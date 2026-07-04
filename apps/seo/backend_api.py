@@ -573,6 +573,64 @@ def get_status():
         "sites_count": len(verified_sites)
     })
 
+@app.route('/api/openai/validate', methods=['POST'])
+def validate_openai_key():
+    """
+    Проверка API-ключа OpenAI и доступности выбранной модели.
+    Тело (опционально): {"apiKey": "...", "model": "..."}.
+    Если поля не переданы — берутся из сохранённого конфига.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+
+    config = load_config()
+    api_key = (data.get('apiKey') or '').strip() or config.get('openaiApiKey', '')
+    model = (data.get('model') or '').strip() or config.get('openaiModel', '') or DEFAULT_OPENAI_MODEL
+
+    if not api_key:
+        return jsonify({"valid": False, "message": "API-ключ не задан."}), 400
+
+    try:
+        client = OpenAI(api_key=api_key)
+        # 1) Ключ рабочий? models.list() требует валидной аутентификации.
+        models = client.models.list()
+        available_ids = {m.id for m in getattr(models, 'data', [])}
+
+        # 2) Доступна ли выбранная модель этому ключу?
+        model_available = model in available_ids
+        if not model_available:
+            # Часть моделей может не попадать в общий список — проверяем точечно.
+            try:
+                client.models.retrieve(model)
+                model_available = True
+            except Exception:
+                model_available = False
+
+        if model_available:
+            message = f"Ключ рабочий, модель «{model}» доступна."
+        else:
+            message = (f"Ключ рабочий, но модель «{model}» недоступна для этого ключа. "
+                       f"Выберите другую модель.")
+
+        return jsonify({
+            "valid": True,
+            "model": model,
+            "model_available": model_available,
+            "message": message
+        })
+    except Exception as e:
+        msg = str(e)
+        low = msg.lower()
+        if any(s in low for s in ('auth', 'invalid', '401', 'incorrect api key', 'api key')):
+            friendly = "Неверный API-ключ OpenAI."
+        elif any(s in low for s in ('quota', 'insufficient', 'billing', '429')):
+            friendly = "Ключ распознан, но превышена квота или недостаточно средств на балансе OpenAI."
+        else:
+            friendly = f"Не удалось проверить ключ: {msg}"
+        return jsonify({"valid": False, "message": friendly})
+
 def get_gpt_insights(content, analysis_type="general"):
     """
     Generate insights from OpenAI GPT model based on the provided content.

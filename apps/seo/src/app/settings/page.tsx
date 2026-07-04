@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faKey, faFile, faCheckCircle, faExclamationTriangle, faSpinner, faEye, faEyeSlash, faTrash, faRobot } from '@fortawesome/free-solid-svg-icons';
+import { faKey, faFile, faCheckCircle, faExclamationTriangle, faSpinner, faEye, faEyeSlash, faTrash, faRobot, faWandMagicSparkles } from '@fortawesome/free-solid-svg-icons';
 import { useData } from '@/contexts/DataContext';
 
 interface SettingsData {
@@ -33,6 +33,15 @@ const OPENAI_MODELS = [
 
 const DEFAULT_MODEL = 'gpt-4o';
 
+// Рекомендуемая модель для генерации SEO-аналитики. Задача — краткий,
+// содержательный анализ небольших таблиц GSC (текст-в-текст, без vision и
+// длинного контекста). gpt-4.1 даёт лучшее следование инструкциям и качество
+// анализа, чем gpt-4o, и при этом чуть дешевле; reasoning-модели (o1/o3) для
+// суммаризации избыточны и медленнее.
+const RECOMMENDED_MODEL = 'gpt-4.1';
+const RECOMMENDED_MODEL_LABEL =
+  OPENAI_MODELS.find((m) => m.value === RECOMMENDED_MODEL)?.label || RECOMMENDED_MODEL;
+
 export default function SettingsPage() {
   const router = useRouter();
   const { clearAllData } = useData();
@@ -51,6 +60,9 @@ export default function SettingsPage() {
   const [authorizing, setAuthorizing] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [showApiKey, setShowApiKey] = useState(true);
+  const [checkingKey, setCheckingKey] = useState(false);
+  // Результат проверки ключа: ok=true (зелёный) / false (красный)
+  const [keyCheck, setKeyCheck] = useState<{ ok: boolean; text: string } | null>(null);
   // true, когда модель не входит в список готовых вариантов и вводится вручную
   const [customModel, setCustomModel] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -99,6 +111,46 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const checkApiKey = async () => {
+    if (!settings.openaiApiKey) {
+      setKeyCheck({ ok: false, text: 'Сначала введите API-ключ.' });
+      return;
+    }
+    setCheckingKey(true);
+    setKeyCheck(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/openai/validate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          apiKey: settings.openaiApiKey,
+          model: settings.openaiModel || DEFAULT_MODEL,
+        }),
+      });
+      const data = await response.json();
+      if (data.valid) {
+        // valid=true, но модель может быть недоступна для ключа — тогда предупреждаем
+        setKeyCheck({ ok: data.model_available !== false, text: data.message || 'Ключ рабочий.' });
+      } else {
+        setKeyCheck({ ok: false, text: data.message || 'Ключ недействителен.' });
+      }
+    } catch (error) {
+      console.error('Error validating OpenAI key:', error);
+      setKeyCheck({ ok: false, text: 'Не удалось проверить ключ. Убедитесь, что бэкенд запущен.' });
+    } finally {
+      setCheckingKey(false);
+    }
+  };
+
+  const selectRecommendedModel = () => {
+    setCustomModel(false);
+    setSettings({ ...settings, openaiModel: RECOMMENDED_MODEL });
+    // Прошлый результат проверки мог относиться к другой модели — сбрасываем
+    setKeyCheck(null);
   };
 
   const saveSettings = async () => {
@@ -277,7 +329,10 @@ export default function SettingsPage() {
                   id="openai-key"
                   type={showApiKey ? "text" : "password"}
                   value={settings.openaiApiKey}
-                  onChange={(e) => setSettings({ ...settings, openaiApiKey: e.target.value })}
+                  onChange={(e) => {
+                    setSettings({ ...settings, openaiApiKey: e.target.value });
+                    setKeyCheck(null);
+                  }}
                   placeholder="sk-proj-..."
                   className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
@@ -289,6 +344,23 @@ export default function SettingsPage() {
                 >
                   <FontAwesomeIcon icon={showApiKey ? faEyeSlash : faEye} />
                 </button>
+              </div>
+              <div className="flex items-center flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={checkApiKey}
+                  disabled={checkingKey || !settings.openaiApiKey}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg border border-gray-300 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 text-sm"
+                >
+                  {checkingKey && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />}
+                  <span>{checkingKey ? 'Проверка...' : 'Проверить ключ'}</span>
+                </button>
+                {keyCheck && (
+                  <span className={`flex items-center space-x-1 text-sm ${keyCheck.ok ? 'text-green-700' : 'text-red-700'}`}>
+                    <FontAwesomeIcon icon={keyCheck.ok ? faCheckCircle : faExclamationTriangle} />
+                    <span>{keyCheck.text}</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-gray-500">
                 Ваш API-ключ OpenAI используется для генерации аналитики. Получить ключ можно на{' '}
@@ -333,8 +405,26 @@ export default function SettingsPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               )}
+              <div className="flex items-center flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={selectRecommendedModel}
+                  disabled={settings.openaiModel === RECOMMENDED_MODEL && !customModel}
+                  className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-200 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 text-sm"
+                >
+                  <FontAwesomeIcon icon={faWandMagicSparkles} />
+                  <span>Выбрать рекомендуемую ({RECOMMENDED_MODEL_LABEL})</span>
+                </button>
+                {settings.openaiModel === RECOMMENDED_MODEL && !customModel && (
+                  <span className="flex items-center space-x-1 text-sm text-green-700">
+                    <FontAwesomeIcon icon={faCheckCircle} />
+                    <span>Выбрана рекомендуемая модель</span>
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-gray-500">
                 Модель, которая будет использоваться для генерации аналитики. Убедитесь, что она доступна для вашего API-ключа.
+                Рекомендуем {RECOMMENDED_MODEL_LABEL}: лучшее соотношение качества анализа и цены для этой задачи.
               </p>
             </div>
 
