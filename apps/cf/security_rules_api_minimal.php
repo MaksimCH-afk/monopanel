@@ -102,6 +102,11 @@ try {
             echo json_encode($result);
             break;
 
+        case 'get_custom_worker':
+            $result = getCustomWorker($pdo, $userId, $_POST);
+            echo json_encode($result);
+            break;
+
         case 'debug_info':
             echo json_encode([
                 'success' => true,
@@ -762,6 +767,62 @@ function deleteCustomWorker($pdo, $userId, $data) {
         'routes_removed' => $routesRemoved,
         'script_deleted' => $scriptDeleted,
         'error' => $ok ? null : ('Не удалось удалить воркер: ' . ($scriptError ?? (implode('; ', $routeErrors) ?: 'воркер не найден на домене'))),
+    ];
+}
+
+/**
+ * Текущий кастомный Worker домена: есть ли скрипт, его маршруты и код (для показа/редактирования).
+ */
+function getCustomWorker($pdo, $userId, $data) {
+    $domainId = (int)($data['domain_id'] ?? 0);
+    if ($domainId <= 0) return ['success' => false, 'error' => 'Не выбран домен'];
+
+    $stmt = $pdo->prepare("
+        SELECT ca.*, cc.email, cc.api_key, cc.auth_type
+        FROM cloudflare_accounts ca
+        JOIN cloudflare_credentials cc ON ca.account_id = cc.id
+        WHERE ca.id = ? AND ca.user_id = ?
+    ");
+    $stmt->execute([$domainId, $userId]);
+    $domain = $stmt->fetch();
+    if (!$domain) return ['success' => false, 'error' => 'Домен не найден'];
+
+    $proxies = getProxies($pdo, $userId);
+    $credentials = ['email' => $domain['email'], 'api_key' => $domain['api_key'], 'auth_type' => $domain['auth_type'] ?? null];
+    $scriptName = cfWorkerScriptName($domain['domain']);
+    $zoneId = $domain['zone_id'];
+
+    // Маршруты зоны, указывающие на наш скрипт.
+    $routes = [];
+    if ($zoneId) {
+        $list = cloudflareListWorkerRoutes($pdo, $credentials, $zoneId, $proxies, $userId);
+        if (!empty($list['success']) && !empty($list['data'])) {
+            $rs = is_array($list['data']) ? $list['data'] : [$list['data']];
+            foreach ($rs as $r) {
+                $rScript = is_object($r) ? ($r->script ?? '') : ($r['script'] ?? '');
+                $rPat    = is_object($r) ? ($r->pattern ?? '') : ($r['pattern'] ?? '');
+                if ($rScript === $scriptName && $rPat !== '') $routes[] = $rPat;
+            }
+        }
+    }
+
+    // Код скрипта (best-effort).
+    $code = '';
+    $exists = false;
+    $accountId = $zoneId ? cfGetAccountId($pdo, $credentials, $zoneId, $proxies, $userId) : null;
+    if ($accountId) {
+        $sc = cfGetWorkerScriptContent($credentials, $accountId, $scriptName, $proxies);
+        if (!empty($sc['exists'])) { $exists = true; $code = $sc['code'] ?? ''; }
+    }
+    $exists = $exists || !empty($routes);
+
+    return [
+        'success'     => true,
+        'exists'      => $exists,
+        'domain'      => $domain['domain'],
+        'script_name' => $scriptName,
+        'routes'      => $routes,
+        'code'        => $code,
     ];
 }
 

@@ -3573,6 +3573,67 @@ function cfWorkerScriptName($domain) {
 }
 
 /**
+ * Читает текущий код Worker-скрипта с аккаунта. Ответ CF: для service-worker —
+ * простой JS, для module — multipart (вытаскиваем главный модуль). Возвращает
+ * ['exists'=>bool, 'code'=>string, 'http_code'=>int].
+ */
+function cfGetWorkerScriptContent($credentials, $accountId, $scriptName, $proxies = []) {
+    $out = ['exists' => false, 'code' => '', 'http_code' => 0];
+    if (!$accountId || !$scriptName) return $out;
+
+    $url = "https://api.cloudflare.com/client/v4/accounts/$accountId/workers/scripts/$scriptName";
+    $ch = curl_init($url);
+    list($authHeaders) = cfBuildAuthHeaders($credentials['email'], $credentials['api_key'], $credentials['auth_type'] ?? null);
+    $headers = array_filter($authHeaders, function ($h) { return stripos($h, 'Content-Type:') !== 0; });
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER         => true,
+        CURLOPT_HTTPHEADER     => array_values($headers),
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_CONNECTTIMEOUT => 12,
+    ]);
+    if (!empty($proxies)) {
+        $proxy = getRandomProxy($proxies);
+        if ($proxy && preg_match('/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)@([^:@]+):(.+)$/', $proxy, $m)) {
+            curl_setopt($ch, CURLOPT_PROXY, "{$m[1]}:{$m[2]}");
+            curl_setopt($ch, CURLOPT_PROXYUSERPWD, "{$m[3]}:{$m[4]}");
+            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
+        }
+    }
+    $resp = curl_exec($ch);
+    $out['http_code'] = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $hsize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+    $ctype = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    curl_close($ch);
+
+    if ($out['http_code'] === 404) return $out;                 // скрипта нет
+    if ($resp === false || $out['http_code'] !== 200) return $out;
+
+    $body = substr($resp, $hsize);
+    if (stripos($ctype, 'multipart') !== false && preg_match('/boundary=("?)([^";]+)\1/i', $ctype, $bm)) {
+        // Module worker: берём часть с JS-содержимым.
+        $boundary = '--' . $bm[2];
+        foreach (explode($boundary, $body) as $part) {
+            if (stripos($part, 'javascript') === false) continue;
+            $pos = strpos($part, "\r\n\r\n");
+            if ($pos !== false) {
+                $content = substr($part, $pos + 4);
+                $content = preg_replace('/\r\n--\s*$/', '', $content); // хвостовой boundary
+                $out['exists'] = true;
+                $out['code'] = trim($content, "\r\n");
+                return $out;
+            }
+        }
+        $out['exists'] = true; // скрипт есть, но код не распарсили
+        return $out;
+    }
+
+    $out['exists'] = true;
+    $out['code'] = $body;
+    return $out;
+}
+
+/**
  * Загружает Worker-скрипт на уровень аккаунта (accounts/:id/workers/scripts/:name).
  * Современный способ; легаси zones/:id/workers/script больше не привязывается к маршрутам.
  */

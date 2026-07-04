@@ -1527,15 +1527,15 @@ function deployWorkerWithConfig() {
 
 // ============ Свой (кастомный) Worker ============
 function deployCustomWorker() {
-    const sel = document.getElementById('customWorkerDomain');
-    const domainId = sel ? sel.value : '';
+    const dom = cwGetDomain();
     const route = (document.getElementById('customWorkerRoute')?.value || '').trim();
     const script = document.getElementById('customWorkerScript')?.value || '';
 
-    if (!domainId) { showError('Выберите домен'); return; }
+    if (!dom || !dom.id) { showError('Выберите домен из списка (введите и выберите подсказку)'); return; }
     if (!script.trim()) { showError('Вставьте код Worker'); return; }
 
-    const domainName = sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '';
+    const domainId = dom.id;
+    const domainName = dom.name;
     const routesPreview = route || (domainName ? domainName + '/*' : '*');
     const routeCount = routesPreview.split(',').map(s => s.trim()).filter(Boolean).length || 1;
     if (!confirm(`Создать Worker и применить к ${routeCount} маршрут(ам) «${routesPreview}» (домен ${domainName})?`)) return;
@@ -1569,14 +1569,25 @@ function deployCustomWorker() {
     });
 }
 
+// Домен-селектор — теперь текстовое поле с поиском (input+datalist). Возвращает
+// { name, id } по введённому имени (id берём из карты window.__cwDomains, домен
+// уникален в рамках пользователя). id=null, если имя не из списка.
+function cwGetDomain() {
+    const inp = document.getElementById('customWorkerDomain');
+    const name = (inp?.value || '').trim();
+    if (!name) return null;
+    const id = (window.__cwDomains || {})[name] || null;
+    return { name, id };
+}
+
 // Подставить выбранный домен в маршрут. Кнопки задают маршрут (заменяют содержимое),
 // чтобы можно было свободно переключаться: «домен/*» → только apex, «*.домен/*» →
 // только поддомены, «оба» → оба варианта. Несколько своих путей можно вписать вручную
 // через запятую (один воркер поддерживает несколько маршрутов).
 function fillWorkerRoute(kind) {
-    const sel = document.getElementById('customWorkerDomain');
-    const d = (sel && sel.value) ? (sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '') : '';
-    if (!d) { showError('Сначала выберите домен'); return; }
+    const dom = cwGetDomain();
+    if (!dom || !dom.name) { showError('Сначала выберите домен'); return; }
+    const d = dom.name;
     const inp = document.getElementById('customWorkerRoute');
     const apex = d + '/*';
     const wild = '*.' + d + '/*';
@@ -1586,12 +1597,54 @@ function fillWorkerRoute(kind) {
     inp.focus();
 }
 
+// Показать статус воркера на выбранном домене (есть/нет + маршруты) и дать загрузить код.
+let _cwStatusTimer = null;
+function loadCustomWorkerStatus() {
+    const box = document.getElementById('customWorkerStatus');
+    if (!box) return;
+    const dom = cwGetDomain();
+    if (!dom || !dom.id) { box.innerHTML = ''; box.dataset.code = ''; box.dataset.routes = ''; return; }
+    box.innerHTML = '<span class="text-muted">Проверяю воркер на домене…</span>';
+    $.post('security_rules_api_minimal.php', { action: 'get_custom_worker', domain_id: dom.id })
+     .done(function (r) {
+        if (!r || !r.success) { box.innerHTML = '<span class="text-danger">' + ((r && r.error) || 'не удалось проверить') + '</span>'; return; }
+        if (r.exists) {
+            const routes = r.routes || [];
+            let html = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>На домене уже есть воркер</span>';
+            if (routes.length) html += ' · маршруты: <code>' + routes.join('</code>, <code>') + '</code>';
+            html += ' · <a href="#" onclick="loadExistingWorker(); return false;">загрузить код и маршруты в форму</a>';
+            box.innerHTML = html;
+            box.dataset.code = r.code || '';
+            box.dataset.routes = routes.join(', ');
+        } else {
+            box.innerHTML = '<span class="text-muted">Воркера на этом домене нет.</span>';
+            box.dataset.code = ''; box.dataset.routes = '';
+        }
+     })
+     .fail(function () { box.innerHTML = '<span class="text-danger">не удалось проверить воркер</span>'; });
+}
+function loadExistingWorker() {
+    const box = document.getElementById('customWorkerStatus');
+    if (!box) return;
+    const code = box.dataset.code || '';
+    const routes = box.dataset.routes || '';
+    if (routes) document.getElementById('customWorkerRoute').value = routes;
+    if (code) {
+        const ta = document.getElementById('customWorkerScript');
+        ta.value = code;
+        ta.dispatchEvent(new Event('input'));
+        showSuccess('Код и маршруты воркера загружены в форму');
+    } else {
+        showError('Маршруты подставлены, но код скрипта получить не удалось (например, воркер залит вне панели или нет прав Workers Scripts:Read)');
+    }
+}
+
 // Удалить кастомный воркер выбранного домена (снять маршруты + удалить скрипт).
 function deleteCustomWorker() {
-    const sel = document.getElementById('customWorkerDomain');
-    const domainId = sel ? sel.value : '';
-    if (!domainId) { showError('Выберите домен, с которого удалить воркер'); return; }
-    const domainName = sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '';
+    const dom = cwGetDomain();
+    if (!dom || !dom.id) { showError('Выберите домен из списка, с которого удалить воркер'); return; }
+    const domainId = dom.id;
+    const domainName = dom.name;
     if (!confirm(`Удалить Worker с домена ${domainName}? Будут сняты его маршруты и удалён скрипт.`)) return;
 
     showLoading('Удаление Worker…');
@@ -1639,16 +1692,25 @@ function checkCustomWorker() {
 
 // Автозаполнение маршрута именем домена + счётчик символов кода
 $(function () {
-    const $sel = $('#customWorkerDomain');
+    const $inp = $('#customWorkerDomain');
     const $route = $('#customWorkerRoute');
-    if ($sel.length && $route.length) {
-        $sel.on('change', function () {
-            const d = this.options[this.selectedIndex]?.getAttribute('data-domain') || '';
-            const cur = ($route.val() || '').trim();
-            // Подставляем домен/* только если поле пустое или там прежний авто-паттерн (…/*).
-            if (d && (cur === '' || /\/\*$/.test(cur))) {
-                $route.val(d + '/*');
+    if ($inp.length) {
+        const onDomain = function () {
+            const dom = cwGetDomain();
+            // автозаполнение маршрута apex, если поле пустое или там прежний авто-паттерн (…/*)
+            if (dom && dom.name && $route.length) {
+                const cur = ($route.val() || '').trim();
+                if (cur === '' || /\/\*$/.test(cur)) $route.val(dom.name + '/*');
             }
+            clearTimeout(_cwStatusTimer);
+            _cwStatusTimer = setTimeout(loadCustomWorkerStatus, 200);
+        };
+        // change — выбор подсказки / потеря фокуса; input — срабатывает, когда введённое
+        // имя совпало с реальным доменом из списка (не дёргаем на каждый символ).
+        $inp.on('change', onDomain);
+        $inp.on('input', function () {
+            const dom = cwGetDomain();
+            if (dom && dom.id) onDomain();
         });
     }
     const $ta = $('#customWorkerScript');

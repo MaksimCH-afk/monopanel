@@ -484,12 +484,15 @@ $stats = $statsStmt->fetch();
                             <div class="row g-3">
                                 <div class="col-md-5">
                                     <label class="form-label small fw-bold">Домен</label>
-                                    <select class="form-select" id="customWorkerDomain">
-                                        <option value="">— выберите домен —</option>
+                                    <input type="text" class="form-control" id="customWorkerDomain" list="cwDomainList"
+                                           placeholder="Начните вводить домен…" autocomplete="off" spellcheck="false" autocapitalize="off">
+                                    <datalist id="cwDomainList">
                                         <?php foreach ($domains as $domain): ?>
-                                            <option value="<?php echo $domain['id']; ?>" data-domain="<?php echo htmlspecialchars($domain['domain']); ?>"><?php echo htmlspecialchars($domain['domain']); ?></option>
+                                            <option value="<?php echo htmlspecialchars($domain['domain']); ?>"></option>
                                         <?php endforeach; ?>
-                                    </select>
+                                    </datalist>
+                                    <div id="customWorkerStatus" class="small mt-1"></div>
+                                    <script>window.__cwDomains = <?php echo json_encode(array_column($domains, 'id', 'domain'), JSON_UNESCAPED_UNICODE); ?>;</script>
                                 </div>
                                 <div class="col-md-7">
                                     <label class="form-label small fw-bold">Маршрут (Route) — можно несколько</label>
