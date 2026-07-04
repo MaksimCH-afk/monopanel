@@ -3595,16 +3595,39 @@ function cloudflareUploadWorkerScript($pdo, $credentials, $accountId, $scriptNam
     $ch = curl_init($endpointUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $scriptContent);
     curl_setopt($ch, CURLOPT_TIMEOUT, 60);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
 
     // Авторизация по типу аккаунта (Global API Key или Bearer-токен с Workers Scripts: Edit)
     list($authHeaders) = cfBuildAuthHeaders($credentials['email'], $credentials['api_key'], $credentials['auth_type'] ?? null);
     $headers = array_filter($authHeaders, function($h) {
-        return stripos($h, 'Content-Type:') !== 0; // заменим Content-Type на javascript
+        return stripos($h, 'Content-Type:') !== 0; // Content-Type выставим сами (зависит от формата воркера)
     });
-    $headers[] = "Content-Type: application/javascript";
+
+    // Формат воркера: МОДУЛЬНЫЙ (export default {fetch}, import ...) грузится multipart-ом
+    // с main_module и типом application/javascript+module. КЛАССИЧЕСКИЙ (addEventListener)
+    // — простым PUT с application/javascript. Иначе CF отвергает export: «Unexpected token 'export'».
+    $isModule = (bool) (preg_match('/^\s*export\s+(default|const|let|var|function|class|async|\{|\*)/m', $scriptContent)
+                     || preg_match('/^\s*import\s+/m', $scriptContent));
+
+    if ($isModule) {
+        $mainModule = 'worker.js';
+        $boundary = '----MonopanelWorker' . bin2hex(random_bytes(8));
+        $body  = "--$boundary\r\n";
+        $body .= "Content-Disposition: form-data; name=\"metadata\"; filename=\"metadata.json\"\r\n";
+        $body .= "Content-Type: application/json\r\n\r\n";
+        $body .= json_encode(['main_module' => $mainModule]) . "\r\n";
+        $body .= "--$boundary\r\n";
+        $body .= "Content-Disposition: form-data; name=\"$mainModule\"; filename=\"$mainModule\"\r\n";
+        $body .= "Content-Type: application/javascript+module\r\n\r\n";
+        $body .= $scriptContent . "\r\n";
+        $body .= "--$boundary--\r\n";
+        $headers[] = "Content-Type: multipart/form-data; boundary=$boundary";
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    } else {
+        $headers[] = "Content-Type: application/javascript";
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $scriptContent);
+    }
     curl_setopt($ch, CURLOPT_HTTPHEADER, array_values($headers));
 
     if (!empty($proxies)) {
