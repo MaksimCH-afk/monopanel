@@ -39,6 +39,7 @@ import db as seo_db
 import cache as seo_cache
 import gsc_manager as gscm
 import dashboard as seo_dashboard
+import backlinks as seo_backlinks
 
 app = Flask(__name__)
 
@@ -113,7 +114,11 @@ DEFAULT_SETTINGS = {
     "credentialsPath": os.path.join(DATA_DIR, "client_secret.json"),
     "trendsCredentialsPath": "",
     "isAuthorized": False,
-    "overviewSites": []
+    "overviewSites": [],
+    # Внешние сервисы мониторинга беклинков
+    "xmlriverUser": "",
+    "xmlriverKey": "",
+    "twoindexKey": "",
 }
 
 
@@ -764,6 +769,119 @@ def page_details():
     return jsonify({"url": url, "period": period,
                     "timeseries": timeseries, "queries": queries[:25]})
 
+
+# ─── Мониторинг беклинков (404, наличие ссылки, XMLRIVER, 2index) ───────────────
+def _backlink_dict(b):
+    return {
+        "id": b.id, "site_url": b.site_url,
+        "source_url": b.source_url, "target_url": b.target_url,
+        "http_status": b.http_status, "link_present": b.link_present,
+        "index_status": b.index_status, "index_count": b.index_count,
+        "submitted": bool(b.submitted),
+        "submitted_at": b.submitted_at.isoformat() if b.submitted_at else None,
+        "last_checked": b.last_checked.isoformat() if b.last_checked else None,
+    }
+
+
+@app.route('/api/backlinks', methods=['GET'])
+def list_backlinks():
+    """Список беклинков. Опционально фильтр по siteUrl."""
+    from db import Backlink
+    site_url = request.args.get('siteUrl')
+    with seo_db.session_scope() as s:
+        q = s.query(Backlink)
+        if site_url:
+            q = q.filter_by(site_url=site_url)
+        rows = [_backlink_dict(b) for b in q.order_by(Backlink.created_at.desc()).all()]
+    return jsonify({"backlinks": rows, "job": seo_backlinks.job_status()})
+
+
+@app.route('/api/backlinks', methods=['POST'])
+def add_backlinks():
+    """
+    Добавить беклинк(и). Форматы:
+      {source_url, target_url, site_url?}  — один
+      {items: [{source_url, target_url, site_url?}, ...]}  — пачкой
+    """
+    from db import Backlink
+    data = request.get_json(silent=True) or {}
+    items = data.get('items')
+    if not items:
+        items = [{"source_url": data.get('source_url'),
+                  "target_url": data.get('target_url'),
+                  "site_url": data.get('site_url')}]
+    added, skipped = 0, 0
+    with seo_db.session_scope() as s:
+        for it in items:
+            src = (it.get('source_url') or '').strip()
+            tgt = (it.get('target_url') or '').strip()
+            if not src or not tgt:
+                skipped += 1
+                continue
+            exists = s.query(Backlink).filter_by(source_url=src, target_url=tgt).first()
+            if exists:
+                skipped += 1
+                continue
+            s.add(Backlink(source_url=src, target_url=tgt,
+                           site_url=(it.get('site_url') or '').strip() or None))
+            added += 1
+    log.info("Backlinks added=%s skipped=%s", added, skipped)
+    return jsonify({"success": True, "added": added, "skipped": skipped})
+
+
+@app.route('/api/backlinks/delete', methods=['POST'])
+def delete_backlinks():
+    """Удалить беклинк(и): {id} или {ids:[...]}"""
+    from db import Backlink
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids') or ([data['id']] if data.get('id') is not None else [])
+    if not ids:
+        return jsonify({"error": "id/ids обязателен"}), 400
+    with seo_db.session_scope() as s:
+        s.query(Backlink).filter(Backlink.id.in_(ids)).delete(synchronize_session=False)
+    return jsonify({"success": True, "deleted": len(ids)})
+
+
+@app.route('/api/backlinks/check', methods=['POST'])
+def check_backlinks():
+    """Фоновая проверка 404 + наличия ссылки для выбранных (или всех) беклинков."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids')
+    started = seo_backlinks.start_check(ids)
+    return jsonify({"started": started, "job": seo_backlinks.job_status()})
+
+
+@app.route('/api/backlinks/index-check', methods=['POST'])
+def index_check_backlinks():
+    """Фоновая проверка индексации доноров через XMLRIVER."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids')
+    config = load_config()
+    user = config.get('xmlriverUser', '')
+    key = config.get('xmlriverKey', '')
+    if not user or not key:
+        return jsonify({"error": "XMLRIVER не настроен (укажите user и key в Настройках)"}), 400
+    started = seo_backlinks.start_index_check(ids, user, key)
+    return jsonify({"started": started, "job": seo_backlinks.job_status()})
+
+
+@app.route('/api/backlinks/submit-index', methods=['POST'])
+def submit_index_backlinks():
+    """Отправить доноров на индексацию через 2index Ninja."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids')
+    config = load_config()
+    key = config.get('twoindexKey', '')
+    if not key:
+        return jsonify({"error": "2index не настроен (укажите ключ в Настройках)"}), 400
+    started = seo_backlinks.start_submit(ids, key)
+    return jsonify({"started": started, "job": seo_backlinks.job_status()})
+
+
+@app.route('/api/backlinks/status', methods=['GET'])
+def backlinks_status():
+    return jsonify(seo_backlinks.job_status())
+
 @app.route('/api/data', methods=['GET'])
 def get_gsc_data():
     """Get GSC analytics data"""
@@ -1136,7 +1254,10 @@ def get_settings():
         "credentialsPath": config.get('credentialsPath', ''),
         "trendsCredentialsPath": config.get('trendsCredentialsPath', ''),
         "isAuthorized": config.get('isAuthorized', False),
-        "overviewSites": config.get('overviewSites', [])
+        "overviewSites": config.get('overviewSites', []),
+        "xmlriverUser": config.get('xmlriverUser', ''),
+        "xmlriverKey": config.get('xmlriverKey', ''),
+        "twoindexKey": config.get('twoindexKey', ''),
     })
 
 @app.route('/api/settings', methods=['POST'])
@@ -1168,7 +1289,11 @@ def save_settings():
             if len(overview_sites) > 6:
                 return jsonify({"error": "Maximum 6 sites allowed for overview"}), 400
             config['overviewSites'] = overview_sites
-        
+
+        for key in ('xmlriverUser', 'xmlriverKey', 'twoindexKey'):
+            if key in data:
+                config[key] = data[key]
+
         # Save config
         if save_config(config):
             return jsonify({
@@ -1178,7 +1303,10 @@ def save_settings():
                 "openaiModel": config.get('openaiModel', '') or DEFAULT_OPENAI_MODEL,
                 "credentialsPath": config.get('credentialsPath', ''),
                 "trendsCredentialsPath": config.get('trendsCredentialsPath', ''),
-                "overviewSites": config.get('overviewSites', [])
+                "overviewSites": config.get('overviewSites', []),
+                "xmlriverUser": config.get('xmlriverUser', ''),
+                "xmlriverKey": config.get('xmlriverKey', ''),
+                "twoindexKey": config.get('twoindexKey', ''),
             })
         else:
             return jsonify({"error": "Failed to save settings"}), 500

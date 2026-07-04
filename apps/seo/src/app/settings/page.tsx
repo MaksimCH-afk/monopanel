@@ -14,6 +14,9 @@ interface SettingsData {
   trendsCredentialsPath: string;
   isAuthorized: boolean;
   overviewSites: string[];
+  xmlriverUser: string;
+  xmlriverKey: string;
+  twoindexKey: string;
 }
 
 // Список моделей OpenAI, доступных для выбора. Значение "custom" позволяет
@@ -51,7 +54,10 @@ export default function SettingsPage() {
     credentialsPath: '',
     trendsCredentialsPath: '',
     isAuthorized: false,
-    overviewSites: []
+    overviewSites: [],
+    xmlriverUser: '',
+    xmlriverKey: '',
+    twoindexKey: ''
   });
   const [availableSites, setAvailableSites] = useState<string[]>([]);
   const [siteSearchFilter, setSiteSearchFilter] = useState('');
@@ -113,7 +119,10 @@ export default function SettingsPage() {
           credentialsPath: String(data.credentialsPath || ''),
           trendsCredentialsPath: String(data.trendsCredentialsPath || ''),
           isAuthorized: Boolean(data.isAuthorized || false),
-          overviewSites: Array.isArray(data.overviewSites) ? data.overviewSites : []
+          overviewSites: Array.isArray(data.overviewSites) ? data.overviewSites : [],
+          xmlriverUser: String(data.xmlriverUser || ''),
+          xmlriverKey: String(data.xmlriverKey || ''),
+          twoindexKey: String(data.twoindexKey || '')
         });
       } else {
         setMessage({ type: 'error', text: 'Не удалось загрузить настройки' });
@@ -224,7 +233,10 @@ export default function SettingsPage() {
           openaiModel: settings.openaiModel || DEFAULT_MODEL,
           credentialsPath: settings.credentialsPath,
           trendsCredentialsPath: settings.trendsCredentialsPath,
-          overviewSites: settings.overviewSites
+          overviewSites: settings.overviewSites,
+          xmlriverUser: settings.xmlriverUser,
+          xmlriverKey: settings.xmlriverKey,
+          twoindexKey: settings.twoindexKey
         })
       });
 
@@ -241,7 +253,10 @@ export default function SettingsPage() {
           credentialsPath: String(result.credentialsPath !== undefined && result.credentialsPath !== null ? result.credentialsPath : settings.credentialsPath || ''),
           trendsCredentialsPath: String(result.trendsCredentialsPath !== undefined && result.trendsCredentialsPath !== null ? result.trendsCredentialsPath : settings.trendsCredentialsPath || ''),
           isAuthorized: Boolean(result.isAuthorized !== undefined ? result.isAuthorized : settings.isAuthorized),
-          overviewSites: Array.isArray(result.overviewSites) ? result.overviewSites : (Array.isArray(settings.overviewSites) ? settings.overviewSites : [])
+          overviewSites: Array.isArray(result.overviewSites) ? result.overviewSites : (Array.isArray(settings.overviewSites) ? settings.overviewSites : []),
+          xmlriverUser: String(result.xmlriverUser ?? settings.xmlriverUser ?? ''),
+          xmlriverKey: String(result.xmlriverKey ?? settings.xmlriverKey ?? ''),
+          twoindexKey: String(result.twoindexKey ?? settings.twoindexKey ?? '')
         };
         console.log('Updated settings:', updatedSettings); // Debug log
         setSettings(updatedSettings);
@@ -312,7 +327,10 @@ export default function SettingsPage() {
           credentialsPath: '',
           trendsCredentialsPath: '',
           isAuthorized: false,
-          overviewSites: []
+          overviewSites: [],
+          xmlriverUser: '',
+          xmlriverKey: '',
+          twoindexKey: ''
         });
 
         // Clear all data from DataContext
@@ -519,6 +537,39 @@ export default function SettingsPage() {
               />
               <p className="text-xs text-gray-500">
                 Путь к файлу client_secret.json OAuth для Google Trends. В Google Cloud Console должен быть включён доступ (scope) <code>searchtrends</code>.
+              </p>
+            </div>
+
+            {/* Ключи мониторинга беклинков */}
+            <div className="space-y-3 border-t border-gray-200 pt-6">
+              <h3 className="text-sm font-semibold text-gray-800">Мониторинг беклинков</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label htmlFor="xmlriver-user" className="block text-xs font-medium text-gray-700 mb-1">XMLRIVER — user ID</label>
+                  <input id="xmlriver-user" type="text" value={settings.xmlriverUser}
+                    onChange={(e) => setSettings({ ...settings, xmlriverUser: e.target.value })}
+                    placeholder="напр. 12345"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label htmlFor="xmlriver-key" className="block text-xs font-medium text-gray-700 mb-1">XMLRIVER — API key</label>
+                  <input id="xmlriver-key" type="password" value={settings.xmlriverKey}
+                    onChange={(e) => setSettings({ ...settings, xmlriverKey: e.target.value })}
+                    placeholder="ключ XMLRIVER"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label htmlFor="twoindex-key" className="block text-xs font-medium text-gray-700 mb-1">2index Ninja — API key</label>
+                  <input id="twoindex-key" type="password" value={settings.twoindexKey}
+                    onChange={(e) => setSettings({ ...settings, twoindexKey: e.target.value })}
+                    placeholder="ключ 2index"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                XMLRIVER — проверка индексации беклинков (<a href="https://xmlriver.com/api/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">docs</a>).
+                2index Ninja — отправка беклинков на индексацию (<a href="https://2index.ninja/api-documentation" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">docs</a>).
+                Используются на странице «Беклинки».
               </p>
             </div>
 

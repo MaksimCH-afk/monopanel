@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import (create_engine, Column, Integer, String, Text, DateTime,
-                        Float, ForeignKey, UniqueConstraint)
+                        Float, Boolean, ForeignKey, UniqueConstraint)
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 log = logging.getLogger('seo.db')
@@ -107,6 +107,30 @@ class Annotation(Base):
     date = Column(String(10), nullable=False)        # YYYY-MM-DD (дата события)
     text = Column(Text, nullable=False)
     category = Column(String(32), default='note')    # backlink | work | change | note
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Backlink(Base):
+    """
+    Беклинк: страница-донор (source_url), где должна стоять ссылка на наш
+    target_url/домен. Хранит результаты проверок: 404, наличие ссылки,
+    индексация (XMLRIVER) и статус отправки на индекс (2index).
+    """
+    __tablename__ = 'backlinks'
+    __table_args__ = (UniqueConstraint('source_url', 'target_url', name='uq_backlink_src_tgt'),)
+
+    id = Column(Integer, primary_key=True)
+    site_url = Column(String(2048), index=True)      # для группировки по проекту (необяз.)
+    source_url = Column(String(2048), nullable=False)  # страница-донор со ссылкой
+    target_url = Column(String(2048), nullable=False)  # наш URL/домен
+
+    http_status = Column(Integer)                    # 404-чекер: код ответа донора
+    link_present = Column(Boolean)                    # найдена ли ссылка на target
+    index_status = Column(String(32))                # indexed | not_indexed | unknown | error
+    index_count = Column(Integer)                    # число результатов от XMLRIVER
+    submitted = Column(Boolean, default=False)       # отправлен в 2index
+    submitted_at = Column(DateTime)
+    last_checked = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
