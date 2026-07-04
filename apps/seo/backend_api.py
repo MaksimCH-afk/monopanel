@@ -1496,8 +1496,11 @@ def oauth_google_start():
     try:
         flow = Flow.from_client_secrets_file(
             creds_path, scopes=GSC_SCOPES, redirect_uri=OAUTH_REDIRECT_URI)
+        # select_account — всегда показывать выбор аккаунта Google, чтобы можно
+        # было подключить несколько разных Gmail одним и тем же client_secret.json.
         auth_url, state = flow.authorization_url(
-            access_type='offline', include_granted_scopes='true', prompt='consent')
+            access_type='offline', include_granted_scopes='true',
+            prompt='select_account consent')
         _oauth_flows[state] = creds_path
         return jsonify({"authUrl": auth_url})
     except Exception as e:
