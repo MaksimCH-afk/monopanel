@@ -9,3 +9,5 @@ google-auth-oauthlib
 oauth2client
 httplib2
 python-dateutil
+SQLAlchemy>=2.0
+redis>=5.0

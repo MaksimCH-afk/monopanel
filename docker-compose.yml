@@ -20,6 +20,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Redis для seo-бэкенда (кэш/очереди). Хост `redis` — имя сервиса ниже.
+      - REDIS_URL=redis://redis:6379/0
+      # Уровень логов seo-бэкенда (INFO по умолчанию; DEBUG — максимально подробно).
+      - SEO_LOG_LEVEL=${SEO_LOG_LEVEL:-INFO}
+    depends_on:
+      - redis
     ports:
       # Дашборд (плитки). 333 — привилегированный порт; если демон откажет —
       # поменяйте на 3330 здесь и в dashboard/Caddyfile.
@@ -40,4 +47,13 @@ services:
       - ./data/ank:/data/ank   # ank-БД (проекты, стратегии)
       - ./data/arc:/data/arc   # arc-БД (прогоны) — стартует с чистого листа
       - ./data/img:/data/img   # img: SQLite + сгенерированные картинки
-      - ./data/seo:/data/seo   # seo: client_secret.json + OAuth-токен GSC (переживает пересборку)
+      - ./data/seo:/data/seo   # seo: client_secret.json + OAuth-токен GSC + seo.db + logs
+
+  # Redis — кэш и очереди для seo-бэкенда (ускорение под нагрузкой).
+  redis:
+    image: redis:7-alpine
+    container_name: panel-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data   # AOF-персистентность кэша

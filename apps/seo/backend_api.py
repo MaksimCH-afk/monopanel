@@ -30,7 +30,31 @@ from google_auth_oauthlib.flow import Flow
 os.environ.setdefault('OAUTHLIB_INSECURE_TRANSPORT', '1')
 os.environ.setdefault('OAUTHLIB_RELAX_TOKEN_SCOPE', '1')
 
+# ─── Логирование / БД / кэш (фундамент) ────────────────────────────────────────
+import logging
+from logging_config import setup_logging
+log = setup_logging()
+
+import db as seo_db
+import cache as seo_cache
+
 app = Flask(__name__)
+
+# Подробное логирование каждого запроса к API: метод, путь, статус, длительность.
+@app.before_request
+def _log_request_start():
+    request._start_ts = time.time()
+    log.info("→ %s %s", request.method, request.path)
+
+@app.after_request
+def _log_request_end(response):
+    try:
+        dur_ms = (time.time() - getattr(request, '_start_ts', time.time())) * 1000
+        log.info("← %s %s %s (%.0f ms)", request.method, request.path,
+                 response.status_code, dur_ms)
+    except Exception:  # noqa: BLE001 — логи не должны ломать ответ
+        pass
+    return response
 
 # Адрес фронта seo (для CORS и для возврата после OAuth). По умолчанию :3332,
 # как в docker-compose; можно переопределить через env для другого хоста.
@@ -651,12 +675,24 @@ def get_top_queries():
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    """Get API status"""
+    """Get API status (плюс здоровье БД/кэша и число подключённых аккаунтов)."""
     global webmasters_service, verified_sites
+
+    accounts_count = None
+    try:
+        from db import Account
+        with seo_db.session_scope() as s:
+            accounts_count = s.query(Account).count()
+    except Exception as e:  # noqa: BLE001
+        log.warning("status: accounts count failed: %s", e)
+
     return jsonify({
         "status": "running",
         "gsc_connected": webmasters_service is not None,
-        "sites_count": len(verified_sites)
+        "sites_count": len(verified_sites),
+        "db": seo_db.db_healthy(),
+        "cache": seo_cache.cache_healthy(),   # true / false / null(=отключён)
+        "accounts": accounts_count
     })
 
 @app.route('/api/openai/validate', methods=['POST'])
@@ -1671,21 +1707,29 @@ if __name__ == '__main__':
     # Set environment variable to prevent multiprocessing issues with Flask reloader
     os.environ['FLASK_ENV'] = 'development'
     
-    print("Starting GSC Dashboard Backend...")
-    
+    log.info("Starting GSC Dashboard Backend...")
+
+    # Инициализация БД (создаёт таблицы, если их нет)
+    try:
+        seo_db.init_db()
+    except Exception as e:  # noqa: BLE001
+        log.exception("DB init failed (продолжаем без БД): %s", e)
+
+    # Прогрев подключения к кэшу (не критично, есть фолбэк)
+    seo_cache.get_client()
+
     # Initialize OpenAI client
     initialize_openai_client()
-    
+
     # Initialize GSC service
     init_gsc()
-    
+
     try:
         # Use use_reloader=False to prevent multiprocessing conflicts
         # This is safer when using pandas and other libraries that use multiprocessing
+        log.info("Backend listening on 0.0.0.0:5001")
         app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False, threaded=True)
     except KeyboardInterrupt:
-        print("\nShutting down backend...")
+        log.info("Shutting down backend...")
     except Exception as e:
-        print(f"Error running backend: {e}")
-        import traceback
-        traceback.print_exc() 
+        log.exception("Error running backend: %s", e)
