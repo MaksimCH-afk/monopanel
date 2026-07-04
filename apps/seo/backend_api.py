@@ -207,11 +207,20 @@ def initialize_openai_client():
     else:
         openai_client = None
 
-def authorize_creds(creds_path, authorized_creds_path=os.path.join(DATA_DIR, 'authorizedcreds.dat')):
-    """Authorize and return the Webmasters API service"""
+def authorize_creds(creds_path, authorized_creds_path=os.path.join(DATA_DIR, 'authorizedcreds.dat'),
+                    allow_interactive=True):
+    """
+    Authorize and return the Webmasters API service.
+
+    allow_interactive=False — только подхватить уже сохранённые креды
+    (authorizedcreds.dat), НЕ запускать интерактивный OAuth-флоу. Это критично
+    для старта сервера: tools.run_flow() блокирует поток до завершения OAuth,
+    а в headless-контейнере (без браузера) висит навсегда — тогда app.run()
+    не выполняется и порт 5001 не открывается (Connection reset by peer).
+    """
     try:
         SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly']
-        
+
         parser = argparse.ArgumentParser(
             formatter_class=argparse.RawDescriptionHelpFormatter,
             parents=[tools.argparser])
@@ -225,6 +234,12 @@ def authorize_creds(creds_path, authorized_creds_path=os.path.join(DATA_DIR, 'au
         credentials = storage.get()
 
         if credentials is None or credentials.invalid:
+            if not allow_interactive:
+                # Нет сохранённой авторизации — на старте молча выходим,
+                # авторизацию пользователь запустит кнопкой «Авторизовать».
+                print("GSC not authorized yet (no stored credentials); "
+                      "skipping interactive flow at startup.")
+                return None
             credentials = tools.run_flow(flow, storage, flags)
 
         http = httplib2.Http()
@@ -418,7 +433,10 @@ def init_gsc():
     creds_path = config.get('credentialsPath', '')
     
     if creds_path and os.path.exists(creds_path):
-        webmasters_service = authorize_creds(creds_path)
+        # На старте НЕ запускаем интерактивный OAuth — иначе сервер зависает
+        # до app.run() и порт 5001 не открывается. Только подхватываем уже
+        # сохранённую авторизацию (authorizedcreds.dat), если она есть.
+        webmasters_service = authorize_creds(creds_path, allow_interactive=False)
         if webmasters_service:
             verified_sites = get_verified_sites(webmasters_service)
             print(f"Initialized GSC with {len(verified_sites)} verified sites")
