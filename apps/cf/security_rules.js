@@ -1604,24 +1604,32 @@ function loadCustomWorkerStatus() {
     if (!box) return;
     const dom = cwGetDomain();
     if (!dom || !dom.id) { box.innerHTML = ''; box.dataset.code = ''; box.dataset.routes = ''; return; }
-    box.innerHTML = '<span class="text-muted">Проверяю воркер на домене…</span>';
+    box.innerHTML = '<div class="alert alert-light border py-2 px-3 mb-0"><span class="text-muted">Проверяю воркер на домене…</span></div>';
     $.post('security_rules_api_minimal.php', { action: 'get_custom_worker', domain_id: dom.id })
      .done(function (r) {
-        if (!r || !r.success) { box.innerHTML = '<span class="text-danger">' + ((r && r.error) || 'не удалось проверить') + '</span>'; return; }
+        if (!r || !r.success) {
+            box.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0">' + ((r && r.error) || 'не удалось проверить') + '</div>';
+            return;
+        }
         if (r.exists) {
             const routes = r.routes || [];
-            let html = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>На домене уже есть воркер</span>';
-            if (routes.length) html += ' · маршруты: <code>' + routes.join('</code>, <code>') + '</code>';
-            html += ' · <a href="#" onclick="loadExistingWorker(); return false;">загрузить код и маршруты в форму</a>';
+            const scripts = r.scripts || [];
+            let html = '<div class="alert alert-success py-2 px-3 mb-0">';
+            html += '<i class="fas fa-check-circle me-1"></i><strong>На домене уже есть воркер.</strong>';
+            if (routes.length) html += '<br>Маршруты: <code>' + routes.join('</code>, <code>') + '</code>';
+            if (scripts.length) html += '<br>Скрипт: <code>' + scripts.join('</code>, <code>') + '</code>';
+            if (r.foreign) html += '<br><span class="text-muted">Заведён вне панели (имя скрипта не панельное) — можно загрузить и переприменить через панель.</span>';
+            html += '<br><a href="#" onclick="loadExistingWorker(); return false;">↧ загрузить код и маршруты в форму</a>';
+            html += '</div>';
             box.innerHTML = html;
             box.dataset.code = r.code || '';
             box.dataset.routes = routes.join(', ');
         } else {
-            box.innerHTML = '<span class="text-muted">Воркера на этом домене нет.</span>';
+            box.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="fas fa-triangle-exclamation me-1"></i>Воркера на этом домене нет.</div>';
             box.dataset.code = ''; box.dataset.routes = '';
         }
      })
-     .fail(function () { box.innerHTML = '<span class="text-danger">не удалось проверить воркер</span>'; });
+     .fail(function () { box.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0">не удалось проверить воркер</div>'; });
 }
 function loadExistingWorker() {
     const box = document.getElementById('customWorkerStatus');

@@ -792,8 +792,11 @@ function getCustomWorker($pdo, $userId, $data) {
     $scriptName = cfWorkerScriptName($domain['domain']);
     $zoneId = $domain['zone_id'];
 
-    // Маршруты зоны, указывающие на наш скрипт.
-    $routes = [];
+    // ВСЕ worker-маршруты зоны (а не только наш скрипт) — чтобы видеть и воркеры,
+    // заведённые руками в кабинете Cloudflare (у них другое имя скрипта).
+    $routes = [];            // паттерны (для подстановки в поле)
+    $scriptsSeen = [];       // имя_скрипта => true (в порядке появления)
+    $foreign = false;        // есть ли маршрут на скрипт НЕ нашего формата
     if ($zoneId) {
         $list = cloudflareListWorkerRoutes($pdo, $credentials, $zoneId, $proxies, $userId);
         if (!empty($list['success']) && !empty($list['data'])) {
@@ -801,28 +804,41 @@ function getCustomWorker($pdo, $userId, $data) {
             foreach ($rs as $r) {
                 $rScript = is_object($r) ? ($r->script ?? '') : ($r['script'] ?? '');
                 $rPat    = is_object($r) ? ($r->pattern ?? '') : ($r['pattern'] ?? '');
-                if ($rScript === $scriptName && $rPat !== '') $routes[] = $rPat;
+                if ($rPat === '') continue;
+                $routes[] = $rPat;
+                if ($rScript !== '') {
+                    $scriptsSeen[$rScript] = true;
+                    if ($rScript !== $scriptName) $foreign = true;
+                }
             }
         }
     }
 
-    // Код скрипта (best-effort).
-    $code = '';
-    $exists = false;
+    // Из какого скрипта тянуть код: сперва наш (cfp-…), иначе первый привязанный.
+    $loadScript = null;
+    if (isset($scriptsSeen[$scriptName])) $loadScript = $scriptName;
+    elseif (!empty($scriptsSeen))         $loadScript = array_key_first($scriptsSeen);
+
     $accountId = $zoneId ? cfGetAccountId($pdo, $credentials, $zoneId, $proxies, $userId) : null;
+    $code = '';
+    $exists = !empty($routes);
+
+    // Код скрипта (best-effort): того, что привязан маршрутом; если маршрутов нет —
+    // проверяем, не залит ли наш скрипт без маршрута.
     if ($accountId) {
-        $sc = cfGetWorkerScriptContent($credentials, $accountId, $scriptName, $proxies);
-        if (!empty($sc['exists'])) { $exists = true; $code = $sc['code'] ?? ''; }
+        $sc = cfGetWorkerScriptContent($credentials, $accountId, $loadScript ?: $scriptName, $proxies);
+        if (!empty($sc['exists'])) { $exists = true; $code = $sc['code'] ?? ''; if (!$loadScript) $loadScript = $scriptName; }
     }
-    $exists = $exists || !empty($routes);
 
     return [
-        'success'     => true,
-        'exists'      => $exists,
-        'domain'      => $domain['domain'],
-        'script_name' => $scriptName,
-        'routes'      => $routes,
-        'code'        => $code,
+        'success'      => true,
+        'exists'       => $exists,
+        'domain'       => $domain['domain'],
+        'script_name'  => $loadScript ?: $scriptName,
+        'scripts'      => array_keys($scriptsSeen),
+        'foreign'      => $foreign,
+        'routes'       => array_values(array_unique($routes)),
+        'code'         => $code,
     ];
 }
 
