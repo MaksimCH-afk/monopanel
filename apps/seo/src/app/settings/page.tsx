@@ -64,6 +64,11 @@ export default function SettingsPage() {
   // Подключённые Google-аккаунты (мультиаккаунт)
   const [accounts, setAccounts] = useState<Array<{ email: string; sites: number; created_at: string | null }>>([]);
   const [deletingAccount, setDeletingAccount] = useState<string | null>(null);
+  // Добавление сайта в консоль
+  const [addSiteEmail, setAddSiteEmail] = useState('');
+  const [addSiteUrl, setAddSiteUrl] = useState('');
+  const [addingSite, setAddingSite] = useState(false);
+  const [addSiteResult, setAddSiteResult] = useState<any>(null);
   // Автоматизация (планировщик)
   const [autom, setAutom] = useState({ enabled: false, dashboardRefreshHours: 6, sitesRefreshHours: 24, dashboardPeriod: 28 });
   const [automState, setAutomState] = useState<{ lastDashboard: string | null; lastSites: string | null }>({ lastDashboard: null, lastSites: null });
@@ -198,6 +203,25 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error loading accounts:', error);
     }
+  };
+
+  const addSite = async () => {
+    const email = addSiteEmail || (accounts[0]?.email ?? '');
+    if (!email || !addSiteUrl.trim()) return;
+    setAddingSite(true);
+    setAddSiteResult(null);
+    try {
+      const r = await fetch(`${API_BASE}/api/accounts/add-site`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, siteUrl: addSiteUrl.trim() }),
+      });
+      const d = await r.json();
+      setAddSiteResult(d);
+      if (d.ok) { setAddSiteUrl(''); loadAccounts(); }
+    } catch (e) {
+      console.error('Error adding site:', e);
+      setAddSiteResult({ error: 'Не удалось добавить сайт. Убедитесь, что бэкенд запущен.' });
+    } finally { setAddingSite(false); }
   };
 
   const deleteAccount = async (email: string) => {
@@ -670,6 +694,55 @@ export default function SettingsPage() {
                              : <FontAwesomeIcon icon={faPlus} />}
                 <span>{authorizing ? 'Открываю Google…' : 'Добавить аккаунт Google'}</span>
               </button>
+
+              {/* Добавить сайт в консоль (Site Verification) */}
+              {accounts.length > 0 && (
+                <div className="mt-4 border-t border-gray-100 pt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Добавить сайт в консоль</p>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Аккаунт</label>
+                      <select value={addSiteEmail || accounts[0]?.email || ''}
+                        onChange={(e) => setAddSiteEmail(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg bg-white max-w-[220px]">
+                        {accounts.map((a) => <option key={a.email} value={a.email}>{a.email}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[220px]">
+                      <label className="block text-xs text-gray-500 mb-1">Ресурс (URL или sc-domain:домен)</label>
+                      <input type="text" value={addSiteUrl} onChange={(e) => setAddSiteUrl(e.target.value)}
+                        placeholder="https://site.com/ или sc-domain:site.com"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                    </div>
+                    <button onClick={addSite} disabled={addingSite || !addSiteUrl.trim()}
+                      className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:bg-gray-400 flex items-center gap-2 text-sm">
+                      {addingSite ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" /> : <FontAwesomeIcon icon={faPlus} />}
+                      <span>Добавить сайт</span>
+                    </button>
+                  </div>
+
+                  {addSiteResult && (
+                    <div className={`mt-3 text-sm rounded-lg p-3 border ${
+                      addSiteResult.verified ? 'bg-green-50 border-green-200 text-green-800'
+                        : addSiteResult.error && !addSiteResult.added ? 'bg-red-50 border-red-200 text-red-800'
+                        : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
+                      {addSiteResult.error && !addSiteResult.added && !addSiteResult.verified ? (
+                        <span>Ошибка: {addSiteResult.error}</span>
+                      ) : addSiteResult.verified ? (
+                        <span>✅ Сайт добавлен и подтверждён.</span>
+                      ) : (
+                        <div>
+                          <p>{addSiteResult.added ? 'Сайт добавлен, но требуется подтверждение.' : 'Требуется подтверждение права собственности.'}</p>
+                          {addSiteResult.instruction && <p className="mt-1">{addSiteResult.instruction}</p>}
+                          {addSiteResult.token && !addSiteResult.instruction && (
+                            <p className="mt-1 break-all">Токен ({addSiteResult.method}): <code>{addSiteResult.token}</code></p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Overview Sites Selection */}

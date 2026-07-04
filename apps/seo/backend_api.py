@@ -42,6 +42,7 @@ import dashboard as seo_dashboard
 import backlinks as seo_backlinks
 import indexation as seo_indexation
 import scheduler as seo_scheduler
+import siteverify as seo_siteverify
 
 app = Flask(__name__)
 
@@ -585,6 +586,24 @@ def refresh_accounts_endpoint():
     total = gscm.refresh_all_sites()
     verified_sites = gscm.all_site_urls()
     return jsonify({"success": True, "sites": total, "accounts": gscm.list_accounts()})
+
+
+@app.route('/api/accounts/add-site', methods=['POST'])
+def add_site_endpoint():
+    """
+    Добавить сайт в консоль аккаунта и попытаться верифицировать.
+    {email, siteUrl, method?}. Для sc-domain:... используется DNS_TXT, иначе META.
+    """
+    global verified_sites
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip()
+    site_url = (data.get('siteUrl') or '').strip()
+    method = (data.get('method') or '').strip() or None
+    if not email or not site_url:
+        return jsonify({"error": "email и siteUrl обязательны"}), 400
+    result = seo_siteverify.add_and_verify(email, site_url, method)
+    verified_sites = gscm.all_site_urls()
+    return jsonify(result)
 
 
 # ─── Главный дашборд (агрегация по всем сайтам, ленивая подгрузка) ──────────────

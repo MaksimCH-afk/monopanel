@@ -21,9 +21,13 @@ from db import Account, Site, session_scope
 
 log = logging.getLogger('seo.gsc')
 
-# webmasters.readonly — данные GSC; openid+email — чтобы узнать, что за аккаунт.
+# webmasters (полный, а не readonly) — чтение данных GSC + добавление ресурсов;
+# siteverification — авто-верификация добавляемых сайтов; openid+email — узнать
+# аккаунт. ВНИМАНИЕ: расширение scope относительно readonly — ранее выданные
+# токены нужно переавторизовать (кнопка «Добавить аккаунт Google»).
 GSC_SCOPES = [
-    'https://www.googleapis.com/auth/webmasters.readonly',
+    'https://www.googleapis.com/auth/webmasters',
+    'https://www.googleapis.com/auth/siteverification',
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
 ]
@@ -200,3 +204,17 @@ def has_any_account():
     if not _services:
         rebuild_registry()
     return bool(_services)
+
+
+def get_creds(email):
+    """Валидные (обновлённые) Credentials аккаунта по email или None."""
+    with session_scope() as s:
+        acc = s.query(Account).filter_by(email=email).first()
+        if not acc:
+            return None
+        token_json = acc.token_json
+    try:
+        return _refresh_and_persist(email, creds_from_json(token_json))
+    except Exception as e:  # noqa: BLE001
+        log.warning("get_creds failed for %s: %s", email, e)
+        return None
