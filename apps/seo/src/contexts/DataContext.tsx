@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { API_BASE } from '@/lib/api';
 
 // Types
 interface GSCRow {
@@ -216,7 +217,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
     setError('');
     
     try {
-      const response = await fetch('http://localhost:5001/api/sites');
+      const response = await fetch(`${API_BASE}/api/sites`);
       const result = await response.json();
       if (result.sites) {
         setSites(result.sites);
@@ -227,7 +228,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
         // Set top sites for overview - check if saved in settings first
         if (topSites.length === 0) {
           // Try to load from settings
-          fetch('http://localhost:5001/api/settings')
+          fetch(`${API_BASE}/api/settings`)
             .then(res => res.json())
             .then(settingsData => {
               if (settingsData.overviewSites && settingsData.overviewSites.length > 0) {

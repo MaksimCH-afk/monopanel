@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '@/lib/api';
 import MetricCard from '@/components/ui/MetricCard';
 import DashboardControls from '@/components/dashboard/DashboardControls';
 import { useData } from '@/contexts/DataContext';
@@ -955,9 +956,9 @@ export default function Dashboard() {
         params.append('filterValue', advancedFilter.value);
       }
 
-      console.log(`DEBUG: API request URL: http://localhost:5001/api/data?${params.toString()}`);
+      console.log(`DEBUG: API request URL: ${API_BASE}/api/data?${params.toString()}`);
         
-      const response = await fetch(`http://localhost:5001/api/data?${params}`);
+      const response = await fetch(`${API_BASE}/api/data?${params}`);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -1483,7 +1484,7 @@ export default function Dashboard() {
     setInsightsLoading({...insightsLoading, daily: true});
     
     try {
-      const response = await fetch('http://localhost:5001/api/insights/daily', {
+      const response = await fetch(`${API_BASE}/api/insights/daily`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1522,7 +1523,7 @@ export default function Dashboard() {
     setInsightsLoading({...insightsLoading, queries: true});
     
     try {
-      const response = await fetch('http://localhost:5001/api/insights/queries', {
+      const response = await fetch(`${API_BASE}/api/insights/queries`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

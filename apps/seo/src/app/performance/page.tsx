@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '@/lib/api';
 import Chart from 'chart.js/auto';
 import { useData } from '@/contexts/DataContext';
 
@@ -110,7 +111,7 @@ export default function PerformancePage() {
         params.append('device', device);
       }
 
-      const response = await fetch(`http://localhost:5001/api/data?${params}`);
+      const response = await fetch(`${API_BASE}/api/data?${params}`);
       
       if (!response.ok) {
         const errorText = await response.text();

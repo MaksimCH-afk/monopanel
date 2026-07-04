@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '@/lib/api';
 import { useData } from '@/contexts/DataContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExclamationTriangle, faTrophy, faArrowDown } from '@fortawesome/free-solid-svg-icons';
@@ -280,7 +281,7 @@ export default function TrafficInsightsPage() {
       }
 
       console.log('Making API call 1: Queries for first date');
-      const queriesFirstRes = await fetch(`http://localhost:5001/api/data?${queriesFirstDateParams}`);
+      const queriesFirstRes = await fetch(`${API_BASE}/api/data?${queriesFirstDateParams}`);
       
       if (!queriesFirstRes.ok) {
         const errorText = await queriesFirstRes.text();
@@ -308,7 +309,7 @@ export default function TrafficInsightsPage() {
       }
 
       console.log('Making API call 2: Queries for second date');
-      const queriesLastRes = await fetch(`http://localhost:5001/api/data?${queriesLastDateParams}`);
+      const queriesLastRes = await fetch(`${API_BASE}/api/data?${queriesLastDateParams}`);
       
       if (!queriesLastRes.ok) {
         const errorText = await queriesLastRes.text();
@@ -402,7 +403,7 @@ export default function TrafficInsightsPage() {
       }
 
       console.log('Making API call 3: Pages/URLs for first date');
-      const pagesFirstRes = await fetch(`http://localhost:5001/api/data?${pagesFirstDateParams}`);
+      const pagesFirstRes = await fetch(`${API_BASE}/api/data?${pagesFirstDateParams}`);
       
       if (!pagesFirstRes.ok) {
         const errorText = await pagesFirstRes.text();
@@ -430,7 +431,7 @@ export default function TrafficInsightsPage() {
       }
 
       console.log('Making API call 4: Pages/URLs for second date');
-      const pagesLastRes = await fetch(`http://localhost:5001/api/data?${pagesLastDateParams}`);
+      const pagesLastRes = await fetch(`${API_BASE}/api/data?${pagesLastDateParams}`);
       
       if (!pagesLastRes.ok) {
         const errorText = await pagesLastRes.text();
