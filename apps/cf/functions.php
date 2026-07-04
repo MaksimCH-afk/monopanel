@@ -3620,25 +3620,38 @@ function cfGetWorkerScriptContent($credentials, $accountId, $scriptName, $proxie
 
     $body = substr($resp, $hsize);
     if (stripos($ctype, 'multipart') !== false && preg_match('/boundary=("?)([^";]+)\1/i', $ctype, $bm)) {
-        // Module worker: берём часть с JS-содержимым.
+        // Module worker: ответ — multipart. Достаём часть с кодом. Устойчиво к \n/\r\n,
+        // к разным заголовкам частей и к порядку (metadata json + один или несколько модулей).
         $boundary = '--' . $bm[2];
+        $jsCode = null;   // часть с Content-Type …javascript…
+        $best = '';       // самая крупная НЕ-json часть (фоллбэк, если тип не распознан)
         foreach (explode($boundary, $body) as $part) {
-            if (stripos($part, 'javascript') === false) continue;
-            $pos = strpos($part, "\r\n\r\n");
-            if ($pos !== false) {
-                $content = substr($part, $pos + 4);
-                $content = preg_replace('/\r\n--\s*$/', '', $content); // хвостовой boundary
-                $out['exists'] = true;
-                $out['code'] = trim($content, "\r\n");
-                return $out;
+            $part = ltrim($part, "\r\n");
+            if ($part === '' || strncmp($part, '--', 2) === 0) continue; // закрывающий boundary
+            // Разделитель заголовков/тела — CRLFCRLF или LFLF.
+            $sep = strpos($part, "\r\n\r\n"); $seplen = 4;
+            if ($sep === false) { $sep = strpos($part, "\n\n"); $seplen = 2; }
+            if ($sep === false) continue;
+            $head = substr($part, 0, $sep);
+            $content = substr($part, $sep + $seplen);
+            $content = preg_replace('/\r?\n--\s*$/', '', $content); // хвостовой boundary, если прилип
+            $content = rtrim($content, "\r\n");
+            if ($content === '') continue;
+            if (stripos($head, 'javascript') !== false) { $jsCode = $content; break; }
+            if (stripos($head, 'application/json') === false && strlen($content) > strlen($best)) {
+                $best = $content;
             }
         }
-        $out['exists'] = true; // скрипт есть, но код не распарсили
+        $out['exists'] = true;
+        if ($jsCode !== null)      $out['code'] = $jsCode;
+        elseif ($best !== '')      $out['code'] = $best;
+        else                       $out['error'] = 'скрипт есть, но код не распарсился (нестандартный формат ответа)';
         return $out;
     }
 
+    // service-worker (или единичный module): тело = код скрипта.
     $out['exists'] = true;
-    $out['code'] = $body;
+    $out['code'] = trim($body, "\r\n");
     return $out;
 }
 
