@@ -492,16 +492,18 @@ $stats = $statsStmt->fetch();
                                     </select>
                                 </div>
                                 <div class="col-md-7">
-                                    <label class="form-label small fw-bold">Маршрут (Route)</label>
-                                    <input type="text" class="form-control" id="customWorkerRoute" placeholder="example.com/*" spellcheck="false" autocapitalize="off" autocomplete="off">
+                                    <label class="form-label small fw-bold">Маршрут (Route) — можно несколько</label>
+                                    <input type="text" class="form-control" id="customWorkerRoute" placeholder="example.com/*, *.example.com/*" spellcheck="false" autocapitalize="off" autocomplete="off">
                                     <div class="btn-group btn-group-sm mt-1" role="group" aria-label="Подставить домен в маршрут">
-                                        <button type="button" class="btn btn-outline-secondary font-monospace" onclick="fillWorkerRoute('apex')" title="Весь сайт: домен/*">домен/*</button>
-                                        <button type="button" class="btn btn-outline-secondary font-monospace" onclick="fillWorkerRoute('wildcard')" title="Все поддомены: *.домен/*">*.домен/*</button>
+                                        <button type="button" class="btn btn-outline-secondary font-monospace" onclick="fillWorkerRoute('apex')" title="Добавить: домен/* (весь сайт)">домен/*</button>
+                                        <button type="button" class="btn btn-outline-secondary font-monospace" onclick="fillWorkerRoute('wildcard')" title="Добавить: *.домен/* (все поддомены)">*.домен/*</button>
+                                        <button type="button" class="btn btn-outline-primary font-monospace" onclick="fillWorkerRoute('both')" title="Оба сразу: домен/* и *.домен/*">оба</button>
                                     </div>
                                     <small class="text-muted d-block mt-1">
                                         Как в Cloudflare: <code>*</code> — любой поддомен/путь, <code>/</code> — разделитель.
-                                        Примеры: <code>example.com/*</code> (весь сайт), <code>*.example.com/*</code> (все поддомены),
-                                        <code>example.com/api/*</code> (только /api). Выберите домен — подставлю <code>домен/*</code> автоматически.
+                                        <strong>Один воркер — несколько маршрутов</strong>: перечислите через запятую, напр.
+                                        <code>example.com/*, *.example.com/*</code> (apex + все поддомены).
+                                        Кнопка «оба» подставит оба варианта для выбранного домена.
                                     </small>
                                 </div>
                                 <div class="col-12">

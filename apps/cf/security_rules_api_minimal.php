@@ -611,12 +611,13 @@ function deployWorker($pdo, $userId, $data) {
 
 /**
  * Развернуть ПОЛЬЗОВАТЕЛЬСКИЙ (кастомный) Worker на выбранный домен.
- * Скрипт заливается как есть (без подстановки шаблонных {{...}}), маршрут —
- * произвольный паттерн CF (пример: example.com/*, *.example.com/*, example.com/api/*).
+ * Скрипт заливается как есть (без подстановки шаблонных {{...}}). Маршрутов может
+ * быть НЕСКОЛЬКО (через запятую или с новой строки) — скрипт один, а путей к нему
+ * сколько нужно, например apex-домен/* и *.домен/* сразу (как в Cloudflare).
  */
 function deployCustomWorker($pdo, $userId, $data) {
     $domainId = (int)($data['domain_id'] ?? 0);
-    $route    = trim($data['route'] ?? '');
+    $routeRaw = trim($data['route'] ?? '');
     $script   = (string)($data['script'] ?? '');
 
     if ($domainId <= 0)          return ['success' => false, 'error' => 'Не выбран домен'];
@@ -636,34 +637,53 @@ function deployCustomWorker($pdo, $userId, $data) {
     $domain = $stmt->fetch();
     if (!$domain) return ['success' => false, 'error' => 'Домен не найден'];
 
-    $proxies = getProxies($pdo, $userId);
-
-    // Маршрут: пусто/'*' = весь домен (домен/*); {{domain}} подставляем именем домена.
-    if ($route === '' || $route === '*') {
-        $routePattern = $domain['domain'] . '/*';
-    } else {
-        $routePattern = str_replace('{{domain}}', $domain['domain'], $route);
+    // Разбираем список маршрутов (запятая/перевод строки), нормализуем, убираем дубли.
+    $patterns = [];
+    foreach (preg_split('/[\n,]+/', $routeRaw) as $p) {
+        $p = trim($p);
+        if ($p === '' || $p === '*') {
+            $p = $domain['domain'] . '/*';
+        } else {
+            $p = str_replace('{{domain}}', $domain['domain'], $p);
+        }
+        $patterns[$p] = true; // ключ = дедуп
     }
+    if (empty($patterns)) { $patterns[$domain['domain'] . '/*'] = true; }
+    $patterns = array_keys($patterns);
 
+    $proxies = getProxies($pdo, $userId);
     $credentials = ['email' => $domain['email'], 'api_key' => $domain['api_key'], 'auth_type' => $domain['auth_type'] ?? null];
     // id=null + пустой config → generateWorkerScript вернёт скрипт как есть (без {{...}}).
     $templateRow = ['id' => null, 'name' => 'custom', 'script' => $script];
 
-    $apply = cloudflareApplyWorkerTemplate($pdo, $userId, $domain, $credentials, $templateRow, $routePattern, $proxies, []);
-    if (empty($apply['success'])) {
-        return ['success' => false, 'error' => $apply['error'] ?? 'Не удалось развернуть Worker', 'details' => $apply['details'] ?? null];
+    // Один скрипт — несколько маршрутов. cloudflareApplyWorkerTemplate заливает скрипт
+    // (PUT идемпотентен) и ставит один маршрут; вызываем на каждый паттерн.
+    $results = [];
+    $okCount = 0;
+    $lastError = null;
+    foreach ($patterns as $pat) {
+        $apply = cloudflareApplyWorkerTemplate($pdo, $userId, $domain, $credentials, $templateRow, $pat, $proxies, []);
+        if (!empty($apply['success'])) {
+            $okCount++;
+            $finalPat = $apply['pattern'] ?? $pat;
+            $results[] = ['pattern' => $finalPat, 'ok' => true];
+            saveSecurityRule($pdo, $userId, $domainId, 'worker', json_encode([
+                'template' => 'custom',
+                'route' => $finalPat
+            ]));
+        } else {
+            $lastError = $apply['error'] ?? 'unknown';
+            $results[] = ['pattern' => $pat, 'ok' => false, 'error' => $lastError];
+        }
     }
 
-    saveSecurityRule($pdo, $userId, $domainId, 'worker', json_encode([
-        'template' => 'custom',
-        'route' => $apply['pattern'] ?? $routePattern
-    ]));
-
     return [
-        'success' => true,
+        'success' => $okCount > 0,
         'domain'  => $domain['domain'],
-        'pattern' => $apply['pattern'] ?? $routePattern,
-        'route_id' => $apply['route_id'] ?? null,
+        'applied' => $okCount,
+        'total'   => count($patterns),
+        'results' => $results,
+        'error'   => $okCount > 0 ? null : ('Не удалось развернуть Worker: ' . ($lastError ?? 'неизвестно')),
     ];
 }
 

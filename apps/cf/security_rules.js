@@ -1536,8 +1536,9 @@ function deployCustomWorker() {
     if (!script.trim()) { showError('Вставьте код Worker'); return; }
 
     const domainName = sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '';
-    const pattern = route || (domainName ? domainName + '/*' : '*');
-    if (!confirm(`Создать Worker и применить к маршруту «${pattern}» (домен ${domainName})?`)) return;
+    const routesPreview = route || (domainName ? domainName + '/*' : '*');
+    const routeCount = routesPreview.split(',').map(s => s.trim()).filter(Boolean).length || 1;
+    if (!confirm(`Создать Worker и применить к ${routeCount} маршрут(ам) «${routesPreview}» (домен ${domainName})?`)) return;
 
     showLoading('Создание и применение Worker…');
     $.post('security_rules_api_minimal.php', {
@@ -1549,7 +1550,14 @@ function deployCustomWorker() {
     .done(function(response) {
         hideLoading();
         if (response.success) {
-            showSuccess(`Worker создан и применён: ${response.pattern || pattern}`);
+            const oks = (response.results || []).filter(r => r.ok).map(r => r.pattern);
+            const fails = (response.results || []).filter(r => !r.ok);
+            let msg = `Worker создан. Маршрутов применено: ${response.applied}/${response.total}`;
+            if (oks.length) msg += ' → ' + oks.join(', ');
+            showSuccess(msg);
+            if (fails.length) {
+                showError('Не удалось для: ' + fails.map(f => f.pattern + ' (' + (f.error || 'ошибка') + ')').join('; '));
+            }
         } else {
             showError(response.error || 'Ошибка развертывания Worker');
         }
@@ -1561,14 +1569,21 @@ function deployCustomWorker() {
     });
 }
 
-// Подставить выбранный домен в маршрут в нужном формате (кнопки «домен/*» и «*.домен/*»).
+// Подставить выбранный домен в маршрут. Один воркер может иметь НЕСКОЛЬКО маршрутов
+// (через запятую): «домен/*» и «*.домен/*» добавляют пункт в список (без дублей),
+// «оба» — сразу оба варианта.
 function fillWorkerRoute(kind) {
     const sel = document.getElementById('customWorkerDomain');
     const d = (sel && sel.value) ? (sel.options[sel.selectedIndex]?.getAttribute('data-domain') || '') : '';
     if (!d) { showError('Сначала выберите домен'); return; }
-    const route = (kind === 'wildcard') ? ('*.' + d + '/*') : (d + '/*');
     const inp = document.getElementById('customWorkerRoute');
-    inp.value = route;
+    const apex = d + '/*';
+    const wild = '*.' + d + '/*';
+    if (kind === 'both') { inp.value = apex + ', ' + wild; inp.focus(); return; }
+    const want = (kind === 'wildcard') ? wild : apex;
+    const list = (inp.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!list.includes(want)) list.push(want);
+    inp.value = list.join(', ');
     inp.focus();
 }
 
