@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { runAnalysis, ValidationError } from './core/analyze.js';
+import { icuSegmentationOk } from './core/segment.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -47,4 +48,14 @@ app.listen(config.port, () => {
     ? 'MOCK (no external calls)'
     : `NL:${config.google.mock ? 'mock' : 'live'} OpenAI:${config.openai.mock ? 'mock' : 'live'}`;
   console.log(`Content Gap Analyzer → http://localhost:${config.port}  [${mode}]`);
+
+  // ICU self-check (TZ §4.5): warn if CJK degrades to per-character segmentation
+  // (e.g. a minimal alpine image without full-icu) — the phrase track then loses
+  // dictionary segmentation for no-space scripts.
+  if (!icuSegmentationOk()) {
+    console.warn(
+      '[icu] WARNING: Intl.Segmenter did not segment 北京 as one word. ICU data ' +
+        'looks incomplete (missing full-icu?) — CJK/Thai phrase analysis will degrade.'
+    );
+  }
 });

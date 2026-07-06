@@ -10,7 +10,7 @@
   <main class="wrap">
     <header class="head">
       <h1>Анализатор контентного gap</h1>
-      <p class="sub">Сравнение вашей страницы с конкурентами по сущностям и интенту.
+      <p class="sub">Сравнение вашей страницы с конкурентами по сущностям, фразам и интенту.
         <span id="mockBadge" class="badge badge-mock" hidden>demo / mock-режим</span>
       </p>
     </header>
@@ -34,8 +34,14 @@
           <button type="button" id="addComp" class="btn btn-ghost">+ добавить конкурента</button>
         </div>
 
+        <label class="field">
+          <span class="lbl">Стоп-слова проекта <small>(необязательно)</small></span>
+          <input id="customStopwords" type="text" autocomplete="off"
+            placeholder="бренд, boilerplate — слова через запятую, будут игнорироваться во фразах" />
+        </label>
+
         <p class="hint">Вставляйте основной текст страницы без меню, футера и блоков «похожее» —
-          они искажают профиль сущностей.</p>
+          они искажают профиль сущностей. Язык определяется автоматически (в т.ч. CJK, арабский и др.).</p>
 
         <div class="actions">
           <button type="submit" id="submitBtn" class="btn btn-primary" disabled>Анализировать</button>

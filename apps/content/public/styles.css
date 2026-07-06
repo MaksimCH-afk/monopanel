@@ -142,5 +142,8 @@ tr:last-child td { border-bottom: none; }
 .vol-fill { height: 100%; background: var(--accent); display: flex; align-items: center;
   padding-left: 8px; color: #fff; font-size: 12px; font-family: var(--mono); min-width: 40px; }
 .vol-fill.competitor { background: #3a4453; }
+.vol-stats { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 12px; }
+.vol-stat { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.vol-stat .lbl2 { color: var(--muted); }
 
 .back { margin-top: 18px; }
