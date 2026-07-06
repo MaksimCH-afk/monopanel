@@ -25,6 +25,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Уровень логов seo-бэкенда (INFO по умолчанию; DEBUG — максимально подробно).
       - SEO_LOG_LEVEL=${SEO_LOG_LEVEL:-INFO}
+      # content: куда сохранять API-ключи, введённые в UI (переживают ребилд).
+      - CONTENT_DATA_DIR=/data/content
     depends_on:
       - redis
     ports:
@@ -48,6 +50,7 @@ services:
       - ./data/arc:/data/arc   # arc-БД (прогоны) — стартует с чистого листа
       - ./data/img:/data/img   # img: SQLite + сгенерированные картинки
       - ./data/seo:/data/seo   # seo: client_secret.json + OAuth-токен GSC + seo.db + logs
+      - ./data/content:/data/content  # content: API-ключи, введённые в UI (keys.json)
 
   # Redis — кэш и очереди для seo-бэкенда (ускорение под нагрузкой).
   redis:

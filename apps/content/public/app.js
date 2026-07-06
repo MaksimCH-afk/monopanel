@@ -19,6 +19,21 @@ const el = {
   loading: $('#loading'),
   result: $('#result'),
   mockBadge: $('#mockBadge'),
+  // API-key settings
+  keysToggle: $('#keysToggle'),
+  keysBody: $('#keysBody'),
+  keysSummary: $('#keysSummary'),
+  keysChevron: $('.keys-chevron'),
+  googleKey: $('#googleKey'),
+  openaiKey: $('#openaiKey'),
+  googleStatus: $('#googleStatus'),
+  openaiStatus: $('#openaiStatus'),
+  googleMsg: $('#googleMsg'),
+  openaiMsg: $('#openaiMsg'),
+  testGoogle: $('#testGoogle'),
+  testOpenai: $('#testOpenai'),
+  saveKeys: $('#saveKeys'),
+  keysSaved: $('#keysSaved'),
 };
 
 const esc = (s) =>
@@ -312,18 +327,104 @@ function cmpCells(a, b, idx, type) {
 }
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
+// ─── API keys ─────────────────────────────────────────────────────
+const SOURCE_LABEL = { runtime: 'сохранён здесь', env: 'из .env', none: '' };
+
+function renderKeyStatus(keys) {
+  if (!keys) return;
+  const one = (k, statusEl) => {
+    if (k.set) {
+      statusEl.textContent = `— задан (${SOURCE_LABEL[k.source] || k.source}: ${k.masked})`;
+      statusEl.className = 'key-ok';
+    } else {
+      statusEl.textContent = '— не задан → mock';
+      statusEl.className = 'key-off';
+    }
+  };
+  one(keys.google, el.googleStatus);
+  one(keys.openai, el.openaiStatus);
+  const live = [keys.google.set && 'Google NL', keys.openai.set && 'OpenAI'].filter(Boolean);
+  el.keysSummary.textContent = live.length ? `— активны: ${live.join(', ')}` : '— оба в mock-режиме';
+}
+
+function setMsg(elm, res) {
+  elm.textContent = res.message || '';
+  elm.className = 'key-msg ' + (res.ok ? 'key-ok' : 'key-off');
+}
+
+async function testKey(provider, input, msgEl, btn) {
+  btn.disabled = true;
+  msgEl.textContent = 'Проверяем…';
+  msgEl.className = 'key-msg';
+  try {
+    const res = await fetch('/api/test-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, key: input.value.trim() || undefined }),
+    });
+    setMsg(msgEl, await res.json());
+  } catch (err) {
+    setMsg(msgEl, { ok: false, message: err.message });
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function saveKeys() {
+  el.saveKeys.disabled = true;
+  el.keysSaved.textContent = 'Сохраняем…';
+  // Only send fields the user actually typed into (keeps existing keys intact).
+  const payload = {};
+  if (el.googleKey.value.trim()) payload.google = el.googleKey.value.trim();
+  if (el.openaiKey.value.trim()) payload.openai = el.openaiKey.value.trim();
+  try {
+    const res = await fetch('/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    renderKeyStatus(data.keys);
+    el.googleKey.value = '';
+    el.openaiKey.value = '';
+    el.keysSaved.textContent = data.persisted
+      ? 'Сохранено. Ключи применены.'
+      : 'Применено (без записи на диск — задайте CONTENT_DATA_DIR для персистентности).';
+    // refresh mock badge
+    refreshHealth();
+  } catch (err) {
+    el.keysSaved.textContent = 'Ошибка сохранения: ' + err.message;
+  } finally {
+    el.saveKeys.disabled = false;
+  }
+}
+
+function refreshHealth() {
+  return fetch('/api/health')
+    .then((r) => r.json())
+    .then((h) => {
+      MAX_COMPETITORS = h.max_competitors || 10;
+      el.mockBadge.hidden = !(h.mock_mode || h.nl_mock || h.openai_mock);
+      renderKeyStatus(h.keys);
+      refreshComps();
+    })
+    .catch(() => {});
+}
+
+el.keysToggle.addEventListener('click', () => {
+  const open = el.keysBody.hidden;
+  el.keysBody.hidden = !open;
+  el.keysToggle.setAttribute('aria-expanded', String(open));
+  el.keysChevron.textContent = open ? '▾' : '▸';
+});
+el.testGoogle.addEventListener('click', () => testKey('google', el.googleKey, el.googleMsg, el.testGoogle));
+el.testOpenai.addEventListener('click', () => testKey('openai', el.openaiKey, el.openaiMsg, el.testOpenai));
+el.saveKeys.addEventListener('click', saveKeys);
+
 // ─── Init ─────────────────────────────────────────────────────────
 el.addComp.addEventListener('click', addCompetitor);
 el.query.addEventListener('input', validate);
 el.target.addEventListener('input', validate);
 
-fetch('/api/health')
-  .then((r) => r.json())
-  .then((h) => {
-    MAX_COMPETITORS = h.max_competitors || 10;
-    if (h.mock_mode || h.nl_mock || h.openai_mock) el.mockBadge.hidden = false;
-    refreshComps();
-  })
-  .catch(() => {});
-
+refreshHealth();
 addCompetitor();

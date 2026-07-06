@@ -19,6 +19,40 @@
       </p>
     </header>
 
+    <!-- ─── API keys ──────────────────────────────────────────── -->
+    <section id="keysCard" class="card keys-card">
+      <button type="button" id="keysToggle" class="keys-toggle" aria-expanded="false">
+        <span class="section-title" style="margin:0">Ключи API <span id="keysSummary" class="n"></span></span>
+        <span class="keys-chevron">▸</span>
+      </button>
+      <div id="keysBody" class="keys-body" hidden>
+        <p class="intent-note" style="margin-top:0">Ключи хранятся и используются только на сервере, применяются сразу и сохраняются между перезапусками. Пусто → соответствующий сервис работает в mock-режиме.</p>
+
+        <div class="field">
+          <span class="lbl">Google NL API <small id="googleStatus"></small></span>
+          <div class="key-input">
+            <input id="googleKey" type="password" autocomplete="off" placeholder="AIza… (пусто → mock)" />
+            <button type="button" class="btn" id="testGoogle">Проверить</button>
+          </div>
+          <span class="key-msg" id="googleMsg"></span>
+        </div>
+
+        <div class="field">
+          <span class="lbl">OpenAI API <small id="openaiStatus"></small></span>
+          <div class="key-input">
+            <input id="openaiKey" type="password" autocomplete="off" placeholder="sk-… (пусто → mock)" />
+            <button type="button" class="btn" id="testOpenai">Проверить</button>
+          </div>
+          <span class="key-msg" id="openaiMsg"></span>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="saveKeys" class="btn btn-primary">Сохранить ключи</button>
+          <span id="keysSaved" class="intent-note"></span>
+        </div>
+      </div>
+    </section>
+
     <!-- ─── Input ─────────────────────────────────────────────── -->
     <section id="inputCard" class="card">
       <form id="analyzeForm" novalidate>

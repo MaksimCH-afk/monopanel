@@ -202,3 +202,19 @@ tr:last-child td { border-bottom: none; }
 .vol-stat strong { color: var(--text); }
 
 .back { margin-top: 20px; }
+
+/* ─── API keys card ──────────────────────────────────────── */
+.keys-card { padding-top: 16px; padding-bottom: 16px; }
+.keys-toggle {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer; color: var(--text); font: inherit;
+}
+.keys-chevron { color: var(--muted); font-size: 12px; }
+.keys-body { margin-top: 16px; }
+.key-input { display: flex; gap: 8px; }
+.key-input input { flex: 1; }
+.key-msg { display: block; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
+.key-ok { color: var(--ok); }
+.key-off { color: var(--muted); }
+.lbl small.key-ok { color: var(--ok); font-weight: 500; }
+.lbl small.key-off { color: var(--muted); font-weight: 400; }

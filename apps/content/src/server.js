@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { runAnalysis, ValidationError } from './core/analyze.js';
 import { icuSegmentationOk } from './core/segment.js';
+import { keyStatus, setKeys, getGoogleKey, getOpenAIKey } from './core/keystore.js';
+import { testGoogleKey, testOpenAIKey } from './services/keytest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -15,7 +17,8 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const app = express();
 app.use(express.json({ limit: '4mb' }));
 
-// Health/status — reports whether real keys are wired or we're in mock mode.
+// Health/status — reports whether real keys are wired or we're in mock mode,
+// plus masked key status for the settings UI.
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -23,7 +26,36 @@ app.get('/api/health', (_req, res) => {
     nl_mock: config.google.mock,
     openai_mock: config.openai.mock,
     max_competitors: config.maxCompetitors,
+    keys: keyStatus(),
   });
+});
+
+// Set/clear runtime API keys from the UI (used immediately + persisted).
+app.post('/api/keys', (req, res) => {
+  const body = req.body || {};
+  const { persisted } = setKeys({ google: body.google, openai: body.openai });
+  res.json({ ok: true, persisted, keys: keyStatus() });
+});
+
+// Validate a key ("Проверить"). Uses the posted key, else the stored/env one.
+app.post('/api/test-key', async (req, res) => {
+  const { provider, key } = req.body || {};
+  const typed = typeof key === 'string' && key.trim() ? key.trim() : null;
+  try {
+    if (provider === 'google') {
+      const k = typed || getGoogleKey() || process.env.GOOGLE_NL_API_KEY;
+      if (!k) return res.json({ ok: false, message: 'Ключ Google NL не указан.' });
+      return res.json(await testGoogleKey(k));
+    }
+    if (provider === 'openai') {
+      const k = typed || getOpenAIKey() || process.env.OPENAI_API_KEY;
+      if (!k) return res.json({ ok: false, message: 'Ключ OpenAI не указан.' });
+      return res.json(await testOpenAIKey(k));
+    }
+    return res.status(400).json({ ok: false, message: 'Неизвестный провайдер.' });
+  } catch (e) {
+    res.json({ ok: false, message: `Ошибка проверки: ${e.message}` });
+  }
 });
 
 app.post('/api/analyze', async (req, res) => {

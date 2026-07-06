@@ -1,6 +1,9 @@
 // Centralized configuration. Every threshold from TZ §8 lives here — no magic
 // numbers scattered through the logic. Values come from the environment with
-// sane defaults so the app runs out of the box.
+// sane defaults so the app runs out of the box. API keys additionally support a
+// runtime override set from the UI (see core/keystore.js).
+
+import { getGoogleKey, getOpenAIKey } from './core/keystore.js';
 
 function num(name, def) {
   const raw = process.env[name];
@@ -26,7 +29,10 @@ export const config = {
   port: num('PORT', 3340),
 
   google: {
-    apiKey: str('GOOGLE_NL_API_KEY', ''),
+    // effective key: runtime override (set via the UI) falls back to env
+    get apiKey() {
+      return getGoogleKey() || str('GOOGLE_NL_API_KEY', '');
+    },
     // per-service mock: forced on globally, or when the key is absent
     get mock() {
       return globalMock || !this.apiKey;
@@ -34,7 +40,9 @@ export const config = {
   },
 
   openai: {
-    apiKey: str('OPENAI_API_KEY', ''),
+    get apiKey() {
+      return getOpenAIKey() || str('OPENAI_API_KEY', '');
+    },
     model: str('OPENAI_MODEL', 'gpt-4o-mini'),
     temperature: num('OPENAI_TEMPERATURE', 0.1),
     get mock() {
