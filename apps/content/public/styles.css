@@ -32,6 +32,8 @@
 }
 
 * { box-sizing: border-box; }
+/* the [hidden] attribute must win over component display rules (e.g. .field) */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -202,6 +204,16 @@ tr:last-child td { border-bottom: none; }
 .vol-stat strong { color: var(--text); }
 
 .back { margin-top: 20px; }
+
+/* ─── Mode switch (segmented control) ────────────────────── */
+.seg { display: inline-flex; gap: 4px; background: var(--card-2); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 4px; }
+.seg-opt { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
+  border-radius: var(--radius-sm); font-size: 13px; color: var(--muted); cursor: pointer; transition: .12s; }
+.seg-opt input { position: absolute; opacity: 0; width: 0; height: 0; }
+.seg-opt:has(input:checked) { background: var(--card); color: var(--text); box-shadow: var(--shadow-xs);
+  font-weight: 500; }
+.mode-hint { display: block; color: var(--muted); font-size: 12.5px; margin-top: 8px; }
 
 /* ─── API keys card ──────────────────────────────────────── */
 .keys-card { padding-top: 16px; padding-bottom: 16px; }

@@ -94,11 +94,9 @@ function sortByPriority(a, b) {
  * @param {{init:Function, merge:Function, priorityFor:Function, makeRow:Function}} hooks
  * @returns {{consensusThreshold:number, missing:Array, weak:Array}}
  */
-function diffConsensus(targetMap, compMaps, cfg, hooks) {
-  const total = compMaps.length;
-  const K = Math.max(1, Math.ceil(total * cfg.consensusThresholdRatio));
-
-  // Per-key competitor stats (coverage + salience samples + display fields).
+// Per-key competitor stats (coverage + salience samples + display fields).
+// Shared by both the diff (mode A) and profile (mode B) paths.
+function buildKeyStats(compMaps, hooks) {
   const keyStats = new Map();
   for (const cm of compMaps) {
     for (const [key, unit] of cm) {
@@ -112,6 +110,13 @@ function diffConsensus(targetMap, compMaps, cfg, hooks) {
       hooks.merge(ks, unit);
     }
   }
+  return keyStats;
+}
+
+function diffConsensus(targetMap, compMaps, cfg, hooks) {
+  const total = compMaps.length;
+  const K = Math.max(1, Math.ceil(total * cfg.consensusThresholdRatio));
+  const keyStats = buildKeyStats(compMaps, hooks);
 
   const missing = [];
   const weak = [];
@@ -137,6 +142,37 @@ function diffConsensus(targetMap, compMaps, cfg, hooks) {
   missing.sort(sortByPriority);
   weak.sort(sortByPriority);
   return { consensusThreshold: K, missing, weak };
+}
+
+/**
+ * "competitors_only" consensus profile (TZ §4.2-§4.3): every unit that passes
+ * the K threshold, ranked by how obligatory + central it is across competitors
+ * (no target, no gap, no missing/weak). Centrality = median salience/density
+ * normalized to the strongest consensus unit of the track.
+ * @returns {{consensusThreshold:number, profile:Array}}
+ */
+function profileConsensus(compMaps, cfg, hooks) {
+  const total = compMaps.length;
+  const K = Math.max(1, Math.ceil(total * cfg.consensusThresholdRatio));
+  const keyStats = buildKeyStats(compMaps, hooks);
+
+  const consensus = [...keyStats.values()].filter((ks) => ks.coverage >= K);
+  const meds = new Map();
+  let maxMed = 0;
+  for (const ks of consensus) {
+    const m = median(ks.saliences);
+    meds.set(ks, m);
+    if (m > maxMed) maxMed = m;
+  }
+
+  const profile = consensus.map((ks) => {
+    const medSal = meds.get(ks);
+    const norm = maxMed > 0 ? medSal / maxMed : 0; // centrality relative to strongest
+    const { score, bucket } = hooks.priorityForProfile({ ks, total, norm });
+    return hooks.makeProfileRow({ ks, total, medSal, norm, score, bucket });
+  });
+  profile.sort(sortByPriority);
+  return { consensusThreshold: K, profile };
 }
 
 // ── Entity track hooks ───────────────────────────────────────────────────────
@@ -181,6 +217,24 @@ function entityHooks(config) {
         _score: score,
       };
     },
+    // mode B: rank by coverage + centrality + mid (no gap term)
+    priorityForProfile: ({ ks, total, norm }) => {
+      const p = config.priorityProfile;
+      const score =
+        p.wCoverage * (ks.coverage / total) + p.wCentrality * norm + p.wMid * (ks.mid ? 1 : 0);
+      return bucketFor(score, p);
+    },
+    makeProfileRow: ({ ks, total, medSal, bucket, score }) => ({
+      name: ks.name,
+      type: ks.type,
+      mid: ks.mid || null,
+      wikipedia_url: ks.wikipedia_url || null,
+      coverage: ks.coverage,
+      competitors_total: total,
+      median_salience: round4(medSal),
+      priority: bucket,
+      _score: score,
+    }),
   };
 }
 
@@ -210,6 +264,22 @@ function phraseHooks(config) {
       median_density: round6(medSal),
       target_density: targetUnit ? round6(targetUnit.salience) : null,
       gap: round4(gap),
+      priority: bucket,
+      _score: score,
+    }),
+    // mode B: coverage + centrality (+ specificity bonus for longer n-grams)
+    priorityForProfile: ({ ks, total, norm }) => {
+      const pp = config.phrasePriorityProfile;
+      let score = pp.wCoverage * (ks.coverage / total) + pp.wCentrality * norm;
+      if (ks.n > 2) score += pp.specificity * (ks.n - 2);
+      return bucketFor(clamp(score, 0, 1), pp);
+    },
+    makeProfileRow: ({ ks, total, medSal, bucket, score }) => ({
+      phrase: ks.name,
+      n: ks.n,
+      coverage: ks.coverage,
+      competitors_total: total,
+      median_density: round6(medSal),
       priority: bucket,
       _score: score,
     }),
@@ -263,4 +333,24 @@ export function aggregatePhrases(target, competitors, config) {
   const targetMap = target.phraseMap || new Map();
   const compMaps = competitors.map((c) => c.phraseMap || new Map());
   return diffConsensus(targetMap, compMaps, config, phraseHooks(config));
+}
+
+/**
+ * ENTITY consensus profile — "competitors_only" mode (TZ §4.2). No target.
+ * @param {Array<{entities:Array}>} competitors  successful docs only
+ * @returns {{consensusThreshold:number, profile:Array}}
+ */
+export function aggregateProfile(competitors, config) {
+  const compMaps = competitors.map((c) => aggregateDoc(c.entities, config));
+  return profileConsensus(compMaps, config, entityHooks(config));
+}
+
+/**
+ * PHRASE consensus profile — "competitors_only" mode (TZ §4.2, §4.4). No target.
+ * @param {Array<{phraseMap:Map}>} competitors
+ * @returns {{consensusThreshold:number, profile:Array}}
+ */
+export function aggregatePhrasesProfile(competitors, config) {
+  const compMaps = competitors.map((c) => c.phraseMap || new Map());
+  return profileConsensus(compMaps, config, phraseHooks(config));
 }

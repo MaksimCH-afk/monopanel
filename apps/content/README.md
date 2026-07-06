@@ -87,6 +87,7 @@ docker run -p 3340:3340 --env-file .env content-gap-analyzer
 
 | Переменная | По умолч. | Назначение |
 |---|---|---|
+| `DEFAULT_MODE` | compare | режим по умолчанию: `compare` / `competitors_only` |
 | `MAX_COMPETITORS` | 10 | предел числа конкурентов |
 | `CONSENSUS_THRESHOLD_RATIO` | 0.5 | `K = ceil(N × ratio)` — порог консенсуса |
 | `WEAK_MARGIN` | 0.4 | weak, если `salience_T < median × (1−margin)` |
@@ -101,23 +102,45 @@ docker run -p 3340:3340 --env-file .env content-gap-analyzer
 | `PHRASE_SALIENCE_MIN` | 0.0005 | нижний порог плотности фраз (аналог `SALIENCE_MIN`) |
 | `PHRASE_PRIORITY_W_COVERAGE/W_GAP` | 0.6/0.4 | веса приоритета фраз (без mid) |
 | `PHRASE_SPECIFICITY_BONUS` | 0.05 | бонус специфичности за уровень n выше биграммы |
+| `PROFILE_PRIORITY_W_COVERAGE/W_CENTRALITY/W_MID` | 0.5/0.3/0.2 | приоритет в режиме «только конкуренты» (без gap) |
+| `PHRASE_PROFILE_PRIORITY_W_COVERAGE/W_CENTRALITY` | 0.6/0.4 | то же для фраз (без mid) |
 | `LANG_DETECT` | true | определение языка (franc-min); off → языконезависимый режим |
 | `STOPWORDS_ENABLED` | true | мультиязычный стоп-фильтр (stopwords-iso) |
 | `CUSTOM_STOPWORDS` | "" | стоп-слова проекта (env; также поле запроса) |
 | `OPENAI_MODEL` | gpt-4o-mini | модель (Structured Outputs, strict) |
 | `RETRY_MAX_ATTEMPTS` / `RETRY_BASE_MS` | 4 / 500 | бэк-офф на 429/5xx |
 
+## Режимы анализа
+
+Перед запуском оператор выбирает режим (переключатель в форме):
+
+- **A — «Сравнение с моей страницей»** (`mode: "compare"`, по умолчанию): нужна
+  моя страница; на выходе дифф — `missing` / `weak` (сущности) и
+  `phrase_gap.missing/weak` (фразы).
+- **B — «Только конкуренты»** (`mode: "competitors_only"`): моя страница не нужна
+  (если прислана — игнорируется); на выходе консенсусный профиль-бриф —
+  `consensus_profile` (сущности) и `phrase_profile` (фразы) с полями
+  `name`/`phrase`, `n`, `coverage`, `median_salience`/`median_density`, `mid`,
+  `priority`, `recommendation`. Полей `target_*`/`gap` нет. Приоритет — без gap:
+  `coverage + центральность (+mid)`. `volume` — медиана и распределение по
+  конкурентам.
+
+Консенсус, порог `K`, извлечение сущностей/фраз — общие для обоих режимов;
+разница только в наличии шага сравнения с моей страницей.
+
 ## API
 
 - `GET /api/health` — статус, флаги mock, `max_competitors`.
-- `POST /api/analyze` — тело по §7.1 ТЗ (+ опциональное `custom_stopwords`:
-  строка или массив). Ответ обратносовместим — все прежние поля трека сущностей
-  сохранены, добавлены:
-  - `phrase_gap: { missing, weak }` — фразовый трек; элементы с полями `phrase`,
-    `n`, `coverage`, `median_density`, `target_density`, `gap`, `priority`,
-    `recommendation`;
+- `POST /api/analyze` — тело по §7.1 ТЗ (+ опциональные `custom_stopwords` и
+  `mode`). Ответ обратносовместим — все прежние поля трека сущностей сохранены,
+  добавлены:
+  - `mode` — эхо режима анализа (`compare` | `competitors_only`);
+  - режим A: `phrase_gap: { missing, weak }` (элементы с `phrase`, `n`,
+    `coverage`, `median_density`, `target_density`, `gap`, `priority`,
+    `recommendation`); режим B: `consensus_profile` + `phrase_profile`;
   - `volume` расширен: `sentences`, `median_competitor_sentences`,
-    `lexical_density`, `median_competitor_lexical_density`;
+    `lexical_density`, `median_competitor_lexical_density` (в режиме B — медианы
+    и распределение по конкурентам);
   - `language: { target, dominant }` — определённый язык (ISO 639-3);
   - `entities_mode` — `nl` | `code` | `mixed` (трек сущностей: NL API или кодовый
     fallback по плотности).

@@ -56,12 +56,23 @@
     <!-- ─── Input ─────────────────────────────────────────────── -->
     <section id="inputCard" class="card">
       <form id="analyzeForm" novalidate>
+        <div class="field">
+          <span class="lbl">Режим анализа</span>
+          <div class="seg" id="modeSwitch">
+            <label class="seg-opt"><input type="radio" name="mode" value="compare" checked />
+              <span>Сравнение с моей страницей</span></label>
+            <label class="seg-opt"><input type="radio" name="mode" value="competitors_only" />
+              <span>Только конкуренты</span></label>
+          </div>
+          <small class="mode-hint" id="modeHint"></small>
+        </div>
+
         <label class="field">
           <span class="lbl">Поисковый запрос <em>*</em></span>
           <input id="query" name="query" type="text" placeholder="напр. casino brand review" autocomplete="off" />
         </label>
 
-        <label class="field">
+        <label class="field" id="targetField">
           <span class="lbl">Моя страница <em>*</em></span>
           <textarea id="target" rows="7" placeholder="Вставьте основной текст вашей страницы…"></textarea>
         </label>

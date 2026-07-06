@@ -64,7 +64,8 @@ const RESPONSE_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = [
+// Mode A — "compare": recommendations frame the gap on MY page.
+const SYSTEM_PROMPT_COMPARE = [
   'Ты SEO-аналитик. Тебе дают поисковый запрос, тексты страниц конкурентов,',
   'профиль сущностей страницы пользователя и ГОТОВЫЕ списки missing/weak сущностей и фраз с метриками.',
   'Твои задачи строго три:',
@@ -78,6 +79,23 @@ const SYSTEM_PROMPT = [
   '(coverage, salience, density, priority) — они уже посчитаны и авторитетны. Пиши на языке запроса.',
 ].join(' ');
 
+// Mode B — "competitors_only": recommendations are a coverage brief/checklist —
+// what a page ON THIS TOPIC should cover. There is no "my page".
+const SYSTEM_PROMPT_PROFILE = [
+  'Ты SEO-аналитик. Тебе дают поисковый запрос, тексты страниц конкурентов и ГОТОВЫЙ',
+  'консенсусный профиль конкурентов: сущности и фразы, которые тема раскрывает у конкурентов,',
+  'с метриками. Страницы пользователя НЕТ — это режим брифа «что должна покрывать страница по теме».',
+  'Твои задачи строго три:',
+  '1) Классифицировать тип страницы каждого конкурента и вывести доминирующий интент темы.',
+  '2) Для КАЖДОЙ сущности из списка написать краткую (1-2 предложения) рекомендацию: что именно',
+  '   должна раскрыть страница по этой теме (пункт чек-листа охвата), а не «исправь у себя».',
+  '3) Аналогично для КАЖДОЙ фразы из phrases — как естественно использовать эту формулировку.',
+  '   Верни в phrase_recommendations (поле phrase = сама фраза).',
+  'ЗАПРЕЩЕНО: добавлять сущности/фразы вне входных списков; менять числа (coverage, salience,',
+  'density, priority). Поля target_matches_dominant/target_type могут быть неопределимы — тогда',
+  'ставь разумные значения (например, target совпадает с доминирующим). Пиши на языке запроса.',
+].join(' ');
+
 function buildUserPayload(input) {
   return JSON.stringify({
     query: input.query,
@@ -89,7 +107,8 @@ function buildUserPayload(input) {
       type: m.type,
       coverage: m.coverage,
       competitors_total: m.competitors_total,
-      median_competitor_salience: m.median_competitor_salience,
+      // compare: median_competitor_salience; profile: median_salience
+      median_salience: m.median_competitor_salience ?? m.median_salience,
       priority: m.priority,
     })),
     weak: input.weak.map((w) => ({
@@ -123,7 +142,7 @@ function buildUserPayload(input) {
   });
 }
 
-async function callReal(input) {
+async function callReal(input, systemPrompt) {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -134,7 +153,7 @@ async function callReal(input) {
       model: config.openai.model,
       temperature: config.openai.temperature,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: buildUserPayload(input) },
       ],
       response_format: {
@@ -163,11 +182,14 @@ async function callReal(input) {
 }
 
 /**
- * @returns {Promise<{intent:object, recommendations:{missing:[],weak:[]}}>}
+ * @param {object} input  incl. optional `mode`: 'compare' (default) | 'competitors_only'
+ * @returns {Promise<{intent:object, recommendations:object, phrase_recommendations:object}>}
  */
 export async function classifyAndRecommend(input) {
-  if (config.openai.mock) return mockLLM(input);
-  return withRetry(() => callReal(input), {
+  const profile = input.mode === 'competitors_only';
+  const systemPrompt = profile ? SYSTEM_PROMPT_PROFILE : SYSTEM_PROMPT_COMPARE;
+  if (config.openai.mock) return mockLLM(input, profile);
+  return withRetry(() => callReal(input, systemPrompt), {
     maxAttempts: config.retry.maxAttempts,
     baseMs: config.retry.baseMs,
     label: 'OpenAI.classifyAndRecommend',
@@ -184,7 +206,7 @@ function guessType(text) {
   return 'informational';
 }
 
-function mockLLM(input) {
+function mockLLM(input, profile = false) {
   const types = input.competitorTexts.map(guessType);
   const counts = new Map();
   for (const ty of types) counts.set(ty, (counts.get(ty) || 0) + 1);
@@ -192,20 +214,23 @@ function mockLLM(input) {
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
   const dominant = distribution[0]?.type || 'informational';
-  const targetType = guessType(input.targetProfile.map((e) => e.name).join(' '));
+  const targetType = guessType((input.targetProfile || []).map((e) => e.name).join(' '));
 
+  const medSal = (m) => m.median_competitor_salience ?? m.median_salience;
   const rec = (m, kind) => ({
     name: m.name,
-    recommendation:
-      kind === 'missing'
+    recommendation: profile
+      ? `[MOCK] Раскройте «${m.name}» — тема покрыта у ${m.coverage}/${m.competitors_total} конкурентов (медиана salience ${medSal(m)}). Пункт брифа охвата.`
+      : kind === 'missing'
         ? `[MOCK] Добавьте раздел про «${m.name}» — сущность раскрыта у ${m.coverage}/${m.competitors_total} конкурентов, но отсутствует у вас.`
         : `[MOCK] Усильте «${m.name}»: у вас salience ${m.target_salience}, у конкурентов медиана ${m.median_competitor_salience}. Дайте больше контекста.`,
   });
 
   const precc = (p, kind) => ({
     phrase: p.phrase,
-    recommendation:
-      kind === 'missing'
+    recommendation: profile
+      ? `[MOCK] Используйте фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов (медиана плотности ${p.median_density}).`
+      : kind === 'missing'
         ? `[MOCK] Впишите фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов, у вас её нет.`
         : `[MOCK] Используйте «${p.phrase}» плотнее: у конкурентов медиана плотности ${p.median_density}, у вас ${p.target_density}.`,
   });
@@ -214,8 +239,8 @@ function mockLLM(input) {
     intent: {
       dominant,
       distribution,
-      target_type: targetType,
-      target_matches_dominant: targetType === dominant,
+      target_type: profile ? dominant : targetType,
+      target_matches_dominant: profile ? true : targetType === dominant,
       note: `[MOCK] Доминирующий тип страниц конкурентов — «${dominant}».`,
     },
     recommendations: {

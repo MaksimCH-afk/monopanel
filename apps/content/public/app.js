@@ -9,6 +9,8 @@ const el = {
   form: $('#analyzeForm'),
   query: $('#query'),
   target: $('#target'),
+  targetField: $('#targetField'),
+  modeHint: $('#modeHint'),
   customStopwords: $('#customStopwords'),
   competitors: $('#competitors'),
   addComp: $('#addComp'),
@@ -68,9 +70,27 @@ function collectCompetitors() {
     .filter((c) => c.text.trim());
 }
 
+// ─── Mode ─────────────────────────────────────────────────────────
+const MODE_HINTS = {
+  compare: 'Дифф вашей страницы против конкурентов: чего не хватает (missing/weak).',
+  competitors_only: 'Профиль конкурентов по теме: что вообще должна покрывать страница. «Моя страница» не нужна.',
+};
+function getMode() {
+  const r = $('input[name="mode"]:checked');
+  return r ? r.value : 'compare';
+}
+function applyMode() {
+  const mode = getMode();
+  const competitorsOnly = mode === 'competitors_only';
+  el.targetField.hidden = competitorsOnly; // hide "Моя страница" in mode B
+  el.modeHint.textContent = MODE_HINTS[mode] || '';
+  validate();
+}
+
 // ─── Validation ───────────────────────────────────────────────────
 function validate() {
-  const ok = el.query.value.trim() && el.target.value.trim() && collectCompetitors().length >= 1;
+  const targetOk = getMode() === 'competitors_only' || el.target.value.trim();
+  const ok = el.query.value.trim() && targetOk && collectCompetitors().length >= 1;
   el.submit.disabled = !ok;
   return ok;
 }
@@ -81,12 +101,15 @@ el.form.addEventListener('submit', async (e) => {
   if (!validate()) return;
   el.formError.textContent = '';
 
+  const mode = getMode();
   const payload = {
+    mode,
     query: el.query.value.trim(),
-    target: { label: null, text: el.target.value },
     competitors: collectCompetitors(),
     custom_stopwords: el.customStopwords.value.trim() || undefined,
   };
+  // "Моя страница" only in compare mode (ignored otherwise).
+  if (mode === 'compare') payload.target = { label: null, text: el.target.value };
 
   el.inputCard.hidden = true;
   el.result.hidden = true;
@@ -111,9 +134,6 @@ el.form.addEventListener('submit', async (e) => {
 
 // ─── Rendering ────────────────────────────────────────────────────
 function renderResult(data) {
-  const intentMatch = data.intent.target_matches_dominant;
-  const verdictOk = intentMatch === true;
-
   const parts = [];
 
   // meta
@@ -139,44 +159,26 @@ function renderResult(data) {
     );
   }
 
-  // 1. Intent
-  const dist = (data.intent.distribution || [])
-    .map(
-      (d) =>
-        `<span class="pill ${d.type === data.intent.dominant ? 'dom' : ''}">${esc(
-          d.type
-        )}: <strong>${d.count}</strong></span>`
-    )
-    .join('');
-  parts.push(`<div class="card ${verdictOk ? 'intent-ok' : 'intent-bad'}">
-    <h2 class="section-title">1 · Интент</h2>
-    <p class="intent-verdict ${verdictOk ? 'ok' : 'bad'}">
-      ${
-        intentMatch === null
-          ? 'Тип страницы не определён'
-          : verdictOk
-          ? '✓ Ваша страница того же типа, что и конкуренты'
-          : '✗ Ваша страница ДРУГОГО типа — приоритетная проблема'
-      }
-    </p>
-    <div>Доминирующий тип: <strong>${esc(data.intent.dominant ?? '—')}</strong>
-      &nbsp;·&nbsp; ваш тип: <strong>${esc(data.intent.target_type ?? '—')}</strong></div>
-    <div class="dist">${dist || '<span class="empty">нет данных</span>'}</div>
-    ${data.intent.note ? `<p class="intent-note">${esc(data.intent.note)}</p>` : ''}
-  </div>`);
+  const profileMode = data.mode === 'competitors_only';
 
-  // 2. Missing (entities)
-  parts.push(entityCard('2 · Отсутствующие сущности (missing)', data.missing, false, data.competitors_analyzed));
-  // 3. Weak (entities)
-  parts.push(entityCard('3 · Слабо раскрытые сущности (weak)', data.weak, true, data.competitors_analyzed));
+  // 1. Intent (verdict against my page only makes sense in compare mode)
+  parts.push(intentCard(data, profileMode));
 
-  // 4-5. Phrase gap (separate track — do NOT merge with entities)
-  const pg = data.phrase_gap || { missing: [], weak: [] };
-  parts.push(phraseCard('4 · Отсутствующие фразы (n-граммы, missing)', pg.missing, false, data.competitors_analyzed));
-  parts.push(phraseCard('5 · Слабо раскрытые фразы (weak)', pg.weak, true, data.competitors_analyzed));
-
-  // 6. Volume
-  parts.push(volumeCard(data.volume));
+  const n = data.competitors_analyzed;
+  if (profileMode) {
+    // Mode B: consensus profile / brief — no missing/weak diff.
+    parts.push(profileEntityCard('2 · Профиль темы: сущности конкурентов', data.consensus_profile || [], n));
+    parts.push(profilePhraseCard('3 · Профиль темы: фразы (n-граммы)', data.phrase_profile || [], n));
+    parts.push(volumeProfileCard(data.volume));
+  } else {
+    // Mode A: diff against my page.
+    parts.push(entityCard('2 · Отсутствующие сущности (missing)', data.missing, false, n));
+    parts.push(entityCard('3 · Слабо раскрытые сущности (weak)', data.weak, true, n));
+    const pg = data.phrase_gap || { missing: [], weak: [] };
+    parts.push(phraseCard('4 · Отсутствующие фразы (n-граммы, missing)', pg.missing, false, n));
+    parts.push(phraseCard('5 · Слабо раскрытые фразы (weak)', pg.weak, true, n));
+    parts.push(volumeCard(data.volume));
+  }
 
   parts.push(`<button class="btn back" id="backBtn">← Изменить и проанализировать снова</button>`);
 
@@ -189,6 +191,113 @@ function renderResult(data) {
   });
   $$('table[data-sortable]').forEach(setupSort);
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function intentCard(data, profileMode) {
+  const dist = (data.intent.distribution || [])
+    .map((d) => `<span class="pill ${d.type === data.intent.dominant ? 'dom' : ''}">${esc(d.type)}: <strong>${d.count}</strong></span>`)
+    .join('');
+  // Mode B: no "my page", so no match verdict — just the topic's dominant intent.
+  if (profileMode) {
+    return `<div class="card">
+      <h2 class="section-title">1 · Интент темы (по конкурентам)</h2>
+      <div>Доминирующий тип страниц по теме: <strong>${esc(data.intent.dominant ?? '—')}</strong></div>
+      <div class="dist">${dist || '<span class="empty">нет данных</span>'}</div>
+      ${data.intent.note ? `<p class="intent-note">${esc(data.intent.note)}</p>` : ''}
+    </div>`;
+  }
+  const intentMatch = data.intent.target_matches_dominant;
+  const verdictOk = intentMatch === true;
+  return `<div class="card ${verdictOk ? 'intent-ok' : 'intent-bad'}">
+    <h2 class="section-title">1 · Интент</h2>
+    <p class="intent-verdict ${verdictOk ? 'ok' : 'bad'}">
+      ${intentMatch === null ? 'Тип страницы не определён' : verdictOk
+        ? '✓ Ваша страница того же типа, что и конкуренты'
+        : '✗ Ваша страница ДРУГОГО типа — приоритетная проблема'}
+    </p>
+    <div>Доминирующий тип: <strong>${esc(data.intent.dominant ?? '—')}</strong>
+      &nbsp;·&nbsp; ваш тип: <strong>${esc(data.intent.target_type ?? '—')}</strong></div>
+    <div class="dist">${dist || '<span class="empty">нет данных</span>'}</div>
+    ${data.intent.note ? `<p class="intent-note">${esc(data.intent.note)}</p>` : ''}
+  </div>`;
+}
+
+// ─── Mode B: consensus profile tables ─────────────────────────────
+function profileEntityCard(title, rows, n) {
+  if (!rows.length) {
+    return `<div class="card"><h2 class="section-title">${title} <span class="n">— 0</span></h2>
+      <p class="empty">Консенсусных сущностей не найдено.</p></div>`;
+  }
+  const header = `<tr>
+    <th data-type="text">Сущность</th>
+    <th data-type="text">Тип</th>
+    <th data-type="text">В графе</th>
+    <th data-type="num" class="num">У конкур.</th>
+    <th data-type="num" class="num">Медиана sal.</th>
+    <th data-type="prio">Приоритет</th>
+    <th data-type="text">Что покрыть</th>
+  </tr>`;
+  const body = rows.map((r) => {
+    const name = r.wikipedia_url
+      ? `<a href="${esc(r.wikipedia_url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`
+      : esc(r.name);
+    const mid = r.mid ? `<span class="mid-yes" title="${esc(r.mid)}">✓ да</span>` : '<span class="mid-no">нет</span>';
+    return `<tr data-prio="${r.priority}">
+      <td class="ent-name">${name}</td>
+      <td><span class="tag">${esc(r.type)}</span></td>
+      <td>${mid}</td>
+      <td class="num">${r.coverage} из ${r.competitors_total ?? n}</td>
+      <td class="num">${fmt(r.median_salience)}</td>
+      <td><span class="prio ${r.priority}">${r.priority}</span></td>
+      <td>${esc(r.recommendation) || '<span class="empty">—</span>'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="card"><h2 class="section-title">${title} <span class="n">— ${rows.length}</span></h2>
+    <p class="intent-note">Консенсусный профиль: что тема раскрывает у конкурентов. Ранжировано по обязательности (coverage + центральность).</p>
+    <div class="table-scroll"><table data-sortable><thead>${header}</thead><tbody>${body}</tbody></table></div></div>`;
+}
+
+function profilePhraseCard(title, rows, n) {
+  if (!rows.length) {
+    return `<div class="card"><h2 class="section-title">${title} <span class="n">— 0</span></h2>
+      <p class="empty">Консенсусных фраз не найдено.</p></div>`;
+  }
+  const header = `<tr>
+    <th data-type="text">Фраза</th>
+    <th data-type="num" class="num">n</th>
+    <th data-type="num" class="num">У конкур.</th>
+    <th data-type="num" class="num">Медиана плотн.</th>
+    <th data-type="prio">Приоритет</th>
+    <th data-type="text">Что покрыть</th>
+  </tr>`;
+  const body = rows.map((r) => `<tr data-prio="${r.priority}">
+    <td class="ent-name">${esc(r.phrase)}</td>
+    <td class="num">${r.n}</td>
+    <td class="num">${r.coverage} из ${r.competitors_total ?? n}</td>
+    <td class="num">${fmtPct(r.median_density)}</td>
+    <td><span class="prio ${r.priority}">${r.priority}</span></td>
+    <td>${esc(r.recommendation) || '<span class="empty">—</span>'}</td>
+  </tr>`).join('');
+  return `<div class="card"><h2 class="section-title">${title} <span class="n">— ${rows.length}</span></h2>
+    <p class="intent-note">Отдельный трек: буквальные слова и фразы (n-граммы), считается в коде. Не сводится с треком сущностей.</p>
+    <div class="table-scroll"><table data-sortable><thead>${header}</thead><tbody>${body}</tbody></table></div></div>`;
+}
+
+function volumeProfileCard(v) {
+  const parts = (v.competitor_words || []).join(', ');
+  const stat = (label, med, dist, fmtFn) => `<div class="vol-stat">
+    <span class="lbl2">${label}</span>
+    <span>медиана: <strong>${fmtFn(med)}</strong>${dist ? ` · по конкур.: ${dist.map(fmtFn).join(', ')}` : ''}</span>
+  </div>`;
+  return `<div class="card"><h2 class="section-title">4 · Объём и плотность (профиль конкурентов)</h2>
+    <p class="intent-note">Ориентир по теме: медиана и распределение по конкурентам (без сравнения с вашей страницей).</p>
+    <div class="vol-stats">
+      ${stat('Слов', v.median_competitor_words, v.competitor_words, (x) => x)}
+      ${typeof v.median_competitor_sentences === 'number' ? stat('Предложений', v.median_competitor_sentences, v.competitor_sentences, (x) => x) : ''}
+      ${typeof v.median_competitor_lexical_density === 'number' ? stat('Лексическая плотность', v.median_competitor_lexical_density, v.competitor_lexical_density, fmtPct) : ''}
+    </div>
+    <p class="intent-note">Слова по конкурентам: ${parts}</p>
+  </div>`;
 }
 
 function entityCard(title, rows, isWeak, n) {
@@ -425,6 +534,9 @@ el.saveKeys.addEventListener('click', saveKeys);
 el.addComp.addEventListener('click', addCompetitor);
 el.query.addEventListener('input', validate);
 el.target.addEventListener('input', validate);
+// switching mode must not lose already-typed competitor text (§8)
+$$('input[name="mode"]').forEach((r) => r.addEventListener('change', applyMode));
 
 refreshHealth();
+applyMode();
 addCompetitor();

@@ -7,7 +7,12 @@
 
 import { config } from '../config.js';
 import { cleanText } from './preprocess.js';
-import { aggregate, aggregatePhrases } from './aggregator.js';
+import {
+  aggregate,
+  aggregatePhrases,
+  aggregateProfile,
+  aggregatePhrasesProfile,
+} from './aggregator.js';
 import { buildPhraseProfile } from './phrases.js';
 import { countWords, median } from '../util/stats.js';
 import { analyzeEntities, codeEntities } from '../services/nl.js';
@@ -32,8 +37,16 @@ export function validateRequest(body) {
   const query = typeof body.query === 'string' ? body.query.trim() : '';
   if (!query) throw new ValidationError('Поле «Поисковый запрос» обязательно.');
 
+  // Mode (TZ §3): "compare" (default) needs my page; "competitors_only" doesn't.
+  const mode = body.mode === 'competitors_only' ? 'competitors_only'
+    : body.mode === 'compare' ? 'compare'
+    : config.defaultMode === 'competitors_only' ? 'competitors_only' : 'compare';
+
   const targetText = body.target && typeof body.target.text === 'string' ? body.target.text : '';
-  if (!targetText.trim()) throw new ValidationError('Поле «Моя страница» обязательно.');
+  // Mode A: my page is required. Mode B: ignored even if sent (§4.1, §8).
+  if (mode === 'compare' && !targetText.trim()) {
+    throw new ValidationError('Поле «Моя страница» обязательно.');
+  }
 
   const competitors = Array.isArray(body.competitors) ? body.competitors : [];
   const withText = competitors.filter((c) => c && typeof c.text === 'string' && c.text.trim());
@@ -49,7 +62,8 @@ export function validateRequest(body) {
 
   return {
     query,
-    target: { label: body.target.label ?? null, text: targetText },
+    mode,
+    target: mode === 'compare' ? { label: body.target.label ?? null, text: targetText } : null,
     competitors: withText.map((c) => ({ label: c.label ?? null, text: c.text })),
     customStopwords,
   };
@@ -85,15 +99,55 @@ async function analyzeDoc(rawText, customTerms) {
 
 export async function runAnalysis(body) {
   const req = validateRequest(body);
-  const warnings = [];
-
   // Custom stopwords = env defaults + per-request, normalized once.
   const customTerms = [
     ...parseCustomStopwords(config.stopwords.custom),
     ...parseCustomStopwords(req.customStopwords),
   ];
+  return req.mode === 'competitors_only'
+    ? runCompetitorsOnly(req, customTerms)
+    : runCompare(req, customTerms);
+}
 
-  // Fire all NL calls in parallel (target + competitors).
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
+// Split competitor results into ok/failed, pushing the standard warnings.
+// Same behavior in both modes (TZ §4.1). Throws if none succeed.
+function splitCompetitors(compResults, competitors, warnings) {
+  const okComps = [];
+  const failedIdx = [];
+  const degradedIdx = [];
+  compResults.forEach((r, i) => {
+    if (r.ok) {
+      if (r.truncated) warnings.push(`Текст конкурента ${i + 1} был усечён по лимиту длины.`);
+      if (r.degraded) degradedIdx.push(i + 1);
+      okComps.push({ ...r, sourceIndex: i, label: competitors[i].label });
+    } else {
+      failedIdx.push(i + 1);
+    }
+  });
+  if (okComps.length === 0) {
+    throw new ValidationError('Ни один конкурент не обработан (пустой текст или сбой API).');
+  }
+  if (failedIdx.length) {
+    warnings.push(`Конкуренты исключены из анализа (сбой/пустой текст): ${failedIdx.join(', ')}.`);
+  }
+  if (degradedIdx.length) {
+    warnings.push(`NL API недоступен для конкурентов ${degradedIdx.join(', ')} — использован кодовый анализ плотности.`);
+  }
+  return { okComps, failedCount: failedIdx.length };
+}
+
+function entitiesModeOf(modes) {
+  if (modes.every((m) => m === 'code')) return 'code';
+  if (modes.some((m) => m === 'code')) return 'mixed';
+  return 'nl';
+}
+
+// ── Mode A: compare against my page ──────────────────────────────────────────
+async function runCompare(req, customTerms) {
+  const warnings = [];
+
   const [targetRes, ...compResults] = await Promise.all([
     analyzeDoc(req.target.text, customTerms),
     ...req.competitors.map((c) => analyzeDoc(c.text, customTerms)),
@@ -114,43 +168,18 @@ export async function runAnalysis(body) {
     warnings.push('На «моей странице» распознано мало сущностей — возможно, недостаточно контента.');
   }
 
-  // Split successful vs failed competitors.
-  const okComps = [];
-  const failedIdx = [];
-  const degradedIdx = [];
-  compResults.forEach((r, i) => {
-    if (r.ok) {
-      if (r.truncated) warnings.push(`Текст конкурента ${i + 1} был усечён по лимиту длины.`);
-      if (r.degraded) degradedIdx.push(i + 1);
-      okComps.push({ ...r, sourceIndex: i, label: req.competitors[i].label });
-    } else {
-      failedIdx.push(i + 1);
-    }
-  });
-
-  if (okComps.length === 0) {
-    throw new ValidationError('Ни один конкурент не обработан (пустой текст или сбой API).');
-  }
-  if (failedIdx.length) {
-    warnings.push(`Конкуренты исключены из анализа (сбой/пустой текст): ${failedIdx.join(', ')}.`);
-  }
-  if (degradedIdx.length) {
-    warnings.push(`NL API недоступен для конкурентов ${degradedIdx.join(', ')} — использован кодовый анализ плотности.`);
-  }
-
+  const { okComps, failedCount } = splitCompetitors(compResults, req.competitors, warnings);
   const smallSample = okComps.length === 1;
   if (smallSample) {
     warnings.push('Всего 1 конкурент: порог консенсуса K=1, выборка мала — выводы нестабильны.');
   }
 
-  // ENTITY track aggregation.
+  // ENTITY + PHRASE diff tracks (same engine).
   const agg = aggregate(
     { entities: targetRes.entities, words: targetRes.words },
     okComps.map((c) => ({ entities: c.entities, words: c.words })),
     config
   );
-
-  // PHRASE track aggregation (same engine, phrase units).
   const phraseGap = aggregatePhrases(
     { phraseMap: targetRes.phrase.phraseMap },
     okComps.map((c) => ({ phraseMap: c.phrase.phraseMap })),
@@ -165,16 +194,12 @@ export async function runAnalysis(body) {
   agg.volume.lexical_density = round4(targetRes.phrase.lexicalDensity);
   agg.volume.median_competitor_lexical_density = round4(median(compLexical));
 
-  // Entities mode indicator (§10): did the entity track run on NL or code?
-  const modes = [targetRes.mode, ...okComps.map((c) => c.mode)];
-  let entitiesMode = 'nl';
-  if (modes.every((m) => m === 'code')) entitiesMode = 'code';
-  else if (modes.some((m) => m === 'code')) entitiesMode = 'mixed';
+  const entitiesMode = entitiesModeOf([targetRes.mode, ...okComps.map((c) => c.mode)]);
 
-  // LLM: intent + recommendations over the fixed entity AND phrase lists.
   let llm;
   try {
     llm = await classifyAndRecommend({
+      mode: 'compare',
       query: req.query,
       targetProfile: agg.targetProfile,
       competitorTexts: okComps.map((c) => c.cleanText.slice(0, config.llmTextChars)),
@@ -190,10 +215,73 @@ export async function runAnalysis(body) {
 
   return buildResponse(req, agg, phraseGap, llm, {
     competitorsAnalyzed: okComps.length,
-    competitorsFailed: failedIdx.length,
+    competitorsFailed: failedCount,
     warnings,
     smallSample,
-    language: { target: targetRes.lang.code, dominant: dominantLanguage([targetRes.lang, ...okComps.map((c) => c.lang)]) },
+    language: {
+      target: targetRes.lang.code,
+      dominant: dominantLanguage([targetRes.lang, ...okComps.map((c) => c.lang)]),
+    },
+    entitiesMode,
+  });
+}
+
+// ── Mode B: competitors-only consensus profile (TZ §4) ───────────────────────
+async function runCompetitorsOnly(req, customTerms) {
+  const warnings = [];
+
+  const compResults = await Promise.all(req.competitors.map((c) => analyzeDoc(c.text, customTerms)));
+  const { okComps, failedCount } = splitCompetitors(compResults, req.competitors, warnings);
+  const smallSample = okComps.length === 1;
+  if (smallSample) {
+    warnings.push('Всего 1 конкурент: консенсуса как такового нет (K=1), выборка мала — это профиль по одному источнику.');
+  }
+
+  // Consensus profiles (no diff, no target).
+  const entProfile = aggregateProfile(okComps.map((c) => ({ entities: c.entities })), config);
+  const phraseProfile = aggregatePhrasesProfile(
+    okComps.map((c) => ({ phraseMap: c.phrase.phraseMap })),
+    config
+  );
+
+  // Volume as a competitor profile: median + distribution, no target compare.
+  const words = okComps.map((c) => c.words);
+  const sentences = okComps.map((c) => c.phrase.sentenceCount);
+  const lexical = okComps.map((c) => c.phrase.lexicalDensity);
+  const volume = {
+    median_competitor_words: Math.round(median(words)),
+    competitor_words: words,
+    median_competitor_sentences: Math.round(median(sentences)),
+    competitor_sentences: sentences,
+    median_competitor_lexical_density: round4(median(lexical)),
+    competitor_lexical_density: lexical.map(round4),
+  };
+
+  const entitiesMode = entitiesModeOf(okComps.map((c) => c.mode));
+
+  let llm;
+  try {
+    llm = await classifyAndRecommend({
+      mode: 'competitors_only',
+      query: req.query,
+      targetProfile: [],
+      competitorTexts: okComps.map((c) => c.cleanText.slice(0, config.llmTextChars)),
+      missing: entProfile.profile, // profile units as the coverage list
+      weak: [],
+      phrasesMissing: phraseProfile.profile,
+      phrasesWeak: [],
+    });
+  } catch (err) {
+    warnings.push(`Классификация интента/рекомендации недоступны: ${err.message}`);
+    llm = null;
+  }
+
+  return buildProfileResponse(req, entProfile, phraseProfile, volume, llm, {
+    competitorsAnalyzed: okComps.length,
+    competitorsFailed: failedCount,
+    warnings,
+    smallSample,
+    language: { target: null, dominant: dominantLanguage(okComps.map((c) => c.lang)) },
     entitiesMode,
   });
 }
@@ -224,6 +312,7 @@ function buildResponse(req, agg, phraseGap, llm, meta) {
 
   return {
     query: req.query,
+    mode: 'compare',
     competitors_analyzed: meta.competitorsAnalyzed,
     competitors_failed: meta.competitorsFailed,
     consensus_threshold: agg.consensusThreshold,
@@ -240,5 +329,33 @@ function buildResponse(req, agg, phraseGap, llm, meta) {
       weak: mergeRecommendations(phraseGap.weak, llm?.phrase_recommendations?.weak, 'phrase'),
     },
     volume: agg.volume,
+  };
+}
+
+// Mode B response: consensus profile / brief instead of a missing/weak diff.
+function buildProfileResponse(req, entProfile, phraseProfile, volume, llm, meta) {
+  const intent = llm?.intent ?? {
+    dominant: null,
+    distribution: [],
+    target_type: null,
+    target_matches_dominant: null,
+    note: 'Интент не определён (LLM недоступен).',
+  };
+
+  return {
+    query: req.query,
+    mode: 'competitors_only',
+    competitors_analyzed: meta.competitorsAnalyzed,
+    competitors_failed: meta.competitorsFailed,
+    consensus_threshold: entProfile.consensusThreshold,
+    small_sample: meta.smallSample,
+    warnings: meta.warnings,
+    mock_mode: config.google.mock || config.openai.mock,
+    language: meta.language,
+    entities_mode: meta.entitiesMode,
+    intent,
+    consensus_profile: mergeRecommendations(entProfile.profile, llm?.recommendations?.missing),
+    phrase_profile: mergeRecommendations(phraseProfile.profile, llm?.phrase_recommendations?.missing, 'phrase'),
+    volume,
   };
 }

@@ -52,6 +52,10 @@ export const config = {
 
   mockMode: globalMock,
 
+  // Analysis mode when the client doesn't send one: "compare" (diff vs my page)
+  // or "competitors_only" (consensus profile / brief). See TZ §7.
+  defaultMode: str('DEFAULT_MODE', 'compare'),
+
   // Analysis thresholds
   maxCompetitors: num('MAX_COMPETITORS', 10),
   consensusThresholdRatio: num('CONSENSUS_THRESHOLD_RATIO', 0.5),
@@ -89,6 +93,25 @@ export const config = {
     specificity: num('PHRASE_SPECIFICITY_BONUS', 0.05), // per n above bigram
     high: num('PHRASE_PRIORITY_HIGH', 0.66),
     medium: num('PHRASE_PRIORITY_MEDIUM', 0.4),
+  },
+
+  // ── "competitors_only" mode priority (TZ §4.3) ───────────────────────────
+  // No gap term (there is no "my page"); rank by how obligatory + central a
+  // topic is across competitors. Centrality = median salience/density
+  // normalized to the strongest consensus unit.
+  priorityProfile: {
+    wCoverage: num('PROFILE_PRIORITY_W_COVERAGE', 0.5),
+    wCentrality: num('PROFILE_PRIORITY_W_CENTRALITY', 0.3),
+    wMid: num('PROFILE_PRIORITY_W_MID', 0.2),
+    high: num('PROFILE_PRIORITY_HIGH', 0.66),
+    medium: num('PROFILE_PRIORITY_MEDIUM', 0.4),
+  },
+  phrasePriorityProfile: {
+    wCoverage: num('PHRASE_PROFILE_PRIORITY_W_COVERAGE', 0.6),
+    wCentrality: num('PHRASE_PROFILE_PRIORITY_W_CENTRALITY', 0.4),
+    specificity: num('PHRASE_PROFILE_SPECIFICITY_BONUS', 0.05),
+    high: num('PHRASE_PROFILE_PRIORITY_HIGH', 0.66),
+    medium: num('PHRASE_PROFILE_PRIORITY_MEDIUM', 0.4),
   },
 
   // Language detection + multilingual stopword filtering
