@@ -49,8 +49,9 @@ export const config = {
   consensusThresholdRatio: num('CONSENSUS_THRESHOLD_RATIO', 0.5),
   weakMargin: num('WEAK_MARGIN', 0.4),
   salienceMin: num('SALIENCE_MIN', 0.005),
-  minLineWords: num('MIN_LINE_WORDS', 3),
-  maxDocChars: num('MAX_DOC_CHARS', 90000),
+  // Safeguard cap against the NL API's hard document-size limit (1M Unicode
+  // chars for analyzeEntities). High by design so realistic pages never hit it.
+  maxDocChars: num('MAX_DOC_CHARS', 1000000),
   llmTextChars: num('LLM_TEXT_CHARS', 4000),
 
   // Priority scoring

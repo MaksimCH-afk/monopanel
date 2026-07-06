@@ -8,8 +8,7 @@ const cfg = {
   consensusThresholdRatio: 0.5,
   weakMargin: 0.4,
   salienceMin: 0.005,
-  minLineWords: 3,
-  maxDocChars: 90000,
+  maxDocChars: 1000000,
   priority: { wCoverage: 0.5, wMid: 0.2, wGap: 0.3, high: 0.66, medium: 0.4 },
 };
 
@@ -121,11 +120,34 @@ test('volume: median of competitor words', () => {
   assert.equal(r.volume.target_words, 50);
 });
 
-test('preprocess drops short lines and normalizes whitespace', () => {
+test('preprocess keeps short lines, drops empty lines, normalizes whitespace', () => {
   const raw = 'Home\nMenu\nThis is a real sentence about bonuses.\n   \nRTP  and    license  details here now.';
-  const { text } = cleanText(raw, cfg);
-  assert.ok(!/Home/.test(text));
+  const { text, truncated } = cleanText(raw, cfg);
+  // short non-empty lines are real content now — they must survive
+  assert.ok(/^Home$/m.test(text));
+  assert.ok(/^Menu$/m.test(text));
   assert.ok(/real sentence/.test(text));
+  // the whitespace-only line is gone
+  const lines = text.split('\n');
+  assert.deepEqual(lines, ['Home', 'Menu', 'This is a real sentence about bonuses.', 'RTP and license details here now.']);
+  // no collapsed-whitespace leftovers
   assert.ok(!/ {2,}/.test(text));
+  assert.equal(truncated, false);
   assert.equal(countWords('one two three'), 3);
+});
+
+test('preprocess does not truncate realistic-length text', () => {
+  // 200k chars is well within the safeguard cap — must pass through untouched
+  const raw = ('word '.repeat(40000)).trim(); // 5 chars * 40000 - 1 = 199999 chars
+  const { text, truncated } = cleanText(raw, cfg);
+  assert.equal(truncated, false);
+  assert.ok(text.length >= 199999);
+});
+
+test('preprocess truncates only past the configured cap', () => {
+  const small = { maxDocChars: 100 };
+  const raw = 'lorem ipsum '.repeat(50); // 600 chars, over the tiny cap
+  const { text, truncated } = cleanText(raw, small);
+  assert.equal(truncated, true);
+  assert.ok(text.length <= 100);
 });
