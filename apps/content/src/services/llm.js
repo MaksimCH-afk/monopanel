@@ -9,10 +9,23 @@ import { withRetry } from '../util/retry.js';
 
 const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
+// Reusable array-of-{keyField, recommendation} schema fragment.
+function recArray(keyField) {
+  return {
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      required: [keyField, 'recommendation'],
+      properties: { [keyField]: { type: 'string' }, recommendation: { type: 'string' } },
+    },
+  };
+}
+
 const RESPONSE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['intent', 'recommendations'],
+  required: ['intent', 'recommendations', 'phrase_recommendations'],
   properties: {
     intent: {
       type: 'object',
@@ -34,44 +47,35 @@ const RESPONSE_SCHEMA = {
         note: { type: 'string' },
       },
     },
+    // recommendations for the ENTITY track (keyed by entity name)
     recommendations: {
       type: 'object',
       additionalProperties: false,
       required: ['missing', 'weak'],
-      properties: {
-        missing: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['name', 'recommendation'],
-            properties: { name: { type: 'string' }, recommendation: { type: 'string' } },
-          },
-        },
-        weak: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['name', 'recommendation'],
-            properties: { name: { type: 'string' }, recommendation: { type: 'string' } },
-          },
-        },
-      },
+      properties: { missing: recArray('name'), weak: recArray('name') },
+    },
+    // recommendations for the PHRASE track (keyed by the literal phrase)
+    phrase_recommendations: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['missing', 'weak'],
+      properties: { missing: recArray('phrase'), weak: recArray('phrase') },
     },
   },
 };
 
 const SYSTEM_PROMPT = [
   'Ты SEO-аналитик. Тебе дают поисковый запрос, тексты страниц конкурентов,',
-  'профиль сущностей страницы пользователя и ГОТОВЫЕ списки missing/weak сущностей с метриками.',
-  'Твои задачи строго две:',
+  'профиль сущностей страницы пользователя и ГОТОВЫЕ списки missing/weak сущностей и фраз с метриками.',
+  'Твои задачи строго три:',
   '1) Классифицировать тип страницы каждого конкурента и вывести доминирующий интент;',
   '   определить тип страницы пользователя и совпадает ли он с доминирующим.',
   '2) Написать краткую (1-2 предложения) практическую рекомендацию к КАЖДОЙ сущности из',
   '   переданных списков missing и weak — как и где раскрыть её на странице.',
-  'ЗАПРЕЩЕНО: добавлять сущности, которых нет во входных списках; менять числа',
-  '(coverage, salience, priority) — они уже посчитаны и авторитетны. Пиши на языке запроса.',
+  '3) Аналогично написать рекомендацию к КАЖДОЙ фразе из phrases.missing и phrases.weak —',
+  '   как естественно вписать эту формулировку. Верни их в phrase_recommendations (поле phrase = сама фраза).',
+  'ЗАПРЕЩЕНО: добавлять сущности или фразы, которых нет во входных списках; менять числа',
+  '(coverage, salience, density, priority) — они уже посчитаны и авторитетны. Пиши на языке запроса.',
 ].join(' ');
 
 function buildUserPayload(input) {
@@ -97,6 +101,25 @@ function buildUserPayload(input) {
       target_salience: w.target_salience,
       priority: w.priority,
     })),
+    phrases: {
+      missing: (input.phrasesMissing || []).map((p) => ({
+        phrase: p.phrase,
+        n: p.n,
+        coverage: p.coverage,
+        competitors_total: p.competitors_total,
+        median_density: p.median_density,
+        priority: p.priority,
+      })),
+      weak: (input.phrasesWeak || []).map((p) => ({
+        phrase: p.phrase,
+        n: p.n,
+        coverage: p.coverage,
+        competitors_total: p.competitors_total,
+        median_density: p.median_density,
+        target_density: p.target_density,
+        priority: p.priority,
+      })),
+    },
   });
 }
 
@@ -179,6 +202,14 @@ function mockLLM(input) {
         : `[MOCK] Усильте «${m.name}»: у вас salience ${m.target_salience}, у конкурентов медиана ${m.median_competitor_salience}. Дайте больше контекста.`,
   });
 
+  const precc = (p, kind) => ({
+    phrase: p.phrase,
+    recommendation:
+      kind === 'missing'
+        ? `[MOCK] Впишите фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов, у вас её нет.`
+        : `[MOCK] Используйте «${p.phrase}» плотнее: у конкурентов медиана плотности ${p.median_density}, у вас ${p.target_density}.`,
+  });
+
   return {
     intent: {
       dominant,
@@ -190,6 +221,10 @@ function mockLLM(input) {
     recommendations: {
       missing: input.missing.map((m) => rec(m, 'missing')),
       weak: input.weak.map((m) => rec(m, 'weak')),
+    },
+    phrase_recommendations: {
+      missing: (input.phrasesMissing || []).map((p) => precc(p, 'missing')),
+      weak: (input.phrasesWeak || []).map((p) => precc(p, 'weak')),
     },
   };
 }

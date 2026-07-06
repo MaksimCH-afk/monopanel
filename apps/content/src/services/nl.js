@@ -1,9 +1,17 @@
 // Google Cloud Natural Language API wrapper — analyzeEntities (TZ §6.2).
 // One call per document. Language is NOT passed (auto-detection, mixed geo).
-// Falls back to a deterministic mock when no key is configured / MOCK_MODE.
+//
+// When no key is configured / MOCK_MODE, and as a fallback when a live NL call
+// fails (TZ §8.1), entities are derived IN CODE from a unigram-density profile
+// (TZ §4.4) built on the same multilingual tokenizer as the phrase track. This
+// upgrades the free/no-API mode from a crude frequency hack to a real, language-
+// aware analysis whose salience = density (so it sums to ~1 like NL salience).
 
 import { config } from '../config.js';
 import { withRetry } from '../util/retry.js';
+import { tokenizeWords } from '../core/segment.js';
+import { buildStopwordSet, isStructuralNoise } from '../core/stopwords.js';
+import { detectLanguage } from './lang.js';
 
 const ENDPOINT = 'https://language.googleapis.com/v1/documents:analyzeEntities';
 
@@ -44,11 +52,12 @@ async function callReal(text) {
 }
 
 /**
- * Analyze one document's entities.
+ * Analyze one document's entities via the live NL API.
+ * Throws on failure (the caller decides whether to fall back to codeEntities).
  * @returns {Promise<{entities:Array, language:string|null}>}
  */
 export async function analyzeEntities(text) {
-  if (config.google.mock) return mockAnalyze(text);
+  if (config.google.mock) return codeEntities(text);
   return withRetry(() => callReal(text), {
     maxAttempts: config.retry.maxAttempts,
     baseMs: config.retry.baseMs,
@@ -56,51 +65,45 @@ export async function analyzeEntities(text) {
   });
 }
 
-// ─── Deterministic mock ──────────────────────────────────────────────────────
-// Extracts frequent word-tokens as pseudo-entities with frequency-based
-// salience. Purely a function of the input text, so results are reproducible.
+// ─── Code-derived entities (free mode + live-failure fallback) ───────────────
+const MAX_CODE_ENTITIES = 60;
 
-const STOP = new Set(
-  ('the a an and or of to in on for with is are was were be by at as from this that ' +
-    'и в на с по за из от до для что как это тот все еще она они оно его ее их но да ' +
-    'a об о у же бы ли не ни то так вот при над под без через между')
-    .split(/\s+/)
-);
-
-function hash(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+// Capitalize the first character for display (no-op for caseless scripts).
+function displayName(token) {
+  return token.charAt(0).toLocaleUpperCase() + token.slice(1);
 }
 
-function mockAnalyze(text) {
-  const tokens = (text.toLowerCase().match(/[\p{L}][\p{L}\-']{3,}/gu) || []).filter(
-    (t) => !STOP.has(t)
-  );
+/**
+ * Build pseudo-entities from a unigram-density profile (TZ §4.4). Purely a
+ * function of the input text → reproducible. Salience = density = count / N,
+ * matching the phrase track's word-level density. No KG `mid` (this is not the
+ * Knowledge Graph), so downstream priority relies on coverage/gap only.
+ * @param {string} text
+ * @param {{code:string, iso1:string|null, locale:string|undefined}} [lang]
+ * @returns {{entities:Array, language:string|null}}
+ */
+export function codeEntities(text, lang = detectLanguage(text)) {
+  const tokens = tokenizeWords(text, lang.locale);
+  const N = tokens.length || 1;
+  const stopSet = config.stopwords.enabled ? buildStopwordSet(lang.iso1) : new Set();
+
   const freq = new Map();
-  for (const t of tokens) freq.set(t, (freq.get(t) || 0) + 1);
+  for (const t of tokens) {
+    // single-token entities: drop stopwords and structural noise outright
+    if (config.stopwords.enabled && (stopSet.has(t) || isStructuralNoise(t))) continue;
+    freq.set(t, (freq.get(t) || 0) + 1);
+  }
 
-  const total = tokens.length || 1;
-  const entries = [...freq.entries()]
-    .filter(([, c]) => c >= 1)
+  const entities = [...freq.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 25);
+    .slice(0, MAX_CODE_ENTITIES)
+    .map(([token, count]) => ({
+      name: displayName(token),
+      type: 'OTHER',
+      salience: count / N,
+      mid: null,
+      wikipedia_url: null,
+    }));
 
-  const entities = entries.map(([word, count]) => {
-    const h = hash(word);
-    return {
-      name: word.charAt(0).toUpperCase() + word.slice(1),
-      // rotate a few plausible types deterministically
-      type: ['ORGANIZATION', 'CONSUMER_GOOD', 'OTHER', 'LOCATION', 'PERSON', 'EVENT'][h % 6],
-      salience: count / total,
-      // ~half of entities get a canonical KG mid
-      mid: h % 2 === 0 ? `/m/${h.toString(36)}` : null,
-      wikipedia_url: h % 2 === 0 ? `https://en.wikipedia.org/wiki/${word}` : null,
-    };
-  });
-
-  return { entities, language: 'und' };
+  return { entities, language: lang.code || null };
 }
