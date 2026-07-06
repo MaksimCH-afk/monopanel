@@ -10,14 +10,23 @@ const el = {
   query: $('#query'),
   target: $('#target'),
   targetField: $('#targetField'),
+  targetLabel: $('#targetLabel'),
+  competitorsField: $('#competitorsField'),
   modeHint: $('#modeHint'),
   customStopwords: $('#customStopwords'),
   competitors: $('#competitors'),
+  // history
+  historyToggle: $('#historyToggle'),
+  historyBody: $('#historyBody'),
+  historyChevron: null,
+  historyCount: $('#historyCount'),
+  historyList: $('#historyList'),
   addComp: $('#addComp'),
   compCount: $('#compCount'),
   submit: $('#submitBtn'),
   formError: $('#formError'),
   inputCard: $('#inputCard'),
+  historyCard: $('#historyCard'),
   loading: $('#loading'),
   result: $('#result'),
   mockBadge: $('#mockBadge'),
@@ -74,6 +83,11 @@ function collectCompetitors() {
 const MODE_HINTS = {
   compare: 'Дифф вашей страницы против конкурентов: чего не хватает (missing/weak).',
   competitors_only: 'Профиль конкурентов по теме: что вообще должна покрывать страница. «Моя страница» не нужна.',
+  single: 'Аудит одной страницы: её сущности, фразы и объём. Конкуренты не нужны.',
+};
+const TARGET_LABELS = {
+  compare: 'Моя страница <em>*</em>',
+  single: 'Страница для анализа <em>*</em>',
 };
 function getMode() {
   const r = $('input[name="mode"]:checked');
@@ -81,16 +95,22 @@ function getMode() {
 }
 function applyMode() {
   const mode = getMode();
-  const competitorsOnly = mode === 'competitors_only';
-  el.targetField.hidden = competitorsOnly; // hide "Моя страница" in mode B
+  // target field: shown in compare + single (relabeled), hidden in competitors_only
+  const showTarget = mode === 'compare' || mode === 'single';
+  el.targetField.hidden = !showTarget;
+  if (showTarget) el.targetLabel.innerHTML = TARGET_LABELS[mode];
+  // competitors block: hidden in single
+  el.competitorsField.hidden = mode === 'single';
   el.modeHint.textContent = MODE_HINTS[mode] || '';
   validate();
 }
 
 // ─── Validation ───────────────────────────────────────────────────
 function validate() {
-  const targetOk = getMode() === 'competitors_only' || el.target.value.trim();
-  const ok = el.query.value.trim() && targetOk && collectCompetitors().length >= 1;
+  const mode = getMode();
+  const targetOk = mode === 'competitors_only' || el.target.value.trim();
+  const competitorsOk = mode === 'single' || collectCompetitors().length >= 1;
+  const ok = el.query.value.trim() && targetOk && competitorsOk;
   el.submit.disabled = !ok;
   return ok;
 }
@@ -105,13 +125,14 @@ el.form.addEventListener('submit', async (e) => {
   const payload = {
     mode,
     query: el.query.value.trim(),
-    competitors: collectCompetitors(),
     custom_stopwords: el.customStopwords.value.trim() || undefined,
   };
-  // "Моя страница" only in compare mode (ignored otherwise).
-  if (mode === 'compare') payload.target = { label: null, text: el.target.value };
+  // page text in compare + single; competitors in compare + competitors_only
+  if (mode === 'compare' || mode === 'single') payload.target = { label: null, text: el.target.value };
+  if (mode !== 'single') payload.competitors = collectCompetitors();
 
   el.inputCard.hidden = true;
+  el.historyCard.hidden = true;
   el.result.hidden = true;
   el.loading.hidden = false;
 
@@ -124,8 +145,10 @@ el.form.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
     renderResult(data);
+    loadHistory(); // the analysis was just saved server-side
   } catch (err) {
     el.inputCard.hidden = false;
+    el.historyCard.hidden = false;
     el.formError.textContent = err.message;
   } finally {
     el.loading.hidden = true;
@@ -141,12 +164,12 @@ function renderResult(data) {
     ? data.language.dominant
     : (data.language?.target && data.language.target !== 'und' ? data.language.target : '—');
   const modeLabel = { nl: 'NL API', code: 'код (плотность)', mixed: 'NL + код' }[data.entities_mode] || data.entities_mode;
+  const modeName = { compare: 'Сравнение', competitors_only: 'Только конкуренты', single: 'Одна страница' }[data.mode];
   parts.push(`<div class="meta-row">
     <span class="pill">Запрос: <strong>${esc(data.query)}</strong></span>
-    <span class="pill">Конкурентов: <strong>${data.competitors_analyzed}</strong>${
-    data.competitors_failed ? ` (пропущено ${data.competitors_failed})` : ''
-  }</span>
-    <span class="pill">Порог консенсуса K = <strong>${data.consensus_threshold}</strong></span>
+    ${modeName ? `<span class="pill">Режим: <strong>${esc(modeName)}</strong></span>` : ''}
+    ${data.competitors_analyzed != null ? `<span class="pill">Конкурентов: <strong>${data.competitors_analyzed}</strong>${data.competitors_failed ? ` (пропущено ${data.competitors_failed})` : ''}</span>` : ''}
+    ${data.consensus_threshold != null ? `<span class="pill">Порог консенсуса K = <strong>${data.consensus_threshold}</strong></span>` : ''}
     ${langLabel !== '—' ? `<span class="pill">Язык: <strong>${esc(langLabel)}</strong></span>` : ''}
     ${data.entities_mode ? `<span class="pill">Сущности: <strong>${esc(modeLabel)}</strong></span>` : ''}
     ${data.elapsed_ms ? `<span class="pill">${data.elapsed_ms} ms</span>` : ''}
@@ -160,15 +183,21 @@ function renderResult(data) {
   }
 
   const profileMode = data.mode === 'competitors_only';
+  const singleMode = data.mode === 'single';
 
   // 1. Intent (verdict against my page only makes sense in compare mode)
-  parts.push(intentCard(data, profileMode));
+  parts.push(intentCard(data));
 
   const n = data.competitors_analyzed;
-  if (profileMode) {
+  if (singleMode) {
+    // Single-page audit: the page's own profile (no coverage, no competitors).
+    parts.push(profileEntityCard('2 · Сущности страницы', data.consensus_profile || [], n, true));
+    parts.push(profilePhraseCard('3 · Фразы страницы (n-граммы)', data.phrase_profile || [], n, true));
+    parts.push(volumeSingleCard(data.volume));
+  } else if (profileMode) {
     // Mode B: consensus profile / brief — no missing/weak diff.
-    parts.push(profileEntityCard('2 · Профиль темы: сущности конкурентов', data.consensus_profile || [], n));
-    parts.push(profilePhraseCard('3 · Профиль темы: фразы (n-граммы)', data.phrase_profile || [], n));
+    parts.push(profileEntityCard('2 · Профиль темы: сущности конкурентов', data.consensus_profile || [], n, false));
+    parts.push(profilePhraseCard('3 · Профиль темы: фразы (n-граммы)', data.phrase_profile || [], n, false));
     parts.push(volumeProfileCard(data.volume));
   } else {
     // Mode A: diff against my page.
@@ -187,18 +216,26 @@ function renderResult(data) {
   $('#backBtn').addEventListener('click', () => {
     el.result.hidden = true;
     el.inputCard.hidden = false;
+    el.historyCard.hidden = false;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   $$('table[data-sortable]').forEach(setupSort);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function intentCard(data, profileMode) {
+function intentCard(data) {
   const dist = (data.intent.distribution || [])
     .map((d) => `<span class="pill ${d.type === data.intent.dominant ? 'dom' : ''}">${esc(d.type)}: <strong>${d.count}</strong></span>`)
     .join('');
-  // Mode B: no "my page", so no match verdict — just the topic's dominant intent.
-  if (profileMode) {
+  // No "my page" → no match verdict, just the dominant type.
+  if (data.mode === 'single') {
+    return `<div class="card">
+      <h2 class="section-title">1 · Тип страницы</h2>
+      <div>Тип этой страницы: <strong>${esc(data.intent.dominant ?? '—')}</strong></div>
+      ${data.intent.note ? `<p class="intent-note">${esc(data.intent.note)}</p>` : ''}
+    </div>`;
+  }
+  if (data.mode === 'competitors_only') {
     return `<div class="card">
       <h2 class="section-title">1 · Интент темы (по конкурентам)</h2>
       <div>Доминирующий тип страниц по теме: <strong>${esc(data.intent.dominant ?? '—')}</strong></div>
@@ -222,62 +259,73 @@ function intentCard(data, profileMode) {
   </div>`;
 }
 
-// ─── Mode B: consensus profile tables ─────────────────────────────
-function profileEntityCard(title, rows, n) {
+// ─── Profile tables (mode B + single) ─────────────────────────────
+// `single` drops the coverage column (a single page has no coverage) and
+// switches the intro wording to "what this page covers".
+function profileEntityCard(title, rows, n, single) {
   if (!rows.length) {
     return `<div class="card"><h2 class="section-title">${title} <span class="n">— 0</span></h2>
-      <p class="empty">Консенсусных сущностей не найдено.</p></div>`;
+      <p class="empty">${single ? 'Сущности не распознаны.' : 'Консенсусных сущностей не найдено.'}</p></div>`;
   }
+  const covHead = single ? '' : '<th data-type="num" class="num">У конкур.</th>';
   const header = `<tr>
     <th data-type="text">Сущность</th>
     <th data-type="text">Тип</th>
     <th data-type="text">В графе</th>
-    <th data-type="num" class="num">У конкур.</th>
-    <th data-type="num" class="num">Медиана sal.</th>
+    ${covHead}
+    <th data-type="num" class="num">${single ? 'Salience' : 'Медиана sal.'}</th>
     <th data-type="prio">Приоритет</th>
-    <th data-type="text">Что покрыть</th>
+    <th data-type="text">${single ? 'Комментарий' : 'Что покрыть'}</th>
   </tr>`;
   const body = rows.map((r) => {
     const name = r.wikipedia_url
       ? `<a href="${esc(r.wikipedia_url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`
       : esc(r.name);
     const mid = r.mid ? `<span class="mid-yes" title="${esc(r.mid)}">✓ да</span>` : '<span class="mid-no">нет</span>';
+    const covCell = single ? '' : `<td class="num">${r.coverage} из ${r.competitors_total ?? n}</td>`;
     return `<tr data-prio="${r.priority}">
       <td class="ent-name">${name}</td>
       <td><span class="tag">${esc(r.type)}</span></td>
       <td>${mid}</td>
-      <td class="num">${r.coverage} из ${r.competitors_total ?? n}</td>
+      ${covCell}
       <td class="num">${fmt(r.median_salience)}</td>
       <td><span class="prio ${r.priority}">${r.priority}</span></td>
       <td>${esc(r.recommendation) || '<span class="empty">—</span>'}</td>
     </tr>`;
   }).join('');
+  const intro = single
+    ? 'Что раскрывает эта страница, ранжировано по значимости (salience).'
+    : 'Консенсусный профиль: что тема раскрывает у конкурентов. Ранжировано по обязательности (coverage + центральность).';
   return `<div class="card"><h2 class="section-title">${title} <span class="n">— ${rows.length}</span></h2>
-    <p class="intent-note">Консенсусный профиль: что тема раскрывает у конкурентов. Ранжировано по обязательности (coverage + центральность).</p>
+    <p class="intent-note">${intro}</p>
     <div class="table-scroll"><table data-sortable><thead>${header}</thead><tbody>${body}</tbody></table></div></div>`;
 }
 
-function profilePhraseCard(title, rows, n) {
+function profilePhraseCard(title, rows, n, single) {
   if (!rows.length) {
     return `<div class="card"><h2 class="section-title">${title} <span class="n">— 0</span></h2>
-      <p class="empty">Консенсусных фраз не найдено.</p></div>`;
+      <p class="empty">${single ? 'Значимых фраз не найдено.' : 'Консенсусных фраз не найдено.'}</p></div>`;
   }
+  const covHead = single ? '' : '<th data-type="num" class="num">У конкур.</th>';
   const header = `<tr>
     <th data-type="text">Фраза</th>
     <th data-type="num" class="num">n</th>
-    <th data-type="num" class="num">У конкур.</th>
-    <th data-type="num" class="num">Медиана плотн.</th>
+    ${covHead}
+    <th data-type="num" class="num">${single ? 'Плотность' : 'Медиана плотн.'}</th>
     <th data-type="prio">Приоритет</th>
-    <th data-type="text">Что покрыть</th>
+    <th data-type="text">${single ? 'Комментарий' : 'Что покрыть'}</th>
   </tr>`;
-  const body = rows.map((r) => `<tr data-prio="${r.priority}">
-    <td class="ent-name">${esc(r.phrase)}</td>
-    <td class="num">${r.n}</td>
-    <td class="num">${r.coverage} из ${r.competitors_total ?? n}</td>
-    <td class="num">${fmtPct(r.median_density)}</td>
-    <td><span class="prio ${r.priority}">${r.priority}</span></td>
-    <td>${esc(r.recommendation) || '<span class="empty">—</span>'}</td>
-  </tr>`).join('');
+  const body = rows.map((r) => {
+    const covCell = single ? '' : `<td class="num">${r.coverage} из ${r.competitors_total ?? n}</td>`;
+    return `<tr data-prio="${r.priority}">
+      <td class="ent-name">${esc(r.phrase)}</td>
+      <td class="num">${r.n}</td>
+      ${covCell}
+      <td class="num">${fmtPct(r.median_density)}</td>
+      <td><span class="prio ${r.priority}">${r.priority}</span></td>
+      <td>${esc(r.recommendation) || '<span class="empty">—</span>'}</td>
+    </tr>`;
+  }).join('');
   return `<div class="card"><h2 class="section-title">${title} <span class="n">— ${rows.length}</span></h2>
     <p class="intent-note">Отдельный трек: буквальные слова и фразы (n-граммы), считается в коде. Не сводится с треком сущностей.</p>
     <div class="table-scroll"><table data-sortable><thead>${header}</thead><tbody>${body}</tbody></table></div></div>`;
@@ -297,6 +345,19 @@ function volumeProfileCard(v) {
       ${typeof v.median_competitor_lexical_density === 'number' ? stat('Лексическая плотность', v.median_competitor_lexical_density, v.competitor_lexical_density, fmtPct) : ''}
     </div>
     <p class="intent-note">Слова по конкурентам: ${parts}</p>
+  </div>`;
+}
+
+// Single-page volume: this page's own numbers (no medians).
+function volumeSingleCard(v) {
+  const stat = (label, val) => `<div class="vol-stat">
+    <span class="lbl2">${label}</span><span><strong>${val}</strong></span></div>`;
+  return `<div class="card"><h2 class="section-title">4 · Объём и плотность страницы</h2>
+    <div class="vol-stats">
+      ${stat('Слов', v.words)}
+      ${typeof v.sentences === 'number' ? stat('Предложений', v.sentences) : ''}
+      ${typeof v.lexical_density === 'number' ? stat('Лексическая плотность', fmtPct(v.lexical_density)) : ''}
+    </div>
   </div>`;
 }
 
@@ -530,6 +591,59 @@ el.testGoogle.addEventListener('click', () => testKey('google', el.googleKey, el
 el.testOpenai.addEventListener('click', () => testKey('openai', el.openaiKey, el.openaiMsg, el.testOpenai));
 el.saveKeys.addEventListener('click', saveKeys);
 
+// ─── History ──────────────────────────────────────────────────────
+const MODE_SHORT = { compare: 'сравнение', competitors_only: 'конкуренты', single: 'одна стр.' };
+function fmtTs(ts) {
+  try {
+    return new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return ts; }
+}
+function renderHistoryList(items) {
+  el.historyCount.textContent = items.length ? `— ${items.length}` : '— пусто';
+  if (!items.length) {
+    el.historyList.innerHTML = '<p class="empty">Пока нет сохранённых анализов.</p>';
+    return;
+  }
+  el.historyList.innerHTML = items.map((it) => `
+    <div class="hist-row">
+      <button class="hist-open" data-id="${esc(it.id)}">
+        <span class="hist-q">${esc(it.query || '(без запроса)')}</span>
+        <span class="hist-meta">${esc(MODE_SHORT[it.mode] || it.mode)} · ${it.items} эл.${it.competitors_analyzed != null ? ` · ${it.competitors_analyzed} конкур.` : ''} · ${esc(fmtTs(it.ts))}</span>
+      </button>
+      <button class="btn-remove hist-del" data-id="${esc(it.id)}" title="Удалить">✕</button>
+    </div>`).join('');
+  $$('.hist-open', el.historyList).forEach((b) => b.addEventListener('click', () => openHistory(b.dataset.id)));
+  $$('.hist-del', el.historyList).forEach((b) => b.addEventListener('click', () => deleteHistory(b.dataset.id)));
+}
+function loadHistory() {
+  return fetch('/api/history').then((r) => r.json()).then((d) => renderHistoryList(d.items || [])).catch(() => {});
+}
+async function openHistory(id) {
+  try {
+    const res = await fetch('/api/history/' + encodeURIComponent(id));
+    if (!res.ok) throw new Error('не найдено');
+    const data = await res.json();
+    el.formError.textContent = '';
+    el.inputCard.hidden = true;
+    el.historyCard.hidden = true;
+    renderResult(data);
+  } catch { /* ignore */ }
+}
+async function deleteHistory(id) {
+  try {
+    const res = await fetch('/api/history/' + encodeURIComponent(id), { method: 'DELETE' });
+    const d = await res.json();
+    renderHistoryList(d.items || []);
+  } catch { /* ignore */ }
+}
+el.historyToggle.addEventListener('click', () => {
+  const open = el.historyBody.hidden;
+  el.historyBody.hidden = !open;
+  el.historyToggle.setAttribute('aria-expanded', String(open));
+  $('.keys-chevron', el.historyToggle).textContent = open ? '▾' : '▸';
+  if (open) loadHistory();
+});
+
 // ─── Init ─────────────────────────────────────────────────────────
 el.addComp.addEventListener('click', addCompetitor);
 el.query.addEventListener('input', validate);
@@ -538,5 +652,6 @@ el.target.addEventListener('input', validate);
 $$('input[name="mode"]').forEach((r) => r.addEventListener('change', applyMode));
 
 refreshHealth();
+loadHistory();
 applyMode();
 addCompetitor();

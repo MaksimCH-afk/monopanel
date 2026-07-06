@@ -37,22 +37,30 @@ export function validateRequest(body) {
   const query = typeof body.query === 'string' ? body.query.trim() : '';
   if (!query) throw new ValidationError('Поле «Поисковый запрос» обязательно.');
 
-  // Mode (TZ §3): "compare" (default) needs my page; "competitors_only" doesn't.
-  const mode = body.mode === 'competitors_only' ? 'competitors_only'
-    : body.mode === 'compare' ? 'compare'
-    : config.defaultMode === 'competitors_only' ? 'competitors_only' : 'compare';
+  // Mode: "compare" (diff vs my page), "competitors_only" (consensus profile),
+  // "single" (audit one page). Falls back to DEFAULT_MODE.
+  const KNOWN = ['compare', 'competitors_only', 'single'];
+  const mode = KNOWN.includes(body.mode)
+    ? body.mode
+    : KNOWN.includes(config.defaultMode) ? config.defaultMode : 'compare';
+
+  const needsTarget = mode === 'compare' || mode === 'single';
+  const needsCompetitors = mode === 'compare' || mode === 'competitors_only';
 
   const targetText = body.target && typeof body.target.text === 'string' ? body.target.text : '';
-  // Mode A: my page is required. Mode B: ignored even if sent (§4.1, §8).
-  if (mode === 'compare' && !targetText.trim()) {
-    throw new ValidationError('Поле «Моя страница» обязательно.');
+  if (needsTarget && !targetText.trim()) {
+    throw new ValidationError(
+      mode === 'single' ? 'Вставьте текст страницы для анализа.' : 'Поле «Моя страница» обязательно.'
+    );
   }
 
   const competitors = Array.isArray(body.competitors) ? body.competitors : [];
   const withText = competitors.filter((c) => c && typeof c.text === 'string' && c.text.trim());
-  if (withText.length < 1) throw new ValidationError('Нужен минимум 1 конкурент с текстом.');
-  if (withText.length > config.maxCompetitors) {
-    throw new ValidationError(`Максимум ${config.maxCompetitors} конкурентов.`);
+  if (needsCompetitors) {
+    if (withText.length < 1) throw new ValidationError('Нужен минимум 1 конкурент с текстом.');
+    if (withText.length > config.maxCompetitors) {
+      throw new ValidationError(`Максимум ${config.maxCompetitors} конкурентов.`);
+    }
   }
 
   // Optional per-request custom stopwords (§7.4): string or array of strings.
@@ -63,8 +71,8 @@ export function validateRequest(body) {
   return {
     query,
     mode,
-    target: mode === 'compare' ? { label: body.target.label ?? null, text: targetText } : null,
-    competitors: withText.map((c) => ({ label: c.label ?? null, text: c.text })),
+    target: needsTarget ? { label: body.target.label ?? null, text: targetText } : null,
+    competitors: needsCompetitors ? withText.map((c) => ({ label: c.label ?? null, text: c.text })) : [],
     customStopwords,
   };
 }
@@ -104,9 +112,9 @@ export async function runAnalysis(body) {
     ...parseCustomStopwords(config.stopwords.custom),
     ...parseCustomStopwords(req.customStopwords),
   ];
-  return req.mode === 'competitors_only'
-    ? runCompetitorsOnly(req, customTerms)
-    : runCompare(req, customTerms);
+  if (req.mode === 'single') return runSingle(req, customTerms);
+  if (req.mode === 'competitors_only') return runCompetitorsOnly(req, customTerms);
+  return runCompare(req, customTerms);
 }
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -284,6 +292,74 @@ async function runCompetitorsOnly(req, customTerms) {
     language: { target: null, dominant: dominantLanguage(okComps.map((c) => c.lang)) },
     entitiesMode,
   });
+}
+
+// ── Single-page audit: profile of ONE page (no competitors, no diff) ─────────
+async function runSingle(req, customTerms) {
+  const warnings = [];
+
+  const doc = await analyzeDoc(req.target.text, customTerms);
+  if (!doc.ok) {
+    throw new ValidationError(
+      doc.reason === 'empty'
+        ? 'После очистки на странице не осталось текста. Вставьте основной контент.'
+        : `Не удалось проанализировать страницу: ${doc.reason}`
+    );
+  }
+  if (doc.truncated) warnings.push('Текст страницы превысил лимит и был усечён.');
+  if (doc.degraded) {
+    warnings.push(`NL API недоступен — использован кодовый анализ плотности (${doc.reason}).`);
+  }
+
+  // Profile of the single document (coverage is trivially 1/1; ranked by
+  // salience/density centrality). Reuses the same profile engine as mode B.
+  const entProfile = aggregateProfile([{ entities: doc.entities }], config);
+  const phraseProfile = aggregatePhrasesProfile([{ phraseMap: doc.phrase.phraseMap }], config);
+  const volume = {
+    words: doc.words,
+    sentences: doc.phrase.sentenceCount,
+    lexical_density: round4(doc.phrase.lexicalDensity),
+  };
+  const entitiesMode = entitiesModeOf([doc.mode]);
+
+  let llm;
+  try {
+    llm = await classifyAndRecommend({
+      mode: 'single',
+      query: req.query,
+      targetProfile: [],
+      competitorTexts: [doc.cleanText.slice(0, config.llmTextChars)],
+      missing: entProfile.profile,
+      weak: [],
+      phrasesMissing: phraseProfile.profile,
+      phrasesWeak: [],
+    });
+  } catch (err) {
+    warnings.push(`Классификация интента/рекомендации недоступны: ${err.message}`);
+    llm = null;
+  }
+
+  const intent = llm?.intent ?? {
+    dominant: null,
+    distribution: [],
+    target_type: null,
+    target_matches_dominant: null,
+    note: 'Интент не определён (LLM недоступен).',
+  };
+
+  return {
+    query: req.query,
+    mode: 'single',
+    small_sample: false,
+    warnings,
+    mock_mode: config.google.mock || config.openai.mock,
+    language: { target: doc.lang.code, dominant: doc.lang.code },
+    entities_mode: entitiesMode,
+    intent,
+    consensus_profile: mergeRecommendations(entProfile.profile, llm?.recommendations?.missing),
+    phrase_profile: mergeRecommendations(phraseProfile.profile, llm?.phrase_recommendations?.missing, 'phrase'),
+    volume,
+  };
 }
 
 // Merge authoritative numbers (agg) with LLM text. LLM items not present in the

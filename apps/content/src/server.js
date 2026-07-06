@@ -10,6 +10,7 @@ import { runAnalysis, ValidationError } from './core/analyze.js';
 import { icuSegmentationOk } from './core/segment.js';
 import { keyStatus, setKeys, getGoogleKey, getOpenAIKey } from './core/keystore.js';
 import { testGoogleKey, testOpenAIKey } from './services/keytest.js';
+import { addAnalysis, listAnalyses, getAnalysis, deleteAnalysis } from './core/historystore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -63,6 +64,12 @@ app.post('/api/analyze', async (req, res) => {
   try {
     const result = await runAnalysis(req.body);
     result.elapsed_ms = Date.now() - started;
+    // Save to history (best-effort — never fail the analysis over this).
+    try {
+      addAnalysis(result);
+    } catch (e) {
+      console.error('[history] save failed:', e.message);
+    }
     res.json(result);
   } catch (err) {
     if (err instanceof ValidationError) {
@@ -71,6 +78,23 @@ app.post('/api/analyze', async (req, res) => {
     console.error('[analyze] unexpected error:', err);
     res.status(500).json({ error: 'Внутренняя ошибка анализа. Попробуйте ещё раз.' });
   }
+});
+
+// ── Analysis history ──────────────────────────────────────────────
+app.get('/api/history', (_req, res) => {
+  res.json({ ok: true, items: listAnalyses() });
+});
+
+app.get('/api/history/:id', (req, res) => {
+  const result = getAnalysis(req.params.id);
+  if (!result) return res.status(404).json({ error: 'Анализ не найден в истории.' });
+  res.json(result);
+});
+
+app.delete('/api/history/:id', (req, res) => {
+  const removed = deleteAnalysis(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'Анализ не найден в истории.' });
+  res.json({ ok: true, items: listAnalyses() });
 });
 
 app.use(express.static(PUBLIC_DIR));

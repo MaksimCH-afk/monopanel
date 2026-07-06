@@ -54,6 +54,26 @@ test('mode B: phrase consensus profile on the phrase track', () => {
   assert.ok(!('target_density' in cb));
 });
 
+test('mode single: profile of ONE doc — coverage 1/1, no competitors needed', () => {
+  const one = [{ entities: [ent('Casino', 0.5, '/m/c'), ent('Bonus', 0.3), ent('RTP', 0.1)] }];
+  const r = aggregateProfile(one, config);
+  // K = ceil(1*0.5)=1 → all units kept, coverage 1
+  assert.deepEqual(r.profile.map((p) => p.name).sort(), ['Bonus', 'Casino', 'RTP']);
+  assert.ok(r.profile.every((p) => p.coverage === 1));
+  assert.ok('median_salience' in r.profile[0]);
+});
+
+test('validation: single needs page text, not competitors', () => {
+  assert.throws(
+    () => validateRequest({ query: 'q', mode: 'single', competitors: [] }),
+    /страниц/
+  );
+  const s = validateRequest({ query: 'q', mode: 'single', target: { text: 'page' } });
+  assert.equal(s.mode, 'single');
+  assert.ok(s.target);
+  assert.deepEqual(s.competitors, []); // competitors not required/ignored
+});
+
 test('validation: compare needs my page, competitors_only does not (§4.1)', () => {
   assert.throws(
     () => validateRequest({ query: 'q', mode: 'compare', competitors: [{ text: 'x' }] }),

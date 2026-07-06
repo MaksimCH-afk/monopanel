@@ -186,9 +186,10 @@ async function callReal(input, systemPrompt) {
  * @returns {Promise<{intent:object, recommendations:object, phrase_recommendations:object}>}
  */
 export async function classifyAndRecommend(input) {
-  const profile = input.mode === 'competitors_only';
+  // competitors_only + single are both "profile" style (no my-page diff).
+  const profile = input.mode === 'competitors_only' || input.mode === 'single';
   const systemPrompt = profile ? SYSTEM_PROMPT_PROFILE : SYSTEM_PROMPT_COMPARE;
-  if (config.openai.mock) return mockLLM(input, profile);
+  if (config.openai.mock) return mockLLM(input);
   return withRetry(() => callReal(input, systemPrompt), {
     maxAttempts: config.retry.maxAttempts,
     baseMs: config.retry.baseMs,
@@ -206,7 +207,10 @@ function guessType(text) {
   return 'informational';
 }
 
-function mockLLM(input, profile = false) {
+function mockLLM(input) {
+  const mode = input.mode || 'compare';
+  const single = mode === 'single';
+  const profile = mode === 'competitors_only' || single;
   const types = input.competitorTexts.map(guessType);
   const counts = new Map();
   for (const ty of types) counts.set(ty, (counts.get(ty) || 0) + 1);
@@ -219,20 +223,24 @@ function mockLLM(input, profile = false) {
   const medSal = (m) => m.median_competitor_salience ?? m.median_salience;
   const rec = (m, kind) => ({
     name: m.name,
-    recommendation: profile
-      ? `[MOCK] Раскройте «${m.name}» — тема покрыта у ${m.coverage}/${m.competitors_total} конкурентов (медиана salience ${medSal(m)}). Пункт брифа охвата.`
-      : kind === 'missing'
-        ? `[MOCK] Добавьте раздел про «${m.name}» — сущность раскрыта у ${m.coverage}/${m.competitors_total} конкурентов, но отсутствует у вас.`
-        : `[MOCK] Усильте «${m.name}»: у вас salience ${m.target_salience}, у конкурентов медиана ${m.median_competitor_salience}. Дайте больше контекста.`,
+    recommendation: single
+      ? `[MOCK] Страница раскрывает «${m.name}» (salience ${medSal(m)}).`
+      : profile
+        ? `[MOCK] Раскройте «${m.name}» — тема покрыта у ${m.coverage}/${m.competitors_total} конкурентов (медиана salience ${medSal(m)}). Пункт брифа охвата.`
+        : kind === 'missing'
+          ? `[MOCK] Добавьте раздел про «${m.name}» — сущность раскрыта у ${m.coverage}/${m.competitors_total} конкурентов, но отсутствует у вас.`
+          : `[MOCK] Усильте «${m.name}»: у вас salience ${m.target_salience}, у конкурентов медиана ${m.median_competitor_salience}. Дайте больше контекста.`,
   });
 
   const precc = (p, kind) => ({
     phrase: p.phrase,
-    recommendation: profile
-      ? `[MOCK] Используйте фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов (медиана плотности ${p.median_density}).`
-      : kind === 'missing'
-        ? `[MOCK] Впишите фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов, у вас её нет.`
-        : `[MOCK] Используйте «${p.phrase}» плотнее: у конкурентов медиана плотности ${p.median_density}, у вас ${p.target_density}.`,
+    recommendation: single
+      ? `[MOCK] Ключевая фраза страницы: «${p.phrase}» (${p.n}-грамма, плотность ${p.median_density}).`
+      : profile
+        ? `[MOCK] Используйте фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов (медиана плотности ${p.median_density}).`
+        : kind === 'missing'
+          ? `[MOCK] Впишите фразу «${p.phrase}» (${p.n}-грамма) — встречается у ${p.coverage}/${p.competitors_total} конкурентов, у вас её нет.`
+          : `[MOCK] Используйте «${p.phrase}» плотнее: у конкурентов медиана плотности ${p.median_density}, у вас ${p.target_density}.`,
   });
 
   return {
@@ -241,7 +249,9 @@ function mockLLM(input, profile = false) {
       distribution,
       target_type: profile ? dominant : targetType,
       target_matches_dominant: profile ? true : targetType === dominant,
-      note: `[MOCK] Доминирующий тип страниц конкурентов — «${dominant}».`,
+      note: single
+        ? `[MOCK] Тип этой страницы — «${dominant}».`
+        : `[MOCK] Доминирующий тип страниц конкурентов — «${dominant}».`,
     },
     recommendations: {
       missing: input.missing.map((m) => rec(m, 'missing')),

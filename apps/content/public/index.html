@@ -63,6 +63,8 @@
               <span>Сравнение с моей страницей</span></label>
             <label class="seg-opt"><input type="radio" name="mode" value="competitors_only" />
               <span>Только конкуренты</span></label>
+            <label class="seg-opt"><input type="radio" name="mode" value="single" />
+              <span>Одна страница</span></label>
           </div>
           <small class="mode-hint" id="modeHint"></small>
         </div>
@@ -73,11 +75,11 @@
         </label>
 
         <label class="field" id="targetField">
-          <span class="lbl">Моя страница <em>*</em></span>
+          <span class="lbl" id="targetLabel">Моя страница <em>*</em></span>
           <textarea id="target" rows="7" placeholder="Вставьте основной текст вашей страницы…"></textarea>
         </label>
 
-        <div class="field">
+        <div class="field" id="competitorsField">
           <span class="lbl">Конкуренты <em>*</em> <small id="compCount"></small></span>
           <div id="competitors"></div>
           <button type="button" id="addComp" class="btn btn-ghost">+ добавить конкурента</button>
@@ -97,6 +99,17 @@
           <span id="formError" class="form-error" role="alert"></span>
         </div>
       </form>
+    </section>
+
+    <!-- ─── History ───────────────────────────────────────────── -->
+    <section id="historyCard" class="card keys-card">
+      <button type="button" id="historyToggle" class="keys-toggle" aria-expanded="false">
+        <span class="section-title" style="margin:0">История анализов <span id="historyCount" class="n"></span></span>
+        <span class="keys-chevron">▸</span>
+      </button>
+      <div id="historyBody" class="keys-body" hidden>
+        <div id="historyList"></div>
+      </div>
     </section>
 
     <!-- ─── Loading ───────────────────────────────────────────── -->
