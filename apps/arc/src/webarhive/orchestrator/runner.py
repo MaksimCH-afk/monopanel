@@ -355,9 +355,27 @@ async def process_domain(
             )
             topic_partial = True
 
-        # --- Redirects ---
-        if history.redirect_rows:
-            tracer.step("РЕДИРЕКТЫ", f"{len(history.redirect_rows)} 3xx-снапшотов")
+        # --- Redirects: СТРОГО только с главной страницы (вариант А) ---
+        # 3xx-бакет содержит редиректы со ВСЕХ URL домена, включая
+        # внутренние (посты, /robots.txt, теги, wp-*). При переезде сайта
+        # каждая внутренняя страница отдаёт свой site-wide 301 на новый
+        # домен → сотни 3xx на ОДНО событие переезда, раздувая счётчик
+        # «обратить внимание» (в прогоне #11: domenig.at — 131 флаг = один
+        # переезд, размноженный по внутренним URL). Переезд однозначно
+        # виден по редиректу самой главной; внутренние — шум и лишний фетч.
+        # `_is_home_page` распознаёт главную во всех формах (http/https,
+        # www, слеш, index.html, без схемы).
+        home_redirect_rows = [
+            r for r in history.redirect_rows
+            if _is_home_page(r.original, domain_row.domain)
+        ]
+        skipped_internal = len(history.redirect_rows) - len(home_redirect_rows)
+        if home_redirect_rows:
+            tracer.step(
+                "РЕДИРЕКТЫ",
+                f"{len(home_redirect_rows)} 3xx-снапшотов главной"
+                + (f" (внутренних отброшено {skipped_internal})" if skipped_internal else ""),
+            )
             t0 = datetime.utcnow()
 
             async def _redir_progress(msg: str) -> None:
@@ -365,7 +383,7 @@ async def process_domain(
 
             redir_cap = int(limits.get("redirect_cap", 150))
             redirects = await analyze_redirects(
-                history.redirect_rows,
+                home_redirect_rows,
                 source_domain=domain_row.domain,
                 fetcher=fetcher,
                 cap=redir_cap,
@@ -374,6 +392,13 @@ async def process_domain(
             tracer.info(
                 f"редиректы: классифицировано {len(redirects)} за "
                 f"{(datetime.utcnow() - t0).total_seconds():.1f}s"
+            )
+        elif history.redirect_rows:
+            # 3xx есть, но только с внутренних страниц — не с главной.
+            # По варианту А это не сигнал переезда самого домена: пропускаем.
+            tracer.info(
+                f"редиректы: {len(history.redirect_rows)} 3xx только с внутренних "
+                f"страниц (главная не редиректила) — пропускаем (вариант А)"
             )
             if roles.get("redirect_llm") and llm is not None and redirects:
                 # spec §9.3: only borderline (REVIEW) cases get the LLM tiebreaker

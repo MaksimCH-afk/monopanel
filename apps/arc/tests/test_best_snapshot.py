@@ -30,6 +30,28 @@ def test_is_home_page():
     assert not _is_home_page("https://bar.com/", "foo.com")
 
 
+def test_is_home_page_all_forms():
+    """Главная во всех формах: протокол, www, слеш, index, без схемы."""
+    home_forms = [
+        "http://foo.com", "http://www.foo.com", "http://foo.com/", "http://www.foo.com/",
+        "https://foo.com", "https://www.foo.com", "https://foo.com/", "https://www.foo.com/",
+        "foo.com", "www.foo.com", "foo.com/", "www.foo.com/",
+        "https://www.foo.com/index.html", "http://foo.com/?utm=x", "foo.com/#top",
+    ]
+    for f in home_forms:
+        assert _is_home_page(f, "foo.com"), f
+
+    not_home = [
+        "http://foo.com/blog", "foo.com/robots.txt", "https://sub.foo.com/",
+        "http://otherfoo.com/", "http://notfoo.com/", "",
+    ]
+    for f in not_home:
+        assert not _is_home_page(f, "foo.com"), f
+
+    # www в самом source_domain тоже нормализуется
+    assert _is_home_page("http://foo.com/", "www.foo.com")
+
+
 def test_filter_home_page_rows_status_and_path():
     rows = [
         _row("20100101000000", "http://foo.com/"),       # ✓

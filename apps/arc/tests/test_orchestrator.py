@@ -149,6 +149,114 @@ async def test_end_to_end_single_domain(session_factory, monkeypatch):
         assert run.processed_domains == 1
 
 
+def _cdx_handler_with_redirects():
+    """foo.com: одна живая главная + 3xx с главной И с внутренних страниц,
+    все ведут на newsite.com. Вариант А должен оставить только редирект
+    самой главной."""
+    home_html = (
+        b"<html><head><title>Foo home</title></head>"
+        b"<body><h1>Foo</h1></body></html>"
+    )
+    # 3xx-строки: одна с главной (во «внешней» форме без слеша), остальные —
+    # внутренние страницы. Все 301 → newsite.com.
+    redirect_rows = [
+        ["com,foo)/", "20200101000000", "http://foo.com", "text/html", "301", "R00", "0"],
+        ["com,foo)/blog/post-1", "20200102000000", "http://foo.com/blog/post-1", "text/html", "301", "R01", "0"],
+        ["com,foo)/robots.txt", "20200103000000", "http://foo.com/robots.txt", "text/plain", "301", "R02", "0"],
+        ["com,foo)/tag/news", "20200104000000", "http://foo.com/tag/news", "text/html", "301", "R03", "0"],
+        ["com,foo)/wp-login.php", "20200105000000", "http://foo.com/wp-login.php", "text/html", "301", "R04", "0"],
+    ]
+    live_rows = [
+        ["com,foo)/", "20100101000000", "http://foo.com/", "text/html", "200", "AAA", "100"],
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "cdx/search/cdx" in url:
+            header = ["urlkey", "timestamp", "original", "mimetype", "statuscode", "digest", "length"]
+            filters = request.url.params.get_list("filter") if hasattr(
+                request.url.params, "get_list"
+            ) else [request.url.params.get("filter", "")]
+            rows: list[list[str]] = []
+            spec = None
+            for f in filters:
+                if f and f.startswith("statuscode:"):
+                    spec = f.split(":", 1)[1]
+            if spec == "200":
+                rows = live_rows
+            elif spec == "3..":
+                rows = redirect_rows
+            elif spec == "404":
+                rows = []
+            else:
+                rows = live_rows + redirect_rows
+            return httpx.Response(200, json=[header] + rows)
+        # 3xx-снапшоты (ts=2020..) — отдаём Location на новый домен.
+        if "/web/2020" in url:
+            return httpx.Response(
+                200, content=b"", headers={"location": "https://newsite.com/"},
+            )
+        if "/web/" in url:
+            return httpx.Response(200, content=home_html,
+                                  headers={"content-type": "text/html; charset=utf-8"})
+        return httpx.Response(404)
+
+    return handler
+
+
+async def test_variant_a_redirects_only_from_home(session_factory):
+    """Вариант А: из 5 3xx (1 с главной + 4 внутренних) в анализ и БД
+    попадает только редирект самой главной."""
+    from sqlalchemy import select
+
+    from webarhive.cdx.client import CdxClient
+    from webarhive.cdx.throttle import IAThrottle
+    from webarhive.db import Redirect
+    from webarhive.db.repo import create_run, seed_domains
+    from webarhive.fetcher.snapshot import SnapshotFetcher
+    from webarhive.orchestrator.runner import process_domain
+
+    snap = get_settings().snapshot()
+    snap["roles"]["verdict"] = False  # без LLM, чистая классификация редиректов
+
+    async with session_factory() as s:
+        run = await create_run(s, total=1, settings_snapshot=snap)
+        rows = await seed_domains(s, run.id, ["foo.com"])
+        await s.commit()
+        domain_row = rows[0]
+        run_id = run.id
+
+    transport = httpx.MockTransport(_cdx_handler_with_redirects())
+    async with httpx.AsyncClient(transport=transport, follow_redirects=False) as http:
+        throttle = IAThrottle(rate=100)
+        cdx = CdxClient(throttle=throttle, client=http, backoff_base=0.01, max_retries=2)
+        fetcher = SnapshotFetcher(throttle=throttle, client=http, backoff_base=0.01, max_retries=2)
+
+        await process_domain(
+            domain_row=domain_row,
+            run_id=run_id,
+            snapshot=snap,
+            session_factory=session_factory,
+            cdx=cdx,
+            fetcher=fetcher,
+            llm=None,  # вариант А не зависит от LLM
+        )
+
+    async with session_factory() as s:
+        stored = (await s.execute(
+            select(Redirect).where(Redirect.domain_id == domain_row.id)
+        )).scalars().all()
+        # только один редирект — с главной; все внутренние отфильтрованы
+        assert len(stored) == 1, [r.from_url for r in stored]
+        assert stored[0].from_url == "http://foo.com"
+        assert stored[0].target_domain == "newsite.com"
+
+        d = await s.get(Domain, domain_row.id)
+        # один уникальный целевой домен → один флаг, а не 5
+        assert d.review_flag_count == 1
+        assert d.trace and "внутренних отброшено 4" in d.trace
+
+
 async def test_resumability_skips_done_domains(session_factory):
     """Re-running the pipeline on a run should only process pending rows."""
     from webarhive.db.repo import create_run, seed_domains

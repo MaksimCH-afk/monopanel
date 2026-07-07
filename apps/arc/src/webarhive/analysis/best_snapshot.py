@@ -40,21 +40,40 @@ HOME_PATH_RE = re.compile(r"^/?(index\.(html?|php|asp|aspx))?$", re.IGNORECASE)
 
 
 def _is_home_page(url: str, source_domain: str) -> bool:
-    """Return True if `url` looks like the domain's home page (root)."""
+    """Return True if `url` looks like the domain's home page (root).
+
+    Главная распознаётся во ВСЕХ формах, в которых она встречается в
+    архиве и во вводе оператора:
+      - протокол: http:// / https:// / вообще без схемы (site.com);
+      - www: с префиксом и без (www.site.com == site.com);
+      - слеш: с завершающим и без (site.com == site.com/);
+      - index: голый корень и index.html/php/asp(x).
+    Query/fragment игнорируются — `?utm=x`/`#frag` не делают URL «не главной».
+    """
+    if not url:
+        return False
+    raw = url.strip()
+    # Бесхемовые формы (site.com, www.site.com/) — urlsplit без схемы
+    # кладёт весь URL в path, а hostname становится пустым. Подставляем
+    # схему, чтобы netloc распарсился корректно.
+    if "://" not in raw and not raw.startswith("//"):
+        raw = "http://" + raw
     try:
-        parts = urlsplit(url)
+        parts = urlsplit(raw)
     except ValueError:
         return False
     host = (parts.hostname or "").lower().lstrip(".")
     if host.startswith("www."):
         host = host[4:]
-    if host != source_domain.lower():
+    src = source_domain.lower().strip()
+    if src.startswith("www."):
+        src = src[4:]
+    if not host or host != src:
         return False
     path = parts.path or "/"
-    # accept "/", "/index.html", etc. — but not "/about", "/page/x"
+    # accept "/", "" (без слеша), "/index.html", etc. — но не "/about", "/page/x"
     if HOME_PATH_RE.match(path) is None:
         return False
-    # ignore query/fragment differences — they don't make it "not home"
     return True
 
 
