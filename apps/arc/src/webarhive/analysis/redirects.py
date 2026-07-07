@@ -59,6 +59,22 @@ _MARKETPLACE_ROOTS = frozenset({
     "escrow.com", "domainmarket.com", "buydomains.com", "saw.com",
     "cnobin.com", "alibuy.com", "park.io",
 })
+# Соцсети / внешние платформы. Редирект НА такой домен — это не «сменил
+# владельца / подозрительный внешний переезд», а обычная практика: сайт
+# перенаправляет на свою страницу в фейсбуке/твиттере/пинтересте (часто
+# после закрытия сайта остаётся только соцсеть). Считаем техническим —
+# не тревожный REVIEW, не флаг.
+_SOCIAL_ROOTS = frozenset({
+    "facebook.com", "fb.com", "fb.me",
+    "twitter.com", "x.com", "t.co",
+    "pinterest.com", "pin.it",
+    "instagram.com",
+    "linkedin.com",
+    "youtube.com", "youtu.be",
+    "tiktok.com",
+    "vk.com",
+    "t.me", "telegram.me",
+})
 _META_REFRESH_RE = re.compile(
     r"""<meta[^>]+http-equiv=['"]?refresh['"]?[^>]+content=['"]?\s*\d+\s*;\s*url=([^'">\s]+)""",
     re.IGNORECASE,
@@ -171,6 +187,15 @@ def _classify_pair(
         return (
             RedirectClass.MARKETPLACE,
             f"маркетплейс/парковка доменов ({target_root}) — домен продаётся/припаркован",
+            target_root,
+        )
+
+    # Соцсеть / внешняя платформа — обычный редирект на страницу бренда в
+    # фейсбуке/твиттере/пинтересте. Не тревожный REVIEW, а technical.
+    if target_root in _SOCIAL_ROOTS:
+        return (
+            RedirectClass.TECHNICAL,
+            f"редирект на соцсеть/платформу ({target_root})",
             target_root,
         )
 

@@ -236,7 +236,8 @@ async def domain_card(request: Request, domain_id: int):
     # «весь сайт 301 → newsite.com» показывался ОДНОЙ строкой «N страниц»,
     # а не полотном из сотен внутренних URL. Технические (свой домен/схема/
     # www/маркетплейсы) сворачиваются отдельно.
-    from webarhive.analysis.redirects import _MARKETPLACE_ROOTS
+    from webarhive.analysis.redirects import _MARKETPLACE_ROOTS, _SOCIAL_ROOTS
+    from webarhive.analysis.best_snapshot import _is_home_page
 
     def _effective_cls(r) -> str:
         # Старые прогоны (до появления класса marketplace) могли сохранить
@@ -244,6 +245,10 @@ async def domain_card(request: Request, domain_id: int):
         # display-уровне, чтобы и они показывались зелёным «маркетплейс».
         if r.target_domain and r.target_domain in _MARKETPLACE_ROOTS:
             return "marketplace"
+        # Старые прогоны (до отнесения соцсетей к техническим) — редирект на
+        # facebook/twitter/pinterest сворачиваем в «технические» на display.
+        if r.target_domain and r.target_domain in _SOCIAL_ROOTS:
+            return "technical"
         return r.classification
 
     ext_redirects = [r for r in redirects
@@ -260,7 +265,6 @@ async def domain_card(request: Request, domain_id: int):
             if g is None:
                 g = {"target": key, "count": 0, "classes": set(),
                      "first": r.captured_at, "last": r.captured_at,
-                     "reason": r.reason, "snapshot_url": r.snapshot_url,
                      "members": []}
                 groups[key] = g
             g["count"] += 1
@@ -269,13 +273,23 @@ async def domain_card(request: Request, domain_id: int):
                 g["first"] = r.captured_at
             if r.captured_at and (g["last"] is None or r.captured_at > g["last"]):
                 g["last"] = r.captured_at
-            if not g["snapshot_url"] and r.snapshot_url:
-                g["snapshot_url"] = r.snapshot_url
             g["members"].append(r)
         out = []
         for g in groups.values():
             g["cls"] = sorted(g["classes"], key=lambda c: _cls_priority.get(c, 9))[0]
             g["mixed"] = len(g["classes"]) > 1
+            # «Основной» редирект группы (что видно ДО разворота) — с главной
+            # страницы: у неё высший приоритет. Редирект с robots.txt или
+            # случайной внутренней страницы — не репрезентативен. members уже
+            # в порядке captured_at (запрос отсортирован), поэтому берём
+            # первый home-page, иначе — самый ранний из группы.
+            members = g["members"]
+            home_members = [m for m in members if _is_home_page(m.from_url, d.domain)]
+            rep = (home_members or members)[0]
+            g["reason"] = rep.reason
+            g["snapshot_url"] = rep.snapshot_url or next(
+                (m.snapshot_url for m in members if m.snapshot_url), None)
+            g["rep_from"] = rep.from_url
             out.append(g)
         # Сначала самые «громкие» (review), затем по числу страниц.
         out.sort(key=lambda g: (_cls_priority.get(g["cls"], 9), -g["count"]))

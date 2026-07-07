@@ -48,6 +48,18 @@ def test_different_core_defaults_to_review_safety():
     assert root == "casino-evil.net"
 
 
+def test_social_redirect_is_technical():
+    for target in (
+        "https://www.facebook.com/mypage",
+        "https://twitter.com/brand",
+        "https://x.com/brand",
+        "https://pinterest.com/brand",
+    ):
+        cls, reason, _ = _classify_pair(source_domain="foo.com", target_url=target)
+        assert cls is RedirectClass.TECHNICAL, target
+        assert "соцсеть" in reason
+
+
 def test_unresolvable_target_is_review():
     cls, reason, _ = _classify_pair(source_domain="foo.com", target_url=None)
     assert cls is RedirectClass.REVIEW

@@ -11,12 +11,34 @@ def _ep(cat, year):
     return TopicEpoch(datetime(year, 1, 1), datetime(year, 12, 31), cat, 0.9, "", "u")
 
 
-def _redir(cls):
+def _redir(cls, target_domain="bar.com", from_url="http://foo.com/"):
     return RedirectInfo(
-        captured_at=datetime(2020, 1, 1), from_url="http://foo.com/",
-        to_url="http://bar.com/", target_domain="bar.com",
+        captured_at=datetime(2020, 1, 1), from_url=from_url,
+        to_url=f"http://{target_domain}/", target_domain=target_domain,
         classification=cls, reason="", snapshot_url="u",
     )
+
+
+def test_review_flags_count_distinct_targets_not_pages():
+    # 3 внутренние страницы одного сайта → один целевой домен → один флаг.
+    redirs = [
+        _redir(RedirectClass.REVIEW, "newsite.com", "http://foo.com/a"),
+        _redir(RedirectClass.REVIEW, "newsite.com", "http://foo.com/b"),
+        _redir(RedirectClass.REVIEW, "newsite.com", "http://foo.com/c"),
+    ]
+    _, review, flags = _aggregate_flags(epochs=[], redirects=redirs)
+    assert review == 1
+    assert "review_redirects:1" in flags
+
+
+def test_review_flags_count_multiple_distinct_targets():
+    redirs = [
+        _redir(RedirectClass.REVIEW, "a.com"),
+        _redir(RedirectClass.REVIEW, "a.com"),
+        _redir(RedirectClass.REVIEW, "b.com"),
+    ]
+    _, review, _ = _aggregate_flags(epochs=[], redirects=redirs)
+    assert review == 2
 
 
 def test_flag_aggregation_counts():

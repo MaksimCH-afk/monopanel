@@ -71,7 +71,8 @@
       {%- set _ = risky_keys.append(c.key) -%}
     {%- endif -%}
   {%- endfor -%}
-  {%- set review_count = (redirects or []) | selectattr("classification", "equalto", "review") | list | length -%}
+  {#- Флаг = уникальный целевой домен, а не каждая внутренняя страница. -#}
+  {%- set review_count = (redirects or []) | selectattr("classification", "equalto", "review") | map(attribute="target_domain") | unique | list | length -%}
   {%- if not risky_keys and not review_count and domain.status != "partial" -%}
     <span class="no-flags">—</span>
   {%- else -%}

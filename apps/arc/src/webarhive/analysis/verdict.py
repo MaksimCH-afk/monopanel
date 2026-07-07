@@ -11,7 +11,8 @@ Two paths:
 
 Flag aggregation (always done, regardless of the LLM toggle):
 - risky_flag_count = number of risky-category epochs
-- review_flag_count = number of «обратить внимание» redirects
+- review_flag_count = number of DISTINCT external target domains among
+  «обратить внимание» redirects (internal pages of one site → one flag)
 These drive the strip icons on the canvas row.
 """
 
@@ -44,11 +45,17 @@ def _aggregate_flags(
 ) -> tuple[int, int, list[str]]:
     risky = [e.category for e in epochs if is_risky(e.category)]
     reviews = [r for r in redirects if r.classification is RedirectClass.REVIEW]
+    # Флаг = уникальный внешний целевой домен, а не каждая исходная
+    # страница. Один сайт, где сотни внутренних URL 301→newsite.com, —
+    # это ОДИН повод «обратить внимание», а не сотня. Считаем по
+    # target_domain (None-цели, где не удалось извлечь, схлопываются в одну).
+    review_targets = {r.target_domain for r in reviews}
+    review_count = len(review_targets)
     flags: list[str] = []
     flags.extend(f"risky:{c}" for c in dict.fromkeys(risky))  # preserve order, dedup
     if reviews:
-        flags.append(f"review_redirects:{len(reviews)}")
-    return len(risky), len(reviews), flags
+        flags.append(f"review_redirects:{review_count}")
+    return len(risky), review_count, flags
 
 
 def _build_report(
