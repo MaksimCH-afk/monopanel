@@ -243,10 +243,104 @@ function closeAllDrawers() {
 }
 $('#helpBtn').onclick = () => openDrawer('help');
 $('#settingsBtn').onclick = () => openDrawer('settings');
+$('#workerBtn').onclick = () => { loadWorkerSource(); openDrawer('worker'); };
 $('#openHelpFromCfg').onclick = () => openDrawer('help');
 backdrop.onclick = closeAllDrawers;
 document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = closeAllDrawers));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllDrawers(); });
+
+// ── Worker source: load once, copy to clipboard ──────────────────────────────
+const workerText = { code: '', schema: '' };
+let workerLoaded = false;
+async function loadWorkerSource() {
+  if (workerLoaded) return;
+  workerLoaded = true;
+  for (const [type, elId] of [['code', 'workerCode'], ['schema', 'workerSchema']]) {
+    try {
+      const res = await fetch(`/api/worker/${type}`);
+      const text = await res.text();
+      workerText[type] = text;
+      $('#' + elId).textContent = text;
+    } catch {
+      $('#' + elId).textContent = '// не удалось загрузить';
+      workerLoaded = false; // allow a retry on next open
+    }
+  }
+}
+document.querySelectorAll('.copy-btn').forEach((btn) => {
+  btn.onclick = async () => {
+    const text = workerText[btn.dataset.copy] || '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for non-secure contexts / older browsers.
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    const orig = btn.textContent;
+    btn.textContent = '✓ Скопировано';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1600);
+  };
+});
+
+// ── Discovery: pick account + D1 database by the token (no wrangler) ──────────
+const accountPick = $('#accountPick');
+const dbPick = $('#dbPick');
+
+async function runDiscover(accountId) {
+  const msg = $('#discoverMsg');
+  msg.className = 'msg';
+  msg.textContent = 'Опрос Cloudflare…';
+  let data;
+  try {
+    data = await api('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: $('#token').value, accountId: accountId || undefined }),
+    });
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = e.message;
+    return;
+  }
+
+  // Accounts
+  if (data.accounts && data.accounts.length) {
+    accountPick.innerHTML = data.accounts
+      .map((a) => `<option value="${a.id}">${esc(a.name)} — ${esc(a.id)}</option>`)
+      .join('');
+    accountPick.value = data.accountId || data.accounts[0].id;
+    $('#accountPickWrap').hidden = data.accounts.length < 2; // single account → just autofill
+    $('#accountId').value = accountPick.value;
+  }
+
+  // Databases
+  if (data.databases && data.databases.length) {
+    dbPick.innerHTML =
+      '<option value="">— выберите базу —</option>' +
+      data.databases.map((d) => `<option value="${d.uuid}">${esc(d.name)} — ${esc(d.uuid)}</option>`).join('');
+    $('#dbPickWrap').hidden = false;
+    // Prefer a database literally named "mail".
+    const mail = data.databases.find((d) => d.name === 'mail');
+    if (mail) { dbPick.value = mail.uuid; $('#databaseId').value = mail.uuid; }
+    msg.className = 'msg ok';
+    msg.textContent = `Найдено баз: ${data.databases.length}. Выберите нужную — ID подставится.`;
+  } else {
+    $('#dbPickWrap').hidden = true;
+    msg.className = 'msg ok';
+    msg.textContent = data.accountId
+      ? 'В этом аккаунте нет баз D1. Создайте базу «mail» (см. ⧉ Воркер).'
+      : 'Выберите аккаунт, чтобы увидеть базы D1.';
+  }
+}
+
+$('#discoverBtn').onclick = () => runDiscover();
+accountPick.onchange = () => { $('#accountId').value = accountPick.value; runDiscover(accountPick.value); };
+dbPick.onchange = () => { if (dbPick.value) $('#databaseId').value = dbPick.value; };
 
 $('#saveCfg').onclick = async () => {
   const msg = $('#cfgMsg');

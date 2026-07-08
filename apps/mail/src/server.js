@@ -3,15 +3,18 @@
 // on the server — the client only ever gets masked status and the parsed rows.
 
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { setCloudflare, cloudflareStatus } from './store/configstore.js';
 import * as repo from './services/mailbox.js';
 import { ping as d1Ping, D1Error } from './services/d1.js';
+import { discover as cfDiscover } from './services/discover.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const WORKER_DIR = path.join(__dirname, '..', 'worker');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -62,6 +65,32 @@ app.post('/api/test', wrap(async (req, res) => {
   const stats = await d1Ping(creds);
   res.json({ ok: true, message: `Соединение с D1 успешно. Писем: ${stats.total}, ящиков: ${stats.mailboxes}.`, stats });
 }));
+
+// Auto-discover account + D1 databases from just the API token (posted or
+// stored). Lets the operator pick the Database ID from a list instead of
+// running `wrangler d1 create` or hunting for the UUID.
+app.post('/api/discover', wrap(async (req, res) => {
+  const b = req.body || {};
+  const token = (b.token || config.cloudflare.token || '').trim();
+  const accountId = (b.accountId || '').trim() || undefined;
+  const result = await cfDiscover({ token, accountId });
+  res.json({ ok: true, ...result });
+}));
+
+// Worker source + schema, served from worker/ so the operator can copy-paste
+// them straight into the Cloudflare dashboard (single source of truth — no
+// duplicated code in the UI).
+app.get('/api/worker/:file', (req, res) => {
+  const map = { code: 'src/index.js', schema: 'schema.sql' };
+  const rel = map[req.params.file];
+  if (!rel) return res.status(404).json({ error: 'Неизвестный файл.' });
+  try {
+    const text = fs.readFileSync(path.join(WORKER_DIR, rel), 'utf8');
+    res.type('text/plain; charset=utf-8').send(text);
+  } catch {
+    res.status(500).json({ error: 'Не удалось прочитать файл воркера.' });
+  }
+});
 
 // List of mailboxes with counts.
 app.get('/api/mailboxes', wrap(async (_req, res) => {

@@ -23,6 +23,7 @@
     <div class="topbar__actions">
       <button type="button" id="refreshBtn" class="btn btn--ghost" title="Обновить">↻ Обновить</button>
       <button type="button" id="helpBtn" class="btn btn--ghost">? Справка</button>
+      <button type="button" id="workerBtn" class="btn btn--ghost">⧉ Воркер</button>
       <button type="button" id="settingsBtn" class="btn btn--ghost">⚙ Настройки</button>
     </div>
   </header>
@@ -63,7 +64,7 @@
       <h3>Что где лежит</h3>
       <table class="kv">
         <tr><td><b>Админка</b><br><span class="muted">эта страница, :3338</span></td><td>Читает письма из D1. Ставится в монопанель, ничего в Cloudflare не деплоит.</td></tr>
-        <tr><td><b>worker/</b><br><span class="muted">apps/mail/worker/</span></td><td>Email Worker + <code>schema.sql</code> — <b>деплоится в Cloudflare</b> (он и ловит письма).</td></tr>
+        <tr><td><b>worker/</b><br><span class="muted">apps/mail/worker/</span></td><td>Email Worker + <code>schema.sql</code> — <b>деплоится в Cloudflare</b> (он и ловит письма). Не хотите CLI — код и схему можно скопировать из панели <b>⧉ Воркер</b> и вставить в дашборд руками.</td></tr>
         <tr><td><b>scripts/</b><br><span class="muted">setup-domains.mjs</span></td><td>Скрипт: включает почту + catch-all сразу на списке доменов через API.</td></tr>
       </table>
 
@@ -87,16 +88,20 @@ npx wrangler deploy</pre></li>
       <h3>Откуда брать три значения</h3>
       <dl class="defs">
         <dt>Account ID</dt>
-        <dd>Идентификатор вашего аккаунта Cloudflare. <b>Не подставляется сам.</b>
-          Cloudflare-дашборд → выберите любой домен → на странице <b>Overview</b>
-          в правой колонке блок <b>«API» → Account ID</b> (кнопка «Click to copy»).</dd>
+        <dd><b>Проще всего:</b> в Настройках вставьте токен и нажмите
+          «Подобрать по токену» — Account ID подставится сам.<br>
+          Вручную: он виден прямо в <b>адресной строке дашборда</b> —
+          <code>dash.cloudflare.com/<b>&lt;account-id&gt;</b></code> — а также на
+          странице <b>Overview</b> любого домена, блок <b>«API» → Account ID</b>
+          справа (кнопка «Click to copy»).</dd>
 
         <dt>D1 Database ID</dt>
-        <dd>UUID именно вашей базы D1. <b>Не подставляется автоматически</b> — он
-          появляется, когда вы <b>создаёте</b> базу командой
-          <code>npx wrangler d1 create mail</code> (шаг 2). Позже его всегда можно
-          посмотреть в дашборде: <b>Workers &amp; Pages → D1 → mail → Database ID</b>.
-          Это не имя базы («mail»), а длинный UUID.</dd>
+        <dd><b>Проще всего:</b> кнопка «Подобрать по токену» в Настройках покажет
+          список ваших баз D1 — выберите <code>mail</code>, и Database ID
+          подставится сам (команда не нужна).<br>
+          Иначе это UUID вашей базы (не имя «mail»): он печатается при создании
+          базы <code>npx wrangler d1 create mail</code> и виден в дашборде
+          <b>Workers &amp; Pages → D1 → mail → Database ID</b>.</dd>
 
         <dt>API Token</dt>
         <dd>Токен, которым админка читает базу. Создать:
@@ -145,7 +150,7 @@ npx wrangler deploy</pre></li>
       <div class="field">
         <label for="accountId">Account ID</label>
         <input id="accountId" type="text" autocomplete="off" placeholder="напр. 0123abcd…89ef" />
-        <small class="hint">Идентификатор аккаунта Cloudflare. Не подставляется сам — скопируйте из дашборда: любой домен → Overview → блок «API» справа.</small>
+        <small class="hint">Идентификатор аккаунта Cloudflare. Проще всего — нажать «Подобрать по токену» ниже. Вручную: он виден в адресной строке дашборда <code>dash.cloudflare.com/<b>&lt;account-id&gt;</b></code>, а также на странице Overview любого домена (блок «API» справа).</small>
       </div>
 
       <div class="field">
@@ -160,11 +165,75 @@ npx wrangler deploy</pre></li>
         <small class="hint">Cloudflare → My Profile → API Tokens → Create Token → Custom. Права: <b>Account · D1 · Read</b> (и <b>Edit</b>, если удаляете письма из админки). Хранится только на сервере.</small>
       </div>
 
+      <!-- Auto-discovery: pick account + D1 database by the token, no wrangler -->
+      <div class="discover">
+        <button type="button" id="discoverBtn" class="btn btn--soft">🔍 Подобрать аккаунт и базу по токену</button>
+        <small class="hint">Вставьте токен выше и нажмите — админка сама покажет ваши аккаунты и базы D1, а Account ID и Database ID подставятся автоматически (без <code>wrangler</code>).</small>
+        <span id="discoverMsg" class="msg"></span>
+        <div class="field" id="accountPickWrap" hidden>
+          <label for="accountPick">Аккаунт</label>
+          <select id="accountPick"></select>
+        </div>
+        <div class="field" id="dbPickWrap" hidden>
+          <label for="dbPick">База D1</label>
+          <select id="dbPick"></select>
+        </div>
+      </div>
+
       <div class="settings__actions">
         <button type="button" id="saveCfg" class="btn btn--primary">Сохранить</button>
         <button type="button" id="testCfg" class="btn">Проверить соединение</button>
         <span id="cfgMsg" class="msg"></span>
       </div>
+    </div>
+  </aside>
+
+  <!-- ══ Worker drawer — copy the Worker + schema into Cloudflare by hand ═══ -->
+  <aside id="worker" class="drawer" aria-hidden="true">
+    <div class="drawer__head">
+      <h2>Воркер для Cloudflare</h2>
+      <button type="button" class="drawer__close" data-close aria-label="Закрыть">✕</button>
+    </div>
+    <div class="drawer__body">
+      <p class="lead">
+        Это код, который ловит письма и пишет их в базу D1. Залейте его в Cloudflare
+        <b>руками</b> (без <code>wrangler</code>): скопируйте кнопкой ниже и вставьте
+        в редактор воркера в дашборде.
+      </p>
+
+      <h3>Порядок (всё через дашборд Cloudflare)</h3>
+      <ol class="steps">
+        <li><b>Создать базу D1.</b> Workers &amp; Pages → <b>D1</b> → Create → имя <code>mail</code>. Откройте её вкладку <b>Console</b>, вставьте схему (кнопка «Копировать схему» ниже) и выполните.</li>
+        <li><b>Создать воркер.</b> Workers &amp; Pages → Create → <b>Worker</b> → задайте имя (напр. <code>mail-catcher</code>) → Deploy → <b>Edit code</b>. Удалите шаблон, вставьте код (кнопка «Копировать воркер») → <b>Deploy</b>.</li>
+        <li><b>Привязать базу.</b> Воркер → Settings → <b>Bindings</b> → Add → <b>D1 database</b>: Variable name <code>DB</code>, база <code>mail</code> → Save.</li>
+        <li><b>Импорт postal-mime.</b> Код использует <code>import PostalMime from "postal-mime"</code> — в дашборд-редакторе модуль подтянется автоматически при Deploy. Если нет — уберите зависимость (см. примечание внизу) или деплойте через <code>wrangler</code>.</li>
+        <li><b>Направить почту.</b> Email → Email Routing → включить, подтвердить MX/TXT → Routing rules → <b>Catch-all → Send to a Worker →</b> ваш воркер.</li>
+        <li><b>Подключить админку.</b> Вернитесь в <b>⚙ Настройки</b> и нажмите «Подобрать по токену» — база <code>mail</code> появится в списке.</li>
+      </ol>
+
+      <div class="code-block">
+        <div class="code-block__head">
+          <span><code>src/index.js</code> — код воркера</span>
+          <button type="button" class="btn btn--sm copy-btn" data-copy="code">Копировать воркер</button>
+        </div>
+        <pre id="workerCode" class="code-block__pre">Загрузка…</pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block__head">
+          <span><code>schema.sql</code> — схема базы D1</span>
+          <button type="button" class="btn btn--sm copy-btn" data-copy="schema">Копировать схему</button>
+        </div>
+        <pre id="workerSchema" class="code-block__pre">Загрузка…</pre>
+      </div>
+
+      <p class="note">
+        <b>Примечание про postal-mime.</b> Это разбор MIME (тема, текст, HTML).
+        В дашборде оно ставится автоматически. Если хотите совсем без внешних
+        зависимостей — деплойте воркер через <code>wrangler</code> из папки
+        <code>apps/mail/worker/</code> (там уже всё настроено), а этот экран нужен
+        как раз для ручной заливки без CLI.
+      </p>
     </div>
   </aside>
 

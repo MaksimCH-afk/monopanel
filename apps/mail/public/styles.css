@@ -68,6 +68,9 @@ body {
 .btn--ghost:hover { background: var(--surface-2); }
 .btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn--primary:hover { background: #1b49bd; }
+.btn--soft { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.btn--soft:hover { background: #d9e4fb; }
+.btn--sm { padding: 4px 9px; font-size: 12px; }
 .btn--danger { color: var(--danger); border-color: #f1c4c4; }
 .btn--danger:hover { background: #fdecec; }
 
@@ -119,6 +122,34 @@ code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); 
 .field .hint { display: block; margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .settings__actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .linklike { font: inherit; color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
+
+/* Discovery block (pick account + D1 database by token) */
+.discover {
+  border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 14px; background: var(--surface-2);
+}
+.discover > .btn--soft { width: 100%; }
+.discover .hint { display: block; margin-top: 6px; }
+.discover .field { margin: 10px 0 0; }
+.discover select {
+  font: inherit; width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+}
+.discover select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Copyable code blocks (Worker drawer) */
+.code-block { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 14px 0; }
+.code-block__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.code-block__pre {
+  margin: 0; padding: 12px; background: #0f172a; color: #e2e8f0;
+  font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  white-space: pre; overflow-x: auto; max-height: 340px; overflow-y: auto;
+}
+.copy-btn.copied { background: #dcfce7; border-color: #86efac; color: #166534; }
 
 /* Help content */
 .drawer__body .lead { margin: 0 0 16px; font-size: 13.5px; }
