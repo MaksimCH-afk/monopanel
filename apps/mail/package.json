@@ -1,0 +1,18 @@
+{
+  "name": "mail-catcher-admin",
+  "version": "1.0.0",
+  "description": "Приём почты на множестве адресов через Cloudflare Email Routing + Worker + D1. Эта папка — админка (чтение писем из D1 по REST API); в подпапке worker/ лежит Email Worker и схема БД для деплоя в Cloudflare.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --env-file-if-exists=.env --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

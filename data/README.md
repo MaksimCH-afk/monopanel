@@ -13,6 +13,8 @@ data/
 ├── ank/
 │   └── app.db                ← БД ank (проекты, стратегии, профили)
 ├── img/                      ← SQLite + сгенерированные картинки
+├── mail/
+│   └── config.json           ← креды Cloudflare mail (account/db id + API-токен) — СЕКРЕТ
 └── seo/
     ├── client_secret.json    ← Google OAuth (для данных GSC) — СЕКРЕТ, положить сюда
     ├── authorizedcreds.dat   ← сохранённый OAuth-токен (создаётся после входа)

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Почта — Cloudflare Email Catcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+      </span>
+      <span>Почта</span>
+      <span id="mockBadge" class="badge badge--mock" hidden>demo / mock</span>
+      <span id="liveBadge" class="badge badge--live" hidden>Cloudflare D1</span>
+    </div>
+    <div class="topbar__actions">
+      <button type="button" id="refreshBtn" class="btn btn--ghost" title="Обновить">↻ Обновить</button>
+      <button type="button" id="settingsBtn" class="btn btn--ghost">⚙ Настройки</button>
+    </div>
+  </header>
+
+  <!-- ── Settings drawer (Cloudflare credentials) ─────────────────────────── -->
+  <section id="settings" class="settings" hidden>
+    <div class="settings__inner">
+      <h2>Cloudflare D1 — подключение</h2>
+      <p class="muted">
+        Письма принимает <b>Email Worker</b> и пишет их в базу <b>D1</b>
+        (см. <code>worker/</code>). Эта админка читает их через D1 REST API.
+        Токен хранится и используется только на сервере. Пусто → работает
+        <b>mock-режим</b> с демо-письмами.
+      </p>
+      <div class="field">
+        <label for="accountId">Account ID</label>
+        <input id="accountId" type="text" autocomplete="off" placeholder="напр. 0123abcd…89ef" />
+      </div>
+      <div class="field">
+        <label for="databaseId">D1 Database ID</label>
+        <input id="databaseId" type="text" autocomplete="off" placeholder="uuid из wrangler d1 create" />
+      </div>
+      <div class="field">
+        <label for="token">API Token <small class="muted">(права D1: Read, при удалении — Edit)</small></label>
+        <input id="token" type="password" autocomplete="off" placeholder="пусто → без изменений" />
+      </div>
+      <div class="settings__actions">
+        <button type="button" id="saveCfg" class="btn btn--primary">Сохранить</button>
+        <button type="button" id="testCfg" class="btn">Проверить соединение</button>
+        <span id="cfgMsg" class="msg"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Main three-pane layout ───────────────────────────────────────────── -->
+  <main class="layout">
+    <!-- Mailboxes -->
+    <aside class="pane pane--boxes">
+      <div class="pane__head">
+        <span class="pane__title">Ящики</span>
+        <span id="boxCount" class="chip"></span>
+      </div>
+      <ul id="mailboxList" class="boxlist"></ul>
+    </aside>
+
+    <!-- Message list -->
+    <section class="pane pane--list">
+      <div class="pane__head">
+        <span id="listTitle" class="pane__title">Письма</span>
+        <input id="search" class="search" type="search" placeholder="поиск…" disabled />
+      </div>
+      <ul id="messageList" class="msglist"></ul>
+    </section>
+
+    <!-- Reading pane -->
+    <section class="pane pane--read">
+      <div id="reader" class="reader">
+        <div class="reader__empty">Выберите письмо слева.</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
