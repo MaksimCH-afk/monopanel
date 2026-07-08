@@ -331,14 +331,33 @@ async function runDiscover(accountId) {
     msg.textContent = `Найдено баз: ${data.databases.length}. Выберите нужную — ID подставится.`;
   } else {
     $('#dbPickWrap').hidden = true;
-    msg.className = 'msg ok';
-    msg.textContent = data.accountId
-      ? 'В этом аккаунте нет баз D1. Создайте базу «mail» (см. ⧉ Воркер).'
-      : 'Выберите аккаунт, чтобы увидеть базы D1.';
+    if (data.accountId) {
+      // We have an account but it holds no D1 databases.
+      msg.className = 'msg ok';
+      msg.textContent = 'В этом аккаунте нет баз D1. Создайте базу «mail» (см. ⧉ Воркер) и нажмите снова.';
+    } else if (data.accounts && data.accounts.length > 1) {
+      msg.className = 'msg';
+      msg.textContent = 'Выберите аккаунт выше — покажем базы D1.';
+    } else {
+      // /accounts came back empty: the token can't enumerate accounts (needs
+      // Account Settings · Read). Ask for the Account ID and retry — D1 Read is
+      // enough to then list the databases.
+      msg.className = 'msg err';
+      msg.innerHTML =
+        'Cloudflare не вернул аккаунт по этому токену (у токена нет права ' +
+        '<b>Account · Account Settings · Read</b>). Впишите <b>Account ID</b> вручную в поле выше ' +
+        '(он в адресной строке дашборда <code>dash.cloudflare.com/&lt;account-id&gt;</code>) и нажмите ' +
+        '«Подобрать» снова — база D1 подтянется. Для чтения писем прав <b>D1 · Read</b> достаточно.';
+      const acc = $('#accountId');
+      acc.focus();
+      acc.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
   }
 }
 
-$('#discoverBtn').onclick = () => runDiscover();
+// Use a manually-typed Account ID if present (needed when the token can't list
+// accounts): then discovery lists that account's D1 databases via D1·Read.
+$('#discoverBtn').onclick = () => runDiscover($('#accountId').value.trim() || undefined);
 accountPick.onchange = () => { $('#accountId').value = accountPick.value; runDiscover(accountPick.value); };
 dbPick.onchange = () => { if (dbPick.value) $('#databaseId').value = dbPick.value; };
 

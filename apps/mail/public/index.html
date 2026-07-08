@@ -109,6 +109,7 @@ npx wrangler deploy</pre></li>
           <ul>
             <li><b>Account → D1 → Read</b> — обязательно (чтение писем);</li>
             <li><b>Account → D1 → Edit</b> — только если хотите <b>удалять</b> письма или запускать очистку прямо из админки;</li>
+            <li><b>Account → Account Settings → Read</b> — опционально, чтобы кнопка «Подобрать по токену» находила <b>и Account ID тоже</b>. Без него автоподбор найдёт только базы (после ручного ввода Account ID);</li>
             <li>в <b>Account Resources</b> выберите свой аккаунт.</li>
           </ul>
           Токен хранится и используется <b>только на сервере</b>, в браузер
@@ -162,13 +163,13 @@ npx wrangler deploy</pre></li>
       <div class="field">
         <label for="token">API Token</label>
         <input id="token" type="password" autocomplete="off" placeholder="пусто → без изменений" />
-        <small class="hint">Cloudflare → My Profile → API Tokens → Create Token → Custom. Права: <b>Account · D1 · Read</b> (и <b>Edit</b>, если удаляете письма из админки). Хранится только на сервере.</small>
+        <small class="hint">Cloudflare → My Profile → API Tokens → Create Token → Custom. Права: <b>Account · D1 · Read</b> (и <b>Edit</b>, если удаляете письма из админки). Чтобы кнопка «Подобрать» нашла и <b>аккаунт</b> — добавьте ещё <b>Account · Account Settings · Read</b> (без него Account ID впишите вручную). Хранится только на сервере.</small>
       </div>
 
       <!-- Auto-discovery: pick account + D1 database by the token, no wrangler -->
       <div class="discover">
         <button type="button" id="discoverBtn" class="btn btn--soft">🔍 Подобрать аккаунт и базу по токену</button>
-        <small class="hint">Вставьте токен выше и нажмите — админка сама покажет ваши аккаунты и базы D1, а Account ID и Database ID подставятся автоматически (без <code>wrangler</code>).</small>
+        <small class="hint">Вставьте токен выше и нажмите — админка покажет ваши базы D1, а Database ID подставится сам (без <code>wrangler</code>). Если Cloudflare не вернёт аккаунт (у токена нет права <b>Account Settings · Read</b>) — впишите <b>Account ID</b> вручную и нажмите снова; база подтянется по праву <b>D1 · Read</b>.</small>
         <span id="discoverMsg" class="msg"></span>
         <div class="field" id="accountPickWrap" hidden>
           <label for="accountPick">Аккаунт</label>
