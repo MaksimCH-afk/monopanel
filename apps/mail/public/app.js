@@ -223,8 +223,30 @@ async function deleteMessage(id) {
   }
 }
 
-// ── Settings ────────────────────────────────────────────────────────────────
-$('#settingsBtn').onclick = () => { $('#settings').hidden = !$('#settings').hidden; };
+// ── Drawers (Help + Settings) ────────────────────────────────────────────────
+const backdrop = $('#backdrop');
+function openDrawer(id) {
+  // close any other open drawer first, then open the requested one
+  document.querySelectorAll('.drawer.open').forEach((d) => { if (d.id !== id) closeDrawer(d); });
+  const d = document.getElementById(id);
+  d.classList.add('open');
+  d.setAttribute('aria-hidden', 'false');
+  backdrop.hidden = false;
+}
+function closeDrawer(d) {
+  d.classList.remove('open');
+  d.setAttribute('aria-hidden', 'true');
+}
+function closeAllDrawers() {
+  document.querySelectorAll('.drawer.open').forEach(closeDrawer);
+  backdrop.hidden = true;
+}
+$('#helpBtn').onclick = () => openDrawer('help');
+$('#settingsBtn').onclick = () => openDrawer('settings');
+$('#openHelpFromCfg').onclick = () => openDrawer('help');
+backdrop.onclick = closeAllDrawers;
+document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = closeAllDrawers));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllDrawers(); });
 
 $('#saveCfg').onclick = async () => {
   const msg = $('#cfgMsg');
