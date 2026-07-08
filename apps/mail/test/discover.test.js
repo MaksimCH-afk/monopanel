@@ -63,6 +63,24 @@ test('discover falls back to listing DBs when /accounts is forbidden but account
   assert.deepEqual(r.databases, [{ uuid: 'u9', name: 'mail' }]);
 });
 
+test('discover: empty /accounts + manual accountId still lists that account\'s DBs', async () => {
+  stubFetch({
+    '/accounts/accX/d1/database': { body: { success: true, result: [{ uuid: 'uX', name: 'mail' }] } },
+    '/accounts': { body: { success: true, result: [] } }, // token can't enumerate accounts
+  });
+  const r = await discover({ token: 'tok', accountId: 'accX' });
+  assert.equal(r.accountId, 'accX');
+  assert.deepEqual(r.databases, [{ uuid: 'uX', name: 'mail' }]);
+});
+
+test('discover: empty /accounts and no accountId → nothing to pick (guides manual entry)', async () => {
+  stubFetch({ '/accounts': { body: { success: true, result: [] } } });
+  const r = await discover({ token: 'tok' });
+  assert.equal(r.accountId, '');
+  assert.equal(r.accounts.length, 0);
+  assert.equal(r.databases.length, 0);
+});
+
 test('401 surfaces a clean D1Error', async () => {
   stubFetch({ '/accounts': { status: 403, body: { success: false, errors: [{ message: 'forbidden' }] } } });
   await assert.rejects(() => listAccounts('bad'), (e) => e instanceof D1Error && e.status === 401);
