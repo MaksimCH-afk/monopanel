@@ -87,9 +87,17 @@ npm test           # node --test
 
 ## Worker + D1 (папка `worker/`, деплой в Cloudflare)
 
+Воркер **без внешних зависимостей** — MIME разбирается встроенным мини-парсером
+(тема, текст, HTML, base64/quoted-printable, UTF-8). Поэтому его можно либо
+задеплоить через `wrangler`, либо просто **вставить в редактор воркера в
+дашборде** (кнопка ⧉ Воркер в UI) — ошибки `No such module "postal-mime"` не
+будет.
+
+Вариант A — через CLI:
+
 ```bash
 cd worker
-npm install                      # ставит postal-mime + wrangler
+npm install                      # только wrangler (dev-зависимость)
 cp wrangler.toml.example wrangler.toml
 
 npx wrangler d1 create mail      # запомни database_id → впиши в wrangler.toml
@@ -97,9 +105,14 @@ npx wrangler d1 execute mail --remote --file=./schema.sql
 npx wrangler deploy
 ```
 
-Затем в Cloudflare: **Email → Email Routing** → включить, подтвердить MX/TXT,
-во вкладке **Routing rules** включить **Catch-all** с действием
-**Send to a Worker → mail-catcher**. (Либо всё это скриптом — см. ниже.)
+Вариант B — руками через дашборд (без CLI): создать D1 `mail` и выполнить
+`schema.sql` в её Console; создать Worker, вставить `src/index.js`, привязать D1
+как `DB`. Код и схему удобно копировать из панели **⧉ Воркер**.
+
+Затем (на **уровне каждого домена**): **Email → Email Routing** → включить,
+подтвердить MX/TXT, во вкладке **Routing rules** включить **Catch-all** с
+действием **Send to a Worker → mail-catcher**. Воркер при этом один на аккаунт.
+(Либо всё это скриптом — см. ниже.)
 
 Опционально: temp-mail-очистка по Cron — задай `MAIL_RETENTION_DAYS` и `crons`
 в `wrangler.toml` (Worker сам удалит старые письма, см. `scheduled()`).
