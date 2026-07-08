@@ -206,8 +206,7 @@ npx wrangler deploy</pre></li>
         <li><b>Создать базу D1.</b> Workers &amp; Pages → <b>D1</b> → Create → имя <code>mail</code>. Откройте её вкладку <b>Console</b>, вставьте схему (кнопка «Копировать схему» ниже) и выполните.</li>
         <li><b>Создать воркер.</b> Workers &amp; Pages → Create → <b>Worker</b> → задайте имя (напр. <code>mail-catcher</code>) → Deploy → <b>Edit code</b>. Удалите шаблон, вставьте код (кнопка «Копировать воркер») → <b>Deploy</b>.</li>
         <li><b>Привязать базу.</b> Воркер → Settings → <b>Bindings</b> → Add → <b>D1 database</b>: Variable name <code>DB</code>, база <code>mail</code> → Save.</li>
-        <li><b>Импорт postal-mime.</b> Код использует <code>import PostalMime from "postal-mime"</code> — в дашборд-редакторе модуль подтянется автоматически при Deploy. Если нет — уберите зависимость (см. примечание внизу) или деплойте через <code>wrangler</code>.</li>
-        <li><b>Направить почту.</b> Email → Email Routing → включить, подтвердить MX/TXT → Routing rules → <b>Catch-all → Send to a Worker →</b> ваш воркер.</li>
+        <li><b>Направить почту.</b> На <b>уровне домена</b>: Email → Email Routing → включить, подтвердить MX/TXT → Routing rules → <b>Catch-all → Send to a Worker →</b> ваш воркер. (Воркер — один на аккаунт; этот шаг повторяется для каждого домена.)</li>
         <li><b>Подключить админку.</b> Вернитесь в <b>⚙ Настройки</b> и нажмите «Подобрать по токену» — база <code>mail</code> появится в списке.</li>
       </ol>
 
@@ -228,11 +227,12 @@ npx wrangler deploy</pre></li>
       </div>
 
       <p class="note">
-        <b>Примечание про postal-mime.</b> Это разбор MIME (тема, текст, HTML).
-        В дашборде оно ставится автоматически. Если хотите совсем без внешних
-        зависимостей — деплойте воркер через <code>wrangler</code> из папки
-        <code>apps/mail/worker/</code> (там уже всё настроено), а этот экран нужен
-        как раз для ручной заливки без CLI.
+        <b>Без внешних зависимостей.</b> Воркер разбирает письмо (тема, текст,
+        HTML, кодировки base64/quoted-printable, UTF-8) встроенным мини-парсером —
+        никаких <code>import</code> из npm. Поэтому его можно просто вставить в
+        поле редактора дашборда: ошибки вида «No such module …» не будет.
+        Через <code>wrangler</code> из <code>apps/mail/worker/</code> он тоже
+        деплоится один в один.
       </p>
     </div>
   </aside>
