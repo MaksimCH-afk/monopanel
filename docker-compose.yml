@@ -1,5 +1,5 @@
 # ============================================================================
-#  Единая панель — один контейнер, 7 приложений + дашборд.
+#  Единая панель — один контейнер, 8 приложений + дашборд.
 #  Первая сборка долгая: 3 рантайма (PHP/Node/Python) + 2 Next-сборки + Prisma.
 #      docker compose up --build
 #  Дашборд: http://localhost:333
@@ -40,6 +40,7 @@ services:
       - "3335:3335"   # arc   — Web Archive Checker
       - "3336:3336"   # skins — Brandskins (/admin)
       - "3337:3337"   # content — Content Gap Analyzer (сущности + интент)
+      - "3338:3338"   # mail  — Cloudflare Email Catcher (Worker + D1)
       # seo-фронт обращается к бэкенду по http://localhost:5001 ИЗ БРАУЗЕРА,
       # поэтому 5001 приходится публиковать (в отличие от первоначального плана).
       - "5001:5001"   # seo   — Flask-бэкенд
@@ -51,6 +52,7 @@ services:
       - ./data/img:/data/img   # img: SQLite + сгенерированные картинки
       - ./data/seo:/data/seo   # seo: client_secret.json + OAuth-токен GSC + seo.db + logs
       - ./data/content:/data/content  # content: API-ключи, введённые в UI (keys.json)
+      - ./data/mail:/data/mail  # mail: креды Cloudflare, введённые в UI (config.json)
 
   # Redis — кэш и очереди для seo-бэкенда (ускорение под нагрузкой).
   redis:

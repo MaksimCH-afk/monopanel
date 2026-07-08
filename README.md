@@ -1,6 +1,6 @@
 # Единая панель (monopanel)
 
-Объединение 6 локальных приложений в **один Docker-контейнер** с дашбордом-плитками.
+Объединение 7 локальных приложений в **один Docker-контейнер** с дашбордом-плитками.
 Каждое приложение работает как есть и слушает свой порт; страница-дашборд (`:333`)
 даёт единую точку входа — плитки ведут на порты приложений.
 
@@ -22,6 +22,7 @@
 | **arc** | Web Archive Checker | FastAPI async | **3335** | `/` |
 | **skins** | Brandskins (темы брендов) | Flask + gunicorn | **3336** | `/admin` |
 | **content** | Content Gap Analyzer (сущности + интент) | Node + Express | **3337** | `/` |
+| **mail** | Cloudflare Email Catcher (Worker + D1) | Node + Express | **3338** | `/` |
 
 - Старых портов (1000/9999/8000/3000/8888) в новой сборке не остаётся.
 - Конфликт порта 3000 (seo и img) решён переназначением: seo→3332, img→3334.
@@ -42,7 +43,8 @@ monopanel/
 │   ├── img/         Next + Prisma                 → :3334
 │   ├── arc/         FastAPI                       → :3335
 │   ├── skins/       Flask + gunicorn              → :3336 (/admin)
-│   └── content/     Node + Express                → :3337
+│   ├── content/     Node + Express                → :3337
+│   └── mail/        Node + Express (+ worker/ для Cloudflare) → :3338
 ├── dashboard/
 │   ├── index.html   страница-плитки (:333)
 │   ├── css/
@@ -63,7 +65,7 @@ monopanel/
 
 ### Исходники приложений (вендоринг)
 
-Код всех 7 приложений **втянут прямо в этот репозиторий** (папки `apps/*`), а не
+Код всех 8 приложений **втянут прямо в этот репозиторий** (папки `apps/*`), а не
 подключён сабмодулями — чтобы всё жило в одном сборном репозитории и не нужно было
 ходить по отдельным репам. В каждой папке лежит родной `README.md` приложения.
 
@@ -76,9 +78,10 @@ monopanel/
 | `apps/arc`   | `MaksimCH-afk/webarhive`        | FastAPI          | `alembic upgrade` + `uvicorn …factory` :3335 |
 | `apps/skins` | `MaksimCH-afk/brandskins1`      | Flask + gunicorn | `gunicorn app:app` :3336 (`/admin`) |
 | `apps/content` | собран в этом репозитории (TZ Content Gap) | Node + Express | `node src/server.js` :3337 |
+| `apps/mail` | собран в этом репозитории (TZ Cloudflare Email) | Node + Express | `node src/server.js` :3338 (worker/ деплоится в Cloudflare) |
 
 Что поменяли при интеграции (минимально, логику не трогали):
-- **порты** переведены на раскладку 3331–3337 (Apache/uvicorn/next/gunicorn/node);
+- **порты** переведены на раскладку 3331–3338 (Apache/uvicorn/next/gunicorn/node);
 - **cf**: фоновые обработчики (`queue_processor.php`, `monitor.php`) перенесены из
   родного `docker-entrypoint.sh` в `supervisord` и нацелены на `:3331`;
 - **seo**: бэкенд `backend_api.py` теперь слушает `0.0.0.0` (одна строка) — иначе

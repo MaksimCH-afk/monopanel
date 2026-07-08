@@ -5,7 +5,7 @@
 set -euo pipefail
 
 echo "[entrypoint] Подготовка каталогов данных…"
-mkdir -p /data/cf /data/ank /data/arc /data/img /data/seo
+mkdir -p /data/cf /data/ank /data/arc /data/img /data/seo /data/mail
 chown -R www-data:www-data /data/cf 2>/dev/null || true
 
 # --- Версия панели: авто-инкремент счётчика перезаливов (1, 2, 3, …) ---

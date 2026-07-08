@@ -1,0 +1,17 @@
+# Copy to wrangler.toml and fill in database_id from `wrangler d1 create mail`.
+name = "mail-catcher"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mail"
+database_id = "<id-from-wrangler-d1-create>"
+
+# Optional temp-mail cleanup. Set the retention window and a cron schedule to
+# have the Worker delete old messages automatically (see scheduled() in src).
+# [vars]
+# MAIL_RETENTION_DAYS = "30"
+#
+# [triggers]
+# crons = ["0 3 * * *"]   # daily at 03:00 UTC
