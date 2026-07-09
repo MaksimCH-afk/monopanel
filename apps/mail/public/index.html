@@ -45,15 +45,12 @@
         отображает.
       </p>
 
-      <div class="flow">
-        <div class="flow__row"><span class="flow__n">1</span><div>Письмо приходит на <b>*@ваш-домен</b></div></div>
-        <div class="flow__arr">▼</div>
-        <div class="flow__row"><span class="flow__n">2</span><div><b>Cloudflare Email Routing</b> (правило catch-all) перехватывает адрес</div></div>
-        <div class="flow__arr">▼</div>
-        <div class="flow__row"><span class="flow__n">3</span><div><b>Email Worker</b> разбирает письмо и записывает строку в базу <b>D1</b></div></div>
-        <div class="flow__arr">▼</div>
-        <div class="flow__row"><span class="flow__n">4</span><div><b>Админка (:3338)</b> читает D1 по API и группирует письма по ящикам</div></div>
-      </div>
+      <ol class="flow">
+        <li><span class="flow__n">1</span><span>Письмо приходит на <b>*@ваш-домен</b>.</span></li>
+        <li><span class="flow__n">2</span><span><b>Cloudflare Email Routing</b> (правило catch-all) перехватывает адрес.</span></li>
+        <li><span class="flow__n">3</span><span><b>Email Worker</b> разбирает письмо и записывает строку в базу <b>D1</b>.</span></li>
+        <li><span class="flow__n">4</span><span><b>Админка (:3338)</b> читает D1 по API и группирует письма по ящикам.</span></li>
+      </ol>
 
       <p class="note">
         <b>Важно:</b> Cloudflare не хранит почту и не создаёт реальных «ящиков».
@@ -151,6 +148,19 @@ npx wrangler d1 execute mail --remote --file=./schema.sql</pre>
         (<code>setup-domains.mjs</code>) — отдельный, ему требуются права
         <b>Zone → Email Routing (Edit)</b> и <b>Zone → DNS (Edit)</b>.
       </p>
+
+      <h3>Решение частых проблем (Troubleshooting)</h3>
+      <ul class="bullets">
+        <li><b>Ошибка в админке <code>no such table: messages</code>.</b> Подключение к базе работает (Account ID, Database ID и токен верные), но в базе нет таблицы. Откройте <b>Storage &amp; databases → D1 → mail → Console</b>, вставьте SQL-схему (можно скопировать в админке по кнопке <b>⧉ Воркер</b>) и нажмите <b>Execute</b>.</li>
+        <li><b>Ошибка <code>No fetch handler!</code> в превью воркера.</b> Это <b>не</b> ошибка. Панель <b>Preview</b> справа отправляет HTTP-GET запрос, а наш воркер — почтовый (обработчик <code>email</code>, а не <code>fetch</code>), поэтому на веб-запрос он честно отвечает отказом. Для приёма писем это нормально — просто игнорируйте вкладку Preview.</li>
+        <li><b>Всё настроено, но письма не появляются в админке.</b>
+          <ol>
+            <li>Убедитесь, что статус DNS для Email Routing стал <b>Active</b> (а не Syncing).</li>
+            <li>Проверьте <b>Binding</b>: воркер → вкладка <b>Bindings</b>. Если там нет привязки <code>DB</code> к базе <code>mail</code>, воркер будет падать на каждом письме.</li>
+            <li>Загляните в логи: воркер → <b>Observability → Workers Logs</b> и отправьте тестовое письмо — видно, дошло ли оно до воркера и не ругается ли он на отсутствие <code>env.DB</code>.</li>
+          </ol>
+        </li>
+      </ul>
 
       <h3>Полезно знать</h3>
       <ul class="bullets">
