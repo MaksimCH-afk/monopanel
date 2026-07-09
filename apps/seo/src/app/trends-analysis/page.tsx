@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import { useData } from '@/contexts/DataContext';
 import ReactMarkdown from 'react-markdown';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -382,14 +383,28 @@ export default function TrendsAnalysisPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-          <FontAwesomeIcon icon={faChartArea} className="text-blue-600" />
-          Анализ трендов
-        </h1>
-        <p className="text-gray-500 mt-1 text-sm">
-          Наложите трафик GSC на поисковый интерес Google Trends, чтобы отличить сезонный спрос от структурных SEO-проблем.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+            <FontAwesomeIcon icon={faChartArea} className="text-blue-600" />
+            Анализ трендов
+          </h1>
+          <p className="text-gray-500 mt-1 text-sm">
+            Наложите трафик GSC на поисковый интерес Google Trends, чтобы отличить сезонный спрос от структурных SEO-проблем.
+          </p>
+        </div>
+        <HelpButton title="Что такое «Анализ трендов»">
+          <p>
+            Раздел кладёт на один график <strong>ваш трафик (клики из Google)</strong> и <strong>общий интерес к теме
+            в Google Trends</strong>. Это помогает понять причину падения или роста:
+          </p>
+          <ul className="list-disc list-inside space-y-1.5">
+            <li>обе линии падают вместе → <strong>сезон</strong>, спрос временно снизился — скорее всего всё в порядке;</li>
+            <li>трафик падает, а интерес держится/растёт → <strong>проблема на сайте</strong> (потеря позиций, техническая ошибка, апдейт Google);</li>
+            <li>обе линии растут вместе → спрос растёт, и сайт забирает свою долю.</li>
+          </ul>
+          <p className="text-gray-500 text-xs">Кнопка AI-разбора даёт короткий вывод по графику простым языком.</p>
+        </HelpButton>
       </div>
 
       {/* Config panel */}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import { useData } from '@/contexts/DataContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExclamationTriangle, faTrophy, faArrowDown } from '@fortawesome/free-solid-svg-icons';
@@ -544,14 +545,27 @@ export default function TrafficInsightsPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 flex items-center space-x-3">
-            <FontAwesomeIcon icon={faTrophy} className="text-green-600" />
-            <span>Аналитика трафика</span>
-          </h1>
-          <p className="mt-2 text-gray-600">
-            Анализируйте лидеров и аутсайдеров в трафике вашего Google Search Console
-          </p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center space-x-3">
+              <FontAwesomeIcon icon={faTrophy} className="text-green-600" />
+              <span>Аналитика трафика</span>
+            </h1>
+            <p className="mt-2 text-gray-600">
+              Анализируйте лидеров и аутсайдеров в трафике вашего Google Search Console
+            </p>
+          </div>
+          <HelpButton title="Что такое «Аналитика трафика»">
+            <p>
+              Раздел сравнивает трафик <strong>между двумя датами</strong> и показывает, <strong>что выросло, а что
+              просело</strong>: топ растущих и топ падающих запросов и страниц.
+            </p>
+            <p>
+              Так быстро видно, какие ключи и URL дали прирост кликов, а какие — потеряли. Полезно после обновлений
+              Google или изменений на сайте, чтобы понять причину скачка трафика.
+            </p>
+            <p className="text-gray-500 text-xs">Учитывается задержка данных GSC (~3 дня).</p>
+          </HelpButton>
         </div>
 
         {/* Error Display */}

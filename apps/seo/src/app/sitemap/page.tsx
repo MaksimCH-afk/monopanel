@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -264,6 +265,18 @@ export default function SitemapPage() {
               </p>
             </div>
             <div className="flex gap-3">
+              <HelpButton title="Что такое «Карты сайта»">
+                <p>
+                  <strong>Карта сайта (sitemap)</strong> — это файл со списком всех страниц сайта. Он помогает Google
+                  быстрее находить и обходить страницы. Раздел управляет такими картами в Search Console.
+                </p>
+                <ul className="list-disc list-inside space-y-1.5">
+                  <li><strong>Список</strong> — какие карты уже отправлены в Google и сколько в них URL.</li>
+                  <li><strong>Отправить</strong> — сообщить Google адрес новой карты (обычно <code>/sitemap.xml</code>).</li>
+                  <li><strong>Удалить</strong> — убрать карту из Search Console (сам файл на сайте остаётся).</li>
+                </ul>
+                <p className="text-gray-500 text-xs">Google обрабатывает карту не мгновенно — статус может обновиться не сразу.</p>
+              </HelpButton>
               <Button
                 onClick={() => setShowSubmitForm(!showSubmitForm)}
                 className="bg-green-600 hover:bg-green-700 text-white"

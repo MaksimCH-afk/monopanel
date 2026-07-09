@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faRefresh, faSpinner, faArrowUp, faArrowDown, faMinus, faSort } from '@fortawesome/free-solid-svg-icons';
 
@@ -204,6 +205,22 @@ export default function MainDashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <HelpButton title="Что такое «Главный дашборд»">
+              <p>
+                Это <strong>единая сводка сразу по всем вашим сайтам и Google-аккаунтам</strong>. По каждому сайту —
+                клики, показы, CTR и средняя позиция за выбранный период, а рядом стрелка изменения к <strong>прошлому
+                периоду такой же длины</strong> (например, эти 28 дней против предыдущих 28).
+              </p>
+              <ul className="list-disc list-inside space-y-1.5">
+                <li>Вверху — общие итоги по всем сайтам; карточки «Клики/Показы/CTR».</li>
+                <li>Таблица ниже — по каждому сайту; столбцы можно <strong>сортировать</strong>, а поле поиска фильтрует по домену или аккаунту.</li>
+                <li><strong>«Обновить»</strong> пересчитывает данные из Google (идёт в фоне — виден прогресс).</li>
+              </ul>
+              <p className="text-gray-500 text-xs">
+                Метка «обновлено …» показывает время последнего пересчёта. «new» вместо стрелки означает, что в прошлом
+                периоде данных не было.
+              </p>
+            </HelpButton>
             <select
               value={period}
               onChange={(e) => setPeriod(Number(e.target.value))}

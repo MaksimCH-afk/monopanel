@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner, faPlus, faTrash, faCheckCircle, faTimesCircle, faQuestionCircle, faSearch, faPaperPlane, faLink } from '@fortawesome/free-solid-svg-icons';
 
@@ -168,9 +169,24 @@ export default function BacklinksPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Беклинки</h1>
-          <p className="text-gray-600 mt-1">Мониторинг: 404, наличие ссылки, индексация (XMLRIVER), отправка на индекс (2index)</p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Беклинки</h1>
+            <p className="text-gray-600 mt-1">Мониторинг: 404, наличие ссылки, индексация (XMLRIVER), отправка на индекс (2index)</p>
+          </div>
+          <HelpButton title="Что такое «Беклинки»">
+            <p>
+              Беклинк — это <strong>ссылка на ваш сайт с другой (донорской) страницы</strong>. Раздел следит, что с
+              этими ссылками всё в порядке.
+            </p>
+            <ul className="list-disc list-inside space-y-1.5">
+              <li><strong>Код ответа (404)</strong> — открывается ли страница-донор вообще (не удалили ли её).</li>
+              <li><strong>Наличие ссылки</strong> — стоит ли ещё на донорской странице ссылка на вас.</li>
+              <li><strong>Индексация (XMLRIVER)</strong> — в индексе ли Google страница-донор (иначе ссылка почти не работает).</li>
+              <li><strong>На индекс (2index)</strong> — отправить донора на переиндексацию, чтобы Google учёл ссылку.</li>
+            </ul>
+            <p className="text-gray-500 text-xs">XMLRIVER и 2index требуют ключей в Настройках.</p>
+          </HelpButton>
         </div>
 
         {/* Добавление */}
