@@ -43,6 +43,7 @@ import backlinks as seo_backlinks
 import indexation as seo_indexation
 import scheduler as seo_scheduler
 import siteverify as seo_siteverify
+import twoindex
 
 app = Flask(__name__)
 
@@ -1791,6 +1792,29 @@ def inspect_url():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/index/submit-url', methods=['POST'])
+def index_submit_url():
+    """
+    Отправить ОДИН URL на переобход через 2index (та же интеграция, что и на
+    вкладке «Индексация»). В GSC API нет «Запросить индексирование», поэтому
+    переобход идёт через 2index. Требуется ключ 2index в Настройках.
+    """
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url:
+        return jsonify({"error": "url обязателен"}), 400
+
+    key = load_config().get('twoindexKey', '')
+    if not key:
+        return jsonify({"error": "2index не настроен (укажите ключ в Настройках)"}), 400
+
+    res = twoindex.submit_urls([url], key)
+    if not res.get('ok'):
+        return jsonify({"error": res.get('error') or "2index отклонил запрос", "raw": res.get('raw')}), 400
+    return jsonify({"success": True, "accepted": res.get('accepted', 0)})
+
 
 @app.route('/api/sitemaps', methods=['GET'])
 def list_sitemaps():

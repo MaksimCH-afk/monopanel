@@ -5,7 +5,7 @@ import { API_BASE } from '@/lib/api';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faMagnifyingGlass, faSpinner, faCheckCircle, faExclamationTriangle, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
+import { faMagnifyingGlass, faSpinner, faCheckCircle, faExclamationTriangle, faInfoCircle, faHouse, faCopy, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 
 interface UrlInspectionResult {
   inspectionResult?: {
@@ -58,6 +58,9 @@ export default function UrlInspectionPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<UrlInspectionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexMsg, setReindexMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     fetchSites();
@@ -65,6 +68,62 @@ export default function UrlInspectionPage() {
       setSelectedSite(sites[0]);
     }
   }, [sites]);
+
+  // Главная страница выбранного сайта в виде https://site.com/.
+  // Учитывает и domain-property Search Console (sc-domain:example.com).
+  const homepageOf = (site: string): string => {
+    if (!site) return '';
+    if (site.startsWith('sc-domain:')) {
+      return `https://${site.slice('sc-domain:'.length)}/`;
+    }
+    return site.endsWith('/') ? site : `${site}/`;
+  };
+
+  const fillHomepage = () => {
+    const home = homepageOf(selectedSite);
+    if (home) {
+      setInspectionUrl(home);
+      setError(null);
+    }
+  };
+
+  const copyHomepage = async () => {
+    const home = homepageOf(selectedSite);
+    if (!home) return;
+    try {
+      await navigator.clipboard.writeText(home);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Фолбэк, если clipboard недоступен — просто подставим в поле.
+      setInspectionUrl(home);
+    }
+  };
+
+  // Переобход через 2index (в GSC API «Запросить индексирование» отсутствует).
+  const requestReindex = async () => {
+    const url = inspectionUrl.trim();
+    if (!url) return;
+    setReindexing(true);
+    setReindexMsg(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/index/submit-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setReindexMsg({ type: 'success', text: `Отправлено на переобход через 2index (${data.accepted}).` });
+      } else {
+        setReindexMsg({ type: 'error', text: data.error || 'Не удалось отправить на переобход' });
+      }
+    } catch {
+      setReindexMsg({ type: 'error', text: 'Не удалось отправить на переобход. Проверьте бэкенд.' });
+    } finally {
+      setReindexing(false);
+    }
+  };
 
   const handleInspect = async () => {
     if (!inspectionUrl.trim()) {
@@ -209,6 +268,31 @@ export default function UrlInspectionPage() {
                   }
                 }}
               />
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={fillHomepage}
+                  disabled={!selectedSite}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Подставить главную страницу выбранного сайта"
+                >
+                  <FontAwesomeIcon icon={faHouse} className="text-gray-500" />
+                  Проверить главную
+                </button>
+                <button
+                  type="button"
+                  onClick={copyHomepage}
+                  disabled={!selectedSite}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Скопировать адрес главной в буфер"
+                >
+                  <FontAwesomeIcon icon={copied ? faCheckCircle : faCopy} className={copied ? 'text-green-600' : 'text-gray-500'} />
+                  {copied ? 'Скопировано' : 'Копировать главную'}
+                </button>
+                {selectedSite && (
+                  <span className="text-xs text-gray-500 break-all">{homepageOf(selectedSite)}</span>
+                )}
+              </div>
             </div>
 
             <Button
@@ -293,19 +377,15 @@ export default function UrlInspectionPage() {
                     <p className="text-gray-900">{result.inspectionResult.indexStatusResult.robotsTxtState || 'N/A'}</p>
                   </div>
 
-                  {result.inspectionResult.indexStatusResult.googleCanonical && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">Каноническая (Google)</p>
-                      <p className="text-gray-900 break-all">{result.inspectionResult.indexStatusResult.googleCanonical}</p>
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Каноническая (Google определил)</p>
+                    <p className="text-gray-900 break-all">{result.inspectionResult.indexStatusResult.googleCanonical || '—'}</p>
+                  </div>
 
-                  {result.inspectionResult.indexStatusResult.userCanonical && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">Каноническая (пользователь)</p>
-                      <p className="text-gray-900 break-all">{result.inspectionResult.indexStatusResult.userCanonical}</p>
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-1">Каноническая (указана на странице)</p>
+                    <p className="text-gray-900 break-all">{result.inspectionResult.indexStatusResult.userCanonical || '—'}</p>
+                  </div>
 
                   {result.inspectionResult.indexStatusResult.crawledAs && (
                     <div>
@@ -335,6 +415,29 @@ export default function UrlInspectionPage() {
                       </ul>
                     </div>
                   )}
+                </div>
+
+                {/* Переобход: в GSC API нет «Запросить индексирование», поэтому
+                    отправляем через 2index (как на вкладке «Индексация»). */}
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={requestReindex}
+                    disabled={reindexing || !inspectionUrl.trim()}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Отправить этот URL на переобход через 2index"
+                  >
+                    <FontAwesomeIcon icon={reindexing ? faSpinner : faRotateRight} className={reindexing ? 'animate-spin' : ''} />
+                    {reindexing ? 'Отправка…' : 'Отправить на переобход (2index)'}
+                  </button>
+                  {reindexMsg && (
+                    <p className={`text-sm mt-2 ${reindexMsg.type === 'success' ? 'text-green-700' : 'text-red-700'}`}>
+                      {reindexMsg.text}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-2">
+                    В Google Search Console API нет прямого «Запросить индексирование» — переобход идёт через сервис 2index (нужен ключ в Настройках).
+                  </p>
                 </div>
               </div>
             )}

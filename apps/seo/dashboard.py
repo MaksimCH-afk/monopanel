@@ -20,7 +20,12 @@ log = logging.getLogger('seo.dashboard')
 
 # GSC отдаёт данные с задержкой ~2-3 дня — берём запас.
 GSC_LAG_DAYS = 3
-MAX_WORKERS = 8
+# На сайт делаем ОДИН запрос (оба периода сразу, см. _totals_split), поэтому при
+# 389 сайтах это ~389 запросов. Квота GSC — ~1200 запросов/мин на пользователя,
+# так что 12 воркеров держат хороший темп с запасом от лимита.
+MAX_WORKERS = 12
+# Сколько раз повторить запрос при 429/5xx (rate limit), с экспоненциальной паузой.
+_RETRIES = 4
 
 # Статус фонового прогона (для прогресс-бара на фронте)
 _job = {
@@ -50,20 +55,55 @@ def period_ranges(period_days):
     return _period_ranges(period_days)
 
 
-def _totals(service, site_url, start, end):
-    """Суммарные метрики сайта за период (один запрос без измерений)."""
-    body = {"startDate": start, "endDate": end, "dimensions": [], "rowLimit": 1, "type": "web"}
-    resp = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
-    rows = resp.get("rows", [])
-    if not rows:
-        return {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": 0.0}
-    r = rows[0]
+def _empty_bucket():
+    return {"clicks": 0, "impressions": 0, "pos_weighted": 0.0}
+
+
+def _finalize_bucket(b):
+    """clicks/impressions → ctr; позиция взвешена по показам."""
+    clicks, impr = b["clicks"], b["impressions"]
     return {
-        "clicks": int(r.get("clicks", 0)),
-        "impressions": int(r.get("impressions", 0)),
-        "ctr": float(r.get("ctr", 0.0)),
-        "position": float(r.get("position", 0.0)),
+        "clicks": clicks,
+        "impressions": impr,
+        "ctr": (clicks / impr) if impr else 0.0,
+        "position": (b["pos_weighted"] / impr) if impr else 0.0,
     }
+
+
+def _query_with_retry(service, site_url, body):
+    """Запрос к GSC с ретраем на 429/5xx (rate limit) и экспоненциальной паузой."""
+    for attempt in range(_RETRIES):
+        try:
+            return service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+        except Exception as e:  # noqa: BLE001
+            status = getattr(getattr(e, 'resp', None), 'status', None)
+            if status in (429, 500, 503) and attempt < _RETRIES - 1:
+                time.sleep(2 ** attempt)  # 1, 2, 4 c
+                continue
+            raise
+
+
+def _totals_split(service, site_url, prev_start, end, cur_start):
+    """
+    ОДИН запрос за оба периода: тянем дни prev_start..end с разбивкой по датам и
+    сами раскладываем на текущий (>= cur_start) и прошлый период. Раньше на сайт
+    уходило два запроса — это вдвое меньше обращений к GSC.
+
+    CTR = clicks/impressions; позиция усреднена с весом по показам (близко к тому,
+    что показывает GSC для периода-агрегата).
+    """
+    body = {"startDate": prev_start, "endDate": end, "dimensions": ["date"],
+            "rowLimit": 25000, "type": "web"}
+    resp = _query_with_retry(service, site_url, body)
+    cur, prev = _empty_bucket(), _empty_bucket()
+    for r in resp.get("rows", []):
+        day = (r.get("keys") or [""])[0]
+        b = cur if day >= cur_start else prev
+        impr = int(r.get("impressions", 0))
+        b["clicks"] += int(r.get("clicks", 0))
+        b["impressions"] += impr
+        b["pos_weighted"] += float(r.get("position", 0.0)) * impr
+    return _finalize_bucket(cur), _finalize_bucket(prev)
 
 
 def compute_summary(site_url, period_days):
@@ -72,8 +112,7 @@ def compute_summary(site_url, period_days):
     if not service:
         return None
     start, end, prev_start, prev_end = _period_ranges(period_days)
-    cur = _totals(service, site_url, start, end)
-    prev = _totals(service, site_url, prev_start, prev_end)
+    cur, prev = _totals_split(service, site_url, prev_start, end, start)
     return {
         "account_email": gscm.account_email_for_site(site_url),
         "clicks": cur["clicks"], "impressions": cur["impressions"],
