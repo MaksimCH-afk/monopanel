@@ -28,10 +28,9 @@ include 'sidebar.php';
     <div class="alert alert-info d-flex align-items-start">
         <i class="fas fa-circle-info me-2 mt-1"></i>
         <div>
-            <strong>Фаза 1: приём и проверка архива.</strong>
-            Загрузите ZIP — система распакует оглавление, проверит файлы (лимит 25&nbsp;MiB
-            <em>на каждый файл</em>, размер архива не ограничен) и покажет сводку.
-            Выбор аккаунта, проверка домена и сама публикация подключаются на следующих фазах.
+            <strong>Загрузите ZIP → проверьте архив → выберите аккаунт и домен → опубликуйте.</strong>
+            Лимит 25&nbsp;MiB <em>на каждый файл</em> (размер архива не ограничен). Публикация идёт на
+            служебный <code>*.workers.dev</code>. Привязка домена и SSL подключаются на фазе&nbsp;3.
         </div>
     </div>
 
@@ -88,14 +87,61 @@ include 'sidebar.php';
         </div>
     </div>
 
-    <div class="mt-3 d-flex gap-2 align-items-center">
+    <!-- Режим защиты (FR-8) -->
+    <div class="card mt-3">
+        <div class="card-body py-2">
+            <div class="d-flex flex-wrap gap-4 align-items-center">
+                <span class="fw-semibold"><i class="fas fa-shield-halved me-2"></i>Режим</span>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="mode" id="modeStatic" value="static-only" checked>
+                    <label class="form-check-label" for="modeStatic">
+                        <strong>static-only</strong> — чистая раздача (не расходует дневной лимит вызовов)
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="mode" id="modeWorker" value="worker-first">
+                    <label class="form-check-label" for="modeWorker">
+                        <strong>worker-first</strong> — воркер на каждый запрос
+                    </label>
+                </div>
+            </div>
+            <div id="workerFirstWarn" class="alert alert-warning py-2 mt-2 mb-0 small d-none">
+                <i class="fas fa-triangle-exclamation me-2"></i>
+                В режиме worker-first <strong>каждый заход расходует дневной лимит вызовов аккаунта</strong>
+                (Free — 100&nbsp;000/день). Для большого трафика нужен платный аккаунт.
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
         <button type="button" class="btn btn-primary" id="validateBtn">
             <i class="fas fa-magnifying-glass me-2"></i>Проверить архив
+        </button>
+        <button type="button" class="btn btn-outline-secondary" id="checkDomainBtn" disabled>
+            <i class="fas fa-globe me-2"></i>Проверить домен
         </button>
         <button type="button" class="btn btn-success" id="publishBtn" disabled>
             <i class="fas fa-rocket me-2"></i>Опубликовать
         </button>
-        <span class="badge bg-secondary">публикация — фаза 2</span>
+    </div>
+
+    <!-- Состояние домена (FR-5) -->
+    <div id="domainState" class="mt-3 d-none">
+        <div class="alert alert-secondary mb-0">
+            <div class="fw-semibold mb-1"><i class="fas fa-globe me-2"></i>Состояние домена</div>
+            <div id="domainStateBody" class="small"></div>
+        </div>
+    </div>
+
+    <!-- Прогресс/итог деплоя -->
+    <div id="deployResult" class="mt-3 d-none">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-list-check me-2"></i>Публикация</div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush" id="deploySteps"></ul>
+                <div id="deployFinal" class="mt-3"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Сводка проверки -->
@@ -172,8 +218,32 @@ $pageScripts = <<<'JS'
     const fileSizeEl = document.getElementById('fileSize');
     const clearBtn = document.getElementById('clearFile');
     const validateBtn = document.getElementById('validateBtn');
+    const checkDomainBtn = document.getElementById('checkDomainBtn');
+    const publishBtn = document.getElementById('publishBtn');
+    const accountSelect = document.getElementById('accountSelect');
+    const domainInput = document.getElementById('domainInput');
     const reportArea = document.getElementById('reportArea');
     let selectedFile = null;
+    let archiveValid = false;
+
+    function currentMode() {
+        const el = document.querySelector('input[name="mode"]:checked');
+        return el ? el.value : 'static-only';
+    }
+    function ready() {
+        return archiveValid && selectedFile && accountSelect.value && domainInput.value.trim();
+    }
+    function refreshButtons() {
+        const ok = ready();
+        checkDomainBtn.disabled = !ok;
+        publishBtn.disabled = !ok;
+    }
+    document.querySelectorAll('input[name="mode"]').forEach(r =>
+        r.addEventListener('change', () => {
+            document.getElementById('workerFirstWarn').classList.toggle('d-none', currentMode() !== 'worker-first');
+        }));
+    accountSelect.addEventListener('change', refreshButtons);
+    domainInput.addEventListener('input', refreshButtons);
 
     function fmtSize(bytes) {
         if (!bytes && bytes !== 0) return '—';
@@ -185,6 +255,8 @@ $pageScripts = <<<'JS'
 
     function setFile(file) {
         selectedFile = file;
+        archiveValid = false;
+        refreshButtons();
         if (file) {
             fileNameEl.textContent = file.name;
             fileSizeEl.textContent = fmtSize(file.size);
@@ -273,9 +345,11 @@ $pageScripts = <<<'JS'
             }
             if (data.success) {
                 renderReport(r);
+                archiveValid = true;
                 showToast('Архив прошёл проверку', 'success');
             } else {
                 if (r) renderReport(r);
+                archiveValid = false;
                 showToast(data.error || 'Архив не прошёл проверку', 'error');
             }
         } catch (e) {
@@ -283,6 +357,109 @@ $pageScripts = <<<'JS'
         } finally {
             validateBtn.disabled = false;
             validateBtn.innerHTML = original;
+            refreshButtons();
+        }
+    });
+
+    // ---- FR-5: проверка состояния домена ----
+    checkDomainBtn.addEventListener('click', async () => {
+        const fd = new FormData();
+        fd.append('action', 'check_domain');
+        fd.append('account_id', accountSelect.value);
+        fd.append('domain', domainInput.value.trim());
+
+        checkDomainBtn.disabled = true;
+        const original = checkDomainBtn.innerHTML;
+        checkDomainBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Проверяю…';
+        try {
+            const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
+            const data = await resp.json();
+            if (!data.success) { showToast(data.error || 'Ошибка проверки домена', 'error'); return; }
+            const s = data.state;
+            const rows = [];
+            rows.push('<strong>Домен:</strong> ' + data.domain + ' &nbsp; <strong>Воркер:</strong> <code>' + data.worker_name + '</code>');
+            rows.push('<strong>Зона в аккаунте:</strong> ' + (s.zone_in_account
+                ? '<span class="text-success">да</span>' : '<span class="text-danger">нет</span>'));
+            if (s.zone_in_account) {
+                rows.push('<strong>DNS-запись:</strong> ' + (s.dns_present ? 'есть' : 'нет'));
+                rows.push('<strong>Привязка воркера:</strong> ' + (s.worker_binding
+                    ? ('к «' + s.worker_binding + '»') : 'свободен'));
+                rows.push('<strong>SSL:</strong> ' + (s.ssl_active ? 'активен' : 'выключен'));
+            }
+            rows.push('<div class="mt-2">' + s.summary + '</div>');
+            rows.push('<div class="text-muted mt-1"><i class="fas fa-circle-info me-1"></i>'
+                + 'Привязка домена и SSL подключаются на фазе 3. Сейчас публикация идёт на служебный '
+                + '<code>*.workers.dev</code>.</div>');
+            document.getElementById('domainStateBody').innerHTML = rows.join('<br>');
+            document.getElementById('domainState').classList.remove('d-none');
+        } catch (e) {
+            showToast('Ошибка сети: ' + e.message, 'error');
+        } finally {
+            checkDomainBtn.disabled = false;
+            checkDomainBtn.innerHTML = original;
+            refreshButtons();
+        }
+    });
+
+    // ---- FR-6: публикация на Static Assets ----
+    publishBtn.addEventListener('click', async () => {
+        if (!ready()) { showToast('Проверьте архив, выберите аккаунт и домен', 'warning'); return; }
+
+        const fd = new FormData();
+        fd.append('action', 'deploy');
+        fd.append('account_id', accountSelect.value);
+        fd.append('domain', domainInput.value.trim());
+        fd.append('mode', currentMode());
+        fd.append('archive', selectedFile);
+
+        publishBtn.disabled = true;
+        checkDomainBtn.disabled = true;
+        validateBtn.disabled = true;
+        const original = publishBtn.innerHTML;
+        publishBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Публикую…';
+
+        const stepsEl = document.getElementById('deploySteps');
+        const finalEl = document.getElementById('deployFinal');
+        stepsEl.innerHTML = '';
+        finalEl.innerHTML = '';
+        document.getElementById('deployResult').classList.remove('d-none');
+
+        try {
+            const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
+            const data = await resp.json();
+
+            (data.steps || []).forEach(st => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item d-flex align-items-center';
+                const icon = st.ok
+                    ? '<i class="fas fa-circle-check text-success me-2"></i>'
+                    : '<i class="fas fa-circle-xmark text-danger me-2"></i>';
+                li.innerHTML = icon + '<span class="fw-semibold me-2">' + st.step + '</span>'
+                    + '<span class="text-muted small">' + (st.info || '') + '</span>';
+                stepsEl.appendChild(li);
+            });
+
+            if (data.success) {
+                const url = data.workers_dev_url;
+                finalEl.innerHTML = '<div class="alert alert-success mb-0">'
+                    + '<i class="fas fa-circle-check me-2"></i>Сайт опубликован. '
+                    + (url ? ('<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>') : 'URL уточните в Cloudflare.')
+                    + '</div>';
+                showToast('Сайт опубликован', 'success');
+            } else {
+                if (data.report && data.report.oversized && data.report.oversized.length) {
+                    showOversized(data.report.oversized);
+                }
+                finalEl.innerHTML = '<div class="alert alert-danger mb-0">'
+                    + '<i class="fas fa-circle-xmark me-2"></i>' + (data.error || 'Ошибка публикации') + '</div>';
+                showToast(data.error || 'Ошибка публикации', 'error');
+            }
+        } catch (e) {
+            showToast('Ошибка сети: ' + e.message, 'error');
+        } finally {
+            publishBtn.innerHTML = original;
+            validateBtn.disabled = false;
+            refreshButtons();
         }
     });
 })();
