@@ -10,17 +10,20 @@ import Link from 'next/link';
 export default function AuthBanner() {
   const pathname = usePathname();
   const [isAuthenticated, setIsAuthenticated] = useState(true);
+  // Загружен ли client_secret.json — чтобы показать, какой именно шаг остался.
+  const [hasClientSecret, setHasClientSecret] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(false);
 
   const checkAuthStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/status`);
-      if (response.ok) {
-        const data = await response.json();
-        setIsAuthenticated(data.gsc_connected || false);
-      } else {
-        setIsAuthenticated(false);
+      const [statusRes, settingsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/status`),
+        fetch(`${API_BASE}/api/settings`),
+      ]);
+      setIsAuthenticated(statusRes.ok ? Boolean((await statusRes.json()).gsc_connected) : false);
+      if (settingsRes.ok) {
+        setHasClientSecret(Boolean((await settingsRes.json()).hasClientSecret));
       }
     } catch (error) {
       console.error('Error checking auth status:', error);
@@ -60,18 +63,29 @@ export default function AuthBanner() {
             />
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-yellow-900 mb-1">
-                Требуется авторизация
+                Требуется подключение Google Search Console
               </h3>
-              <p className="text-sm text-yellow-800 mb-2">
-                Чтобы пользоваться дашбордом, необходимо пройти аутентификацию в Google Search Console.
-                Перейдите в «Настройки» и выполните следующие шаги:
-              </p>
-              <ol className="text-sm text-yellow-800 list-decimal list-inside space-y-1 mb-3">
-                <li>Введите свой API-ключ OpenAI</li>
-                <li>Укажите путь к файлу учётных данных Google Search Console (client_secret.json)</li>
-                <li>Нажмите «Сохранить настройки»</li>
-                <li>Нажмите «Авторизовать данные», чтобы пройти аутентификацию в Google</li>
-              </ol>
+              {hasClientSecret ? (
+                <p className="text-sm text-yellow-800 mb-3">
+                  Учётные данные Google загружены, но ни один аккаунт ещё не подключён.
+                  Откройте «Настройки» и нажмите <strong>«Добавить аккаунт Google»</strong> —
+                  после подтверждения доступа дашборд заработает.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-yellow-800 mb-2">
+                    Чтобы пользоваться дашбордом, подключите Google Search Console.
+                    Откройте «Настройки» и выполните шаги:
+                  </p>
+                  <ol className="text-sm text-yellow-800 list-decimal list-inside space-y-1 mb-3">
+                    <li>Вставьте содержимое <code>client_secret.json</code> и нажмите «Сохранить учётные данные»</li>
+                    <li>Нажмите «Добавить аккаунт Google» и подтвердите доступ</li>
+                  </ol>
+                  <p className="text-xs text-yellow-700 mb-3">
+                    Ключ OpenAI нужен только для AI-инсайтов и необязателен.
+                  </p>
+                </>
+              )}
               <Link
                 href="/settings"
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm font-medium"
