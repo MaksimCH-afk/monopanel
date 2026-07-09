@@ -40,98 +40,126 @@
     <div class="drawer__body">
       <p class="lead">
         Приём почты на любой адрес вашего домена (<code>что-угодно@ваш-домен</code>)
-        без почтового сервера — на Cloudflare. Готовим один раз, дальше письма
-        сами копятся в базе, а эта админка их показывает.
+        без почтового сервера — на мощностях Cloudflare. Настройка выполняется один
+        раз, после чего письма автоматически сохраняются в базу данных, а админка их
+        отображает.
       </p>
 
       <div class="flow">
         <div class="flow__row"><span class="flow__n">1</span><div>Письмо приходит на <b>*@ваш-домен</b></div></div>
         <div class="flow__arr">▼</div>
-        <div class="flow__row"><span class="flow__n">2</span><div><b>Cloudflare Email Routing</b> (правило «catch-all») ловит любой адрес</div></div>
+        <div class="flow__row"><span class="flow__n">2</span><div><b>Cloudflare Email Routing</b> (правило catch-all) перехватывает адрес</div></div>
         <div class="flow__arr">▼</div>
-        <div class="flow__row"><span class="flow__n">3</span><div><b>Email Worker</b> разбирает письмо и пишет строку в базу <b>D1</b></div></div>
+        <div class="flow__row"><span class="flow__n">3</span><div><b>Email Worker</b> разбирает письмо и записывает строку в базу <b>D1</b></div></div>
         <div class="flow__arr">▼</div>
-        <div class="flow__row"><span class="flow__n">4</span><div><b>Эта админка (:3338)</b> читает D1 по REST API и показывает письма по ящикам</div></div>
+        <div class="flow__row"><span class="flow__n">4</span><div><b>Админка (:3338)</b> читает D1 по API и группирует письма по ящикам</div></div>
       </div>
 
       <p class="note">
-        <b>Важно:</b> Cloudflare не хранит почту и не даёт «ящиков» — это только
-        маршрутизатор. «Ящик <code>acc37@…</code>» — это просто выборка из базы по
-        адресу получателя. Новый адрес заводить не нужно: начали слать на него —
-        он сразу работает (catch-all принимает всё).
+        <b>Важно:</b> Cloudflare не хранит почту и не создаёт реальных «ящиков».
+        Любой адрес получателя (например, <code>acc37@ваш-домен</code>) — это просто
+        строка в базе данных. Заводить адреса заранее не нужно: как только на адрес
+        отправят письмо, он тут же отобразится в панели.
       </p>
 
       <h3>Что где лежит</h3>
-      <table class="kv">
-        <tr><td><b>Админка</b><br><span class="muted">эта страница, :3338</span></td><td>Читает письма из D1. Ставится в монопанель, ничего в Cloudflare не деплоит.</td></tr>
-        <tr><td><b>worker/</b><br><span class="muted">apps/mail/worker/</span></td><td>Email Worker + <code>schema.sql</code> — <b>деплоится в Cloudflare</b> (он и ловит письма). Не хотите CLI — код и схему можно скопировать из панели <b>⧉ Воркер</b> и вставить в дашборд руками.</td></tr>
-        <tr><td><b>scripts/</b><br><span class="muted">setup-domains.mjs</span></td><td>Скрипт: включает почту + catch-all сразу на списке доменов через API.</td></tr>
-      </table>
+      <ul class="bullets">
+        <li><b>Админка</b> (<code>:3338</code>) — веб-интерфейс для чтения писем из D1. Работает локально/на сервере, ничего в сам Cloudflare не деплоит.</li>
+        <li><code>apps/mail/worker/</code> — код Email Worker и файл структуры <code>schema.sql</code>. Деплоится в Cloudflare для перехвата почты. Если не используется CLI, код и схему можно перенести в панель Cloudflare вручную (кнопка <b>⧉ Воркер</b>).</li>
+        <li><code>scripts/setup-domains.mjs</code> — скрипт для автоматического включения почты и настройки catch-all сразу для списка доменов через API.</li>
+      </ul>
 
-      <h3>Настройка — по шагам</h3>
+      <h3>Настройка по шагам</h3>
       <ol class="steps">
-        <li><b>Домен на Cloudflare.</b> Домен должен обслуживаться DNS Cloudflare (зона добавлена в аккаунт).</li>
-        <li><b>Создать базу D1.</b> В папке <code>apps/mail/worker/</code>:
-          <pre>npm install
-npx wrangler d1 create mail</pre>
-          Команда напечатает <b>database_id</b> — это и есть «D1 Database ID». Впишите его в <code>wrangler.toml</code> (скопируйте из <code>wrangler.toml.example</code>).</li>
-        <li><b>Применить схему и задеплоить Worker:</b>
-          <pre>npx wrangler d1 execute mail --remote --file=./schema.sql
-npx wrangler deploy</pre></li>
-        <li><b>Включить приём почты.</b> Вручную: Cloudflare → <b>Email → Email Routing</b> → включить, подтвердить MX/TXT, во вкладке <b>Routing rules</b> включить <b>Catch-all → Send to a Worker → mail-catcher</b>.<br>
-          Или сразу на много доменов скриптом:
-          <pre>CF_API_TOKEN=xxxx node scripts/setup-domains.mjs \
-  ваш-домен.com другой-домен.com</pre></li>
-        <li><b>Подключить админку.</b> Откройте <b>⚙ Настройки</b> и впишите три значения: Account ID, D1 Database ID, API Token (см. ниже, откуда их взять). После сохранения бейдж сменится с <span class="badge badge--mock">demo / mock</span> на <span class="badge badge--live">Cloudflare D1</span>.</li>
+        <li><b>Подготовка домена.</b> Домен должен быть добавлен в Cloudflare и полностью обслуживаться его DNS-серверами (статус <b>Active</b>).</li>
+
+        <li><b>Создание базы данных D1.</b> Через панель управления (интерфейс 2026 года):
+          <ol>
+            <li>В главном меню аккаунта: <b>Build → Storage &amp; databases</b>.</li>
+            <li>Нажмите синюю кнопку <b>Create</b> (или <b>Create database</b>).</li>
+            <li>Введите имя базы <code>mail</code> и подтвердите создание.</li>
+            <li>Откройте базу → вкладка <b>Console</b> → вставьте содержимое <code>schema.sql</code> → <b>Execute</b>.</li>
+          </ol>
+          Альтернативный путь через CLI:
+          <pre>cd apps/mail/worker/
+npm install
+npx wrangler d1 create mail
+# скопируйте database_id в wrangler.toml (см. wrangler.toml.example)
+npx wrangler d1 execute mail --remote --file=./schema.sql</pre>
+        </li>
+
+        <li><b>Деплой и привязка (Binding) воркера.</b> Задеплойте код из
+          <code>apps/mail/worker/</code> командой <code>npx wrangler deploy</code>
+          или создайте воркер вручную (<b>Compute → Workers &amp; Pages</b>),
+          вставив код из панели <b>⧉ Воркер</b>.<br>
+          <b>Критически важно — привязать базу к воркеру:</b> настройки воркера →
+          <b>Settings → Bindings → Add → D1 database</b>:
+          <ul>
+            <li><b>Variable name:</b> <code>DB</code> (строго заглавными);</li>
+            <li><b>D1 database:</b> ваша база <code>mail</code>.</li>
+          </ul>
+          Без этой привязки воркер будет выдавать ошибку при попытке сохранить любое письмо.</li>
+
+        <li><b>Включение приёма почты (Email Routing).</b> Ручная настройка в новом интерфейсе:
+          <ol>
+            <li><b>Compute → Email Service → Email Routing</b>.</li>
+            <li>Нажмите <b>+ Onboard Domain</b> и выберите ваш домен.</li>
+            <li>Cloudflare предложит добавить <b>MX и TXT/SPF</b> записи — подтвердите автоматическое добавление и дождитесь смены статуса <b>Syncing → Active</b>.</li>
+            <li>Вкладка <b>Routing rules</b> → блок <b>Catch-all address</b> → <b>Edit</b>.</li>
+            <li>Измените <b>Action</b> с <code>Drop</code> на <b>Send to a Worker</b>.</li>
+            <li>Выберите ваш воркер в списке → <b>Save</b>.</li>
+          </ol>
+          Автоматическая настройка (для множества доменов):
+          <pre>CF_API_TOKEN=xxxx node scripts/setup-domains.mjs ваш-домен.com другой-домен.com</pre>
+          <span class="muted">Верифицировать Destination Addresses не нужно — почта уходит напрямую в воркер, а не пересылается на сторонний ящик.</span>
+        </li>
+
+        <li><b>Подключение админки.</b> Откройте <b>⚙ Настройки</b> и заполните три
+          параметра — интерфейс переключится из демо-режима
+          (<span class="badge badge--mock">mock</span>) в рабочий режим
+          (<span class="badge badge--live">Cloudflare D1</span>).</li>
       </ol>
 
-      <h3>Откуда брать три значения</h3>
+      <h3>Откуда брать значения для настроек</h3>
       <dl class="defs">
         <dt>Account ID</dt>
-        <dd><b>Проще всего:</b> в Настройках вставьте токен и нажмите
-          «Подобрать по токену» — Account ID подставится сам.<br>
-          Вручную: он виден прямо в <b>адресной строке дашборда</b> —
-          <code>dash.cloudflare.com/<b>&lt;account-id&gt;</b></code> — а также на
-          странице <b>Overview</b> любого домена, блок <b>«API» → Account ID</b>
-          справа (кнопка «Click to copy»).</dd>
+        <dd>Виден прямо в адресной строке браузера при входе в панель:
+          <code>dash.cloudflare.com/&lt;account-id&gt;/...</code>. Также доступен на
+          странице <b>Overview</b> любого домена в блоке <b>API</b> справа.</dd>
 
         <dt>D1 Database ID</dt>
-        <dd><b>Проще всего:</b> кнопка «Подобрать по токену» в Настройках покажет
-          список ваших баз D1 — выберите <code>mail</code>, и Database ID
-          подставится сам (команда не нужна).<br>
-          Иначе это UUID вашей базы (не имя «mail»): он печатается при создании
-          базы <code>npx wrangler d1 create mail</code> и виден в дашборде
-          <b>Workers &amp; Pages → D1 → mail → Database ID</b>.</dd>
+        <dd>Уникальный <b>UUID</b> вашей базы (не само слово «mail»). Находится в
+          панели: <b>Storage &amp; databases → D1 →</b> клик по базе <code>mail</code>
+          <b>→ строка Database ID</b>.</dd>
 
         <dt>API Token</dt>
-        <dd>Токен, которым админка читает базу. Создать:
-          <b>My Profile → API Tokens → Create Token → Custom token</b>. Права:
+        <dd>Создаётся в панели: <b>My Profile → API Tokens → Create Token → Custom token</b>.
+          Необходимые права (Permissions):
           <ul>
-            <li><b>Account → D1 → Read</b> — обязательно (чтение писем);</li>
-            <li><b>Account → D1 → Edit</b> — только если хотите <b>удалять</b> письма или запускать очистку прямо из админки;</li>
-            <li><b>Account → Account Settings → Read</b> — опционально, чтобы кнопка «Подобрать по токену» находила <b>и Account ID тоже</b>. Без него автоподбор найдёт только базы (после ручного ввода Account ID);</li>
-            <li>в <b>Account Resources</b> выберите свой аккаунт.</li>
+            <li><code>Account → D1 → Read</code> — обязательно для чтения писем;</li>
+            <li><code>Account → D1 → Edit</code> — необходимо, если планируется удалять письма через админку;</li>
+            <li><b>Account Resources:</b> обязательно выберите ваш конкретный аккаунт.</li>
           </ul>
-          Токен хранится и используется <b>только на сервере</b>, в браузер
-          возвращается лишь маскированным (<code>abc••••1234</code>).</dd>
+        </dd>
       </dl>
 
       <p class="note">
-        Токен для <b>скрипта настройки доменов</b> — другой: ему нужны права
-        <b>Zone → Email Routing (Edit)</b> и <b>Zone → DNS (Edit)</b>. Токен для
-        <b>чтения писем</b> (здесь, в Настройках) — только D1.
+        <b>Про автоподбор ID:</b> базовый токен для чтения D1 не имеет прав на
+        просмотр структуры всего аккаунта, поэтому <b>Account ID</b> в админке нужно
+        вводить вручную (кнопка «Подобрать» затем сама найдёт базу по этому Account ID).<br>
+        Токен для скрипта автоматической настройки доменов
+        (<code>setup-domains.mjs</code>) — отдельный, ему требуются права
+        <b>Zone → Email Routing (Edit)</b> и <b>Zone → DNS (Edit)</b>.
       </p>
 
       <h3>Полезно знать</h3>
       <ul class="bullets">
-        <li>Адреса заводить по одному не нужно — только <b>catch-all</b> (лимит индивидуальных правил ~200 на домен).</li>
-        <li>Локальная часть адреса — только латиница/цифры/дефисы (ASCII до <code>@</code>).</li>
-        <li>Cloudflare пропускает входящие только с валидным SPF или DKIM — совсем «грязные» отправители не дойдут.</li>
-        <li>Письма копятся в D1, пока их не чистить. Для temp-mail включите авто-очистку по Cron (<code>MAIL_RETENTION_DAYS</code> в <code>wrangler.toml</code>).</li>
-        <li>Без кредов админка работает в <b>mock-режиме</b> с демо-письмами — можно посмотреть интерфейс до всякой настройки.</li>
+        <li><b>Лимиты:</b> catch-all позволяет принимать почту на бесконечное число адресов. Индивидуальные правила маршрутизации в Cloudflare ограничены лимитом около 200 правил на домен.</li>
+        <li><b>Формат адресов:</b> локальная часть (до знака <code>@</code>) должна состоять только из латиницы, цифр и дефисов (ASCII).</li>
+        <li><b>Фильтрация спама:</b> Cloudflare автоматически отклоняет входящие письма от отправителей с невалидными или отсутствующими записями SPF/DKIM.</li>
+        <li><b>Очистка базы:</b> письма накапливаются в D1 бессрочно. Чтобы база не переполнялась, настройте автоочистку по Cron, задав переменную <code>MAIL_RETENTION_DAYS</code> в файле <code>wrangler.toml</code>.</li>
+        <li><b>Бесплатный тариф:</b> для приёма почты, обработки воркером и хранения в D1 достаточно полностью бесплатного тарифа (Free plan). Платный Workers Paid требуется только для отправки писем наружу.</li>
       </ul>
-
-      <p class="muted">Полная версия — в <code>apps/mail/README.md</code>.</p>
     </div>
   </aside>
 
