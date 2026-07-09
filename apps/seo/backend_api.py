@@ -1563,7 +1563,14 @@ def oauth_google_start():
         auth_url, state = flow.authorization_url(
             access_type='offline', include_granted_scopes='true',
             prompt='select_account consent')
-        _oauth_flows[state] = creds_path
+        # PKCE: ссылка содержит code_challenge, а при обмене кода на токен нужен
+        # парный code_verifier. Колбэк создаёт НОВЫЙ Flow, поэтому сохраняем
+        # verifier здесь и подставляем его в callback — иначе Google вернёт
+        # invalid_grant "Missing code verifier".
+        _oauth_flows[state] = {
+            'creds_path': creds_path,
+            'code_verifier': getattr(flow, 'code_verifier', None),
+        }
         return jsonify({"authUrl": auth_url})
     except Exception as e:
         return jsonify({"error": f"Не удалось начать авторизацию: {e}"}), 500
@@ -1582,13 +1589,27 @@ def oauth_google_callback():
         return _oauth_return(False, f"Google вернул ошибку: {err}")
 
     state = request.args.get('state', '')
-    creds_path = _oauth_flows.pop(state, None) or load_config().get('credentialsPath', '')
+    entry = _oauth_flows.pop(state, None)
+    # entry — dict {creds_path, code_verifier}; со старой сессии мог остаться
+    # просто путь-строка, поэтому поддерживаем оба варианта.
+    if isinstance(entry, dict):
+        creds_path = entry.get('creds_path')
+        code_verifier = entry.get('code_verifier')
+    else:
+        creds_path = entry
+        code_verifier = None
+    if not creds_path:
+        creds_path = load_config().get('credentialsPath', '')
     if not creds_path or not os.path.exists(creds_path):
         return _oauth_return(False, "Не найден client_secret.json или истекла сессия авторизации. Повторите.")
 
     try:
         flow = Flow.from_client_secrets_file(
             creds_path, scopes=GSC_SCOPES, redirect_uri=OAUTH_REDIRECT_URI, state=state)
+        # Тот же code_verifier, что и на старте (PKCE) — без него Google вернёт
+        # "Missing code verifier".
+        if code_verifier:
+            flow.code_verifier = code_verifier
         flow.fetch_token(authorization_response=request.url)
         creds = flow.credentials
 
