@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch, faCircleQuestion, faXmark } from '@fortawesome/free-solid-svg-icons';
+import SiteSelect from '@/components/ui/SiteSelect';
 
 interface IdxPage {
   id: number;
@@ -40,6 +41,7 @@ export default function IndexationPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [showHelp, setShowHelp] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -120,20 +122,27 @@ export default function IndexationPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Индексация</h1>
-          <p className="text-gray-600 mt-1">Обход sitemap, статус индексации (Google/XMLRIVER), массовая отправка на индекс</p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Индексация</h1>
+            <p className="text-gray-600 mt-1">Обход sitemap, статус индексации (Google/XMLRIVER), массовая отправка на индекс</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowHelp(true)}
+            className="flex-shrink-0 inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <FontAwesomeIcon icon={faCircleQuestion} className="text-blue-600" />
+            Справка
+          </button>
         </div>
 
         {/* Обход sitemap */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[220px]">
+            <div className="min-w-[260px]">
               <label className="block text-xs text-gray-500 mb-1">Сайт</label>
-              <select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white">
-                {sites.map(s => <option key={s} value={s}>{s.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}</option>)}
-              </select>
+              <SiteSelect sites={sites} value={selectedSite} onChange={setSelectedSite} />
             </div>
             <div className="flex-1 min-w-[240px]">
               <label className="block text-xs text-gray-500 mb-1">URL sitemap (необязательно — по умолчанию /sitemap.xml)</label>
@@ -228,6 +237,72 @@ export default function IndexationPage() {
             </table>
           )}
         </div>
+
+        {/* Модалка «Справка» — объяснение раздела простым языком */}
+        {showHelp && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowHelp(false)}>
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FontAwesomeIcon icon={faCircleQuestion} className="text-blue-600" /> Что такое «Индексация»
+                </h2>
+                <button onClick={() => setShowHelp(false)} className="text-gray-400 hover:text-gray-700" aria-label="Закрыть">
+                  <FontAwesomeIcon icon={faXmark} className="text-xl" />
+                </button>
+              </div>
+              <div className="px-6 py-4 space-y-4 text-sm text-gray-700 leading-relaxed">
+                <p>
+                  «Индексация» — это про то, <strong>попали ли страницы вашего сайта в поиск Google</strong>.
+                  Если страница не в индексе, по ней не идёт трафик из поиска. Раздел помогает собрать список
+                  страниц, проверить их статус и отправить недостающие на переобход.
+                </p>
+                <div>
+                  <p className="font-semibold text-gray-900 mb-1">Как пользоваться — по шагам:</p>
+                  <ol className="list-decimal list-inside space-y-1.5">
+                    <li><strong>Выберите сайт</strong> в списке вверху.</li>
+                    <li>
+                      Нажмите <strong>«Обойти sitemap»</strong> — программа откроет карту сайта
+                      (файл <code>sitemap.xml</code> со списком всех страниц) и соберёт страницы в таблицу.
+                      Если карта лежит по нестандартному адресу — впишите его в поле рядом.
+                    </li>
+                    <li>
+                      <strong>«Статус в Google»</strong> — по каждой странице спрашивает у Google, в индексе ли она.
+                      Результат появится в колонках «Google (покрытие)» и «Индекс».
+                    </li>
+                    <li>
+                      <strong>«XMLRIVER»</strong> — альтернативная проверка индексации через сторонний сервис
+                      (нужен ключ XMLRIVER в Настройках).
+                    </li>
+                    <li>
+                      <strong>«На индекс (2index)»</strong> — отправляет страницы на переобход/индексацию через
+                      сервис 2index (нужен ключ 2index в Настройках). Это и есть «попросить Google заглянуть заново».
+                    </li>
+                    <li>
+                      <strong>«Удалить»</strong> — убирает выбранные строки из этого списка (на сам сайт и на Google не влияет).
+                    </li>
+                  </ol>
+                </div>
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                  <p className="text-blue-900">
+                    <strong>Про галочки:</strong> отметьте нужные строки — действие применится только к ним.
+                    Если ничего не отмечено — действие идёт по <strong>всем</strong> страницам сайта.
+                    Поиск по URL сверху помогает быстро найти нужные страницы.
+                  </p>
+                </div>
+                <p className="text-gray-500 text-xs">
+                  Проверка и отправка идут в фоне — виден прогресс-бар. «Статус в Google» и «XMLRIVER» только
+                  смотрят состояние и ничего не меняют; «На индекс» — единственное действие, которое реально
+                  отправляет страницы на переобход.
+                </p>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 text-right sticky bottom-0 bg-white">
+                <button onClick={() => setShowHelp(false)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                  Понятно
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

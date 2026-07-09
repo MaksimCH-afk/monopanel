@@ -6,6 +6,7 @@ import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMagnifyingGlass, faSpinner, faCheckCircle, faExclamationTriangle, faInfoCircle, faHouse, faCopy, faRotateRight } from '@fortawesome/free-solid-svg-icons';
+import SiteSelect from '@/components/ui/SiteSelect';
 
 interface UrlInspectionResult {
   inspectionResult?: {
@@ -239,23 +240,7 @@ export default function UrlInspectionPage() {
               <label htmlFor="site-select" className="block text-sm font-medium text-gray-700 mb-2">
                 Сайт (доступно: {sites.length})
               </label>
-              <select
-                id="site-select"
-                value={selectedSite}
-                onChange={(e) => setSelectedSite(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">Выберите сайт...</option>
-                {sites.map((site) => (
-                  <option key={site} value={site}>
-                    {/* Показываем ПОЛНЫЙ адрес с протоколом: у одного домена в GSC
-                        могут быть отдельные свойства http:// и https:// — без
-                        протокола они выглядят одинаково, и легко выбрать не то
-                        (тогда GSC отвечает «URL не часть property»). */}
-                    {site.startsWith('sc-domain:') ? `Домен: ${site.slice('sc-domain:'.length)}` : site}
-                  </option>
-                ))}
-              </select>
+              <SiteSelect id="site-select" sites={sites} value={selectedSite} onChange={setSelectedSite} />
               <p className="text-xs text-gray-500 mt-1">
                 Проверяемый URL должен точно совпадать по протоколу с выбранным свойством
                 (для <code>https://</code>-свойства — только <code>https://</code>-адреса).

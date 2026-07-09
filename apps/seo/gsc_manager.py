@@ -12,6 +12,7 @@
 
 import json
 import logging
+import threading
 
 from apiclient.discovery import build
 from google.oauth2.credentials import Credentials
@@ -32,9 +33,43 @@ GSC_SCOPES = [
     'https://www.googleapis.com/auth/userinfo.email',
 ]
 
-# email -> searchconsole service; site_url -> email
-_services = {}
+# email -> token_json (свежий), site_url -> email.
+# ВАЖНО (потокобезопасность): googleapiclient-сервис построен на httplib2,
+# который НЕ потокобезопасен — если один и тот же объект сервиса дёргать из
+# нескольких потоков (фоновый пересчёт дашборда в 12 потоков + запросы Flask),
+# процесс падает по SIGSEGV. Поэтому общий сервис не храним: держим только токены,
+# а объект сервиса строим СВОЙ НА КАЖДЫЙ ПОТОК (thread-local, см. _thread_service).
+_tokens_by_email = {}
 _site_index = {}
+
+# Кэш сервисов на поток + счётчик поколений реестра (чтобы после rebuild_registry
+# старые per-thread сервисы не переиспользовались).
+_thread_local = threading.local()
+_generation = 0
+
+
+def _thread_service(email):
+    """Сервис GSC для ТЕКУЩЕГО потока (свой httplib2 на поток). None, если нет токена."""
+    cache = getattr(_thread_local, 'cache', None)
+    gen = getattr(_thread_local, 'gen', None)
+    if cache is None or gen != _generation:
+        cache = {}
+        _thread_local.cache = cache
+        _thread_local.gen = _generation
+    if email in cache:
+        return cache[email]
+    svc = None
+    token_json = _tokens_by_email.get(email)
+    if token_json:
+        try:
+            creds = creds_from_json(token_json)
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            svc = build_service(creds)
+        except Exception as e:  # noqa: BLE001
+            log.warning("thread service build failed for %s: %s", email, e)
+    cache[email] = svc
+    return svc
 
 
 # ─── низкоуровневые помощники ───────────────────────────────────────────────────
@@ -113,8 +148,9 @@ def sync_account_sites(account_id, service):
 
 
 def rebuild_registry():
-    """Перестроить in-memory реестр сервисов и индекс сайтов из БД."""
-    _services.clear()
+    """Перестроить in-memory реестр токенов и индекс сайтов из БД."""
+    global _generation
+    _tokens_by_email.clear()
     _site_index.clear()
 
     with session_scope() as s:
@@ -126,14 +162,15 @@ def rebuild_registry():
     for acc_id, email, token_json in accounts:
         try:
             creds = _refresh_and_persist(email, creds_from_json(token_json))
-            _services[email] = build_service(creds)
+            _tokens_by_email[email] = creds.to_json()
             for url in sites_by_acc.get(acc_id, []):
                 _site_index[url] = email
         except Exception as e:  # noqa: BLE001
             log.warning("rebuild_registry: account %s failed: %s", email, e)
 
+    _generation += 1  # инвалидировать per-thread кэши сервисов
     log.info("Registry rebuilt: %s account(s), %s site(s)",
-             len(_services), len(_site_index))
+             len(_tokens_by_email), len(_site_index))
     return _site_index
 
 
@@ -178,20 +215,20 @@ def list_accounts():
 
 # ─── доступ к сервисам ──────────────────────────────────────────────────────────
 def get_service_for_site(site_url):
-    """Сервис аккаунта, которому принадлежит сайт. None, если не найден."""
-    if not _site_index and not _services:
+    """Сервис аккаунта, которому принадлежит сайт (свой на поток). None, если не найден."""
+    if not _site_index and not _tokens_by_email:
         rebuild_registry()
     email = _site_index.get(site_url)
+    # запасной вариант: единственный аккаунт
+    if not email and len(_tokens_by_email) == 1:
+        email = next(iter(_tokens_by_email))
     if email:
-        return _services.get(email)
-    # запасной вариант: единственный аккаунт (или None)
-    if len(_services) == 1:
-        return next(iter(_services.values()))
+        return _thread_service(email)
     return None
 
 
 def all_site_urls():
-    if not _site_index and not _services:
+    if not _site_index and not _tokens_by_email:
         rebuild_registry()
     return sorted(_site_index.keys())
 
@@ -201,9 +238,9 @@ def account_email_for_site(site_url):
 
 
 def has_any_account():
-    if not _services:
+    if not _tokens_by_email:
         rebuild_registry()
-    return bool(_services)
+    return bool(_tokens_by_email)
 
 
 def get_creds(email):
