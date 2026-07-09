@@ -84,6 +84,10 @@ export default function SettingsPage() {
   // true, когда модель не входит в список готовых вариантов и вводится вручную
   const [customModel, setCustomModel] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // Вставка client_secret.json прямо в админке (без файла через терминал)
+  const [clientSecretText, setClientSecretText] = useState('');
+  const [savingClientSecret, setSavingClientSecret] = useState(false);
+  const [hasClientSecret, setHasClientSecret] = useState(false);
 
   // Load settings on mount
   useEffect(() => {
@@ -134,6 +138,7 @@ export default function SettingsPage() {
           xmlriverKey: String(data.xmlriverKey || ''),
           twoindexKey: String(data.twoindexKey || '')
         });
+        setHasClientSecret(Boolean(data.hasClientSecret));
       } else {
         setMessage({ type: 'error', text: 'Не удалось загрузить настройки' });
       }
@@ -339,6 +344,43 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Не удалось сохранить настройки. Убедитесь, что бэкенд запущен.' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Сохранить содержимое client_secret.json, вставленное в админке. Бэкенд сам
+  // запишет файл в том /data/seo и пропишет путь в конфиг — руками через терминал
+  // класть файл больше не нужно.
+  const saveClientSecret = async () => {
+    if (!clientSecretText.trim()) {
+      setMessage({ type: 'error', text: 'Вставьте содержимое client_secret.json' });
+      return;
+    }
+    setSavingClientSecret(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/gsc/client-secret`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientSecret: clientSecretText })
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setSettings((prev) => ({ ...prev, credentialsPath: String(data.credentialsPath || prev.credentialsPath), isAuthorized: false }));
+        setHasClientSecret(true);
+        setClientSecretText('');
+        const warn = data.clientType === 'web' && data.redirectUriRegistered === false
+          ? ` Внимание: добавьте redirect URI ${data.redirectUri} в разрешённые в Google Cloud Console, иначе Google отклонит вход.`
+          : '';
+        setMessage({ type: 'success', text: (data.message || 'client_secret.json сохранён.') + warn });
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Не удалось сохранить client_secret.json' });
+      }
+    } catch (error) {
+      console.error('Error saving client secret:', error);
+      setMessage({ type: 'error', text: 'Не удалось сохранить. Убедитесь, что бэкенд запущен.' });
+    } finally {
+      setSavingClientSecret(false);
     }
   };
 
@@ -568,26 +610,59 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            {/* Credentials Path */}
+            {/* Google Search Console — client_secret.json (вставка прямо в админке) */}
             <div className="space-y-2">
-              <label htmlFor="credentials-path" className="flex items-center space-x-2 text-sm font-medium text-gray-700">
+              <label htmlFor="client-secret" className="flex items-center space-x-2 text-sm font-medium text-gray-700">
                 <FontAwesomeIcon icon={faFile} className="text-gray-500" />
-                <span>Путь к учётным данным Google Search Console</span>
+                <span>Учётные данные Google Search Console (client_secret.json)</span>
+                {hasClientSecret && (
+                  <span className="inline-flex items-center space-x-1 text-green-600 text-xs">
+                    <FontAwesomeIcon icon={faCheckCircle} />
+                    <span>загружен</span>
+                  </span>
+                )}
               </label>
-              <input
-                id="credentials-path"
-                type="text"
-                value={settings.credentialsPath}
-                onChange={(e) => setSettings({ ...settings, credentialsPath: e.target.value })}
-                placeholder="/path/to/client_secret.json"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              <textarea
+                id="client-secret"
+                value={clientSecretText}
+                onChange={(e) => setClientSecretText(e.target.value)}
+                placeholder={'Вставьте содержимое client_secret.json, например:\n{"web":{"client_id":"...","client_secret":"...","redirect_uris":["http://localhost:5001/api/oauth/google/callback"]}}'}
+                rows={5}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+              <div className="flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={saveClientSecret}
+                  disabled={savingClientSecret || !clientSecretText.trim()}
+                  className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                >
+                  <FontAwesomeIcon icon={savingClientSecret ? faSpinner : faFile} className={savingClientSecret ? 'animate-spin' : ''} />
+                  <span>{savingClientSecret ? 'Сохранение…' : 'Сохранить учётные данные'}</span>
+                </button>
+                {hasClientSecret && (
+                  <span className="text-xs text-gray-500">Файл сохранён в томе — класть его через терминал не нужно.</span>
+                )}
+              </div>
               <p className="text-xs text-gray-500">
-                Путь к файлу client_secret.json для Google Search Console. Скачать его можно в{' '}
+                Создайте OAuth-клиент типа «Веб-приложение» в{' '}
                 <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                   Google Cloud Console
-                </a>
+                </a>, скачайте client_secret.json и вставьте его содержимое сюда. В разрешённые
+                redirect URI OAuth-клиента добавьте <code>http://localhost:5001/api/oauth/google/callback</code>.
               </p>
+              <details className="text-xs text-gray-500">
+                <summary className="cursor-pointer select-none">Дополнительно: путь к файлу</summary>
+                <input
+                  id="credentials-path"
+                  type="text"
+                  value={settings.credentialsPath}
+                  onChange={(e) => setSettings({ ...settings, credentialsPath: e.target.value })}
+                  placeholder="/data/seo/client_secret.json"
+                  className="mt-2 w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <p className="mt-1">Заполняется автоматически после сохранения. Меняйте, только если файл лежит в нестандартном месте.</p>
+              </details>
             </div>
 
             {/* Google Trends Credentials Path */}
@@ -678,7 +753,7 @@ export default function SettingsPage() {
               ) : (
                 <div className="border border-gray-300 rounded-lg p-4 bg-gray-50">
                   <p className="text-sm text-gray-600">
-                    Аккаунтов пока нет. Укажите путь к client_secret.json выше, сохраните настройки
+                    Аккаунтов пока нет. Вставьте client_secret.json выше, сохраните учётные данные
                     и нажмите «Добавить аккаунт Google».
                   </p>
                 </div>
@@ -687,7 +762,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={authorizeCredentials}
-                disabled={authorizing || !settings.credentialsPath}
+                disabled={authorizing || (!hasClientSecret && !settings.credentialsPath)}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2 text-sm"
               >
                 {authorizing ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
@@ -936,8 +1011,8 @@ export default function SettingsPage() {
             В настройках OAuth-клиента добавьте <strong>Authorized redirect URI</strong>:{' '}
             <code>http://localhost:5001/api/oauth/google/callback</code>
           </li>
-          <li>Укажите полный путь к файлу client_secret.json выше и нажмите «Сохранить настройки»</li>
-          <li>Нажмите «Авторизовать данные» — откроется страница согласия Google, после подтверждения вы вернётесь сюда автоматически</li>
+          <li>Вставьте содержимое client_secret.json в поле выше и нажмите «Сохранить учётные данные» (файл сохранится сам — класть его через терминал не нужно)</li>
+          <li>Нажмите «Добавить аккаунт Google» — откроется страница согласия Google, после подтверждения вы вернётесь сюда автоматически</li>
           <li>После авторизации можно начинать работу с дашбордом!</li>
         </ol>
       </div>
