@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import Chart from 'chart.js/auto';
 import { useData } from '@/contexts/DataContext';
 
@@ -325,14 +326,26 @@ export default function PerformancePage() {
                 </div>
               )}
             </div>
-            <button
-              onClick={handleRefreshData}
-              disabled={performanceLoading || !selectedSite}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
-            >
-              <span>🔄</span>
-              <span>{performanceLoading ? 'Загрузка...' : 'Обновить данные'}</span>
-            </button>
+            <div className="flex items-center gap-3">
+              <HelpButton title="Что такое «Матрица корреляции»">
+                <p>
+                  Раздел показывает, <strong>как связаны между собой показатели</strong> — клики, показы, CTR и
+                  позиция. На диаграммах рассеяния каждая точка — это один поисковый запрос.
+                </p>
+                <p>
+                  По форме «облака» точек видно зависимости: например, растут ли клики вместе с показами, или
+                  высокие позиции дают более высокий CTR. Это помогает понять, что тянет трафик, а что нет.
+                </p>
+              </HelpButton>
+              <button
+                onClick={handleRefreshData}
+                disabled={performanceLoading || !selectedSite}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
+              >
+                <span>🔄</span>
+                <span>{performanceLoading ? 'Загрузка...' : 'Обновить данные'}</span>
+              </button>
+            </div>
           </div>
         </div>
 

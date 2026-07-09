@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
+import SiteSelect from '@/components/ui/SiteSelect';
 import Chart from 'chart.js/auto';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner, faPlus, faTrash, faArrowUp, faArrowDown, faMinus, faTimes, faLink, faWrench, faPen, faNoteSticky } from '@fortawesome/free-solid-svg-icons';
@@ -230,10 +232,18 @@ export default function PagesPage() {
             <p className="text-gray-600 mt-1">Статистика по страницам, динамика и заметки на графике</p>
           </div>
           <div className="flex items-center gap-3">
-            <select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg bg-white max-w-xs">
-              {sites.map(s => <option key={s} value={s}>{s.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}</option>)}
-            </select>
+            <HelpButton title="Что такое «Страницы»">
+              <p>
+                Раздел показывает статистику <strong>по конкретным страницам сайта</strong>: сколько кликов и показов
+                собирает каждый URL, и как меняется динамика кликов на графике.
+              </p>
+              <p>
+                Сюда же можно ставить <strong>заметки на график</strong> — отметки о событиях (проставлен беклинк,
+                проведены работы, изменение на сайте). Так удобно связать скачок трафика с тем, что вы делали.
+              </p>
+              <p className="text-gray-500 text-xs">Поиск по URL помогает быстро найти нужную страницу среди многих.</p>
+            </HelpButton>
+            <div className="max-w-xs"><SiteSelect sites={sites} value={selectedSite} onChange={setSelectedSite} /></div>
             <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}
               className="px-3 py-2 border border-gray-300 rounded-lg bg-white">
               {PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}

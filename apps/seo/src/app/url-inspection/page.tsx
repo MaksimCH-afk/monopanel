@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMagnifyingGlass, faSpinner, faCheckCircle, faExclamationTriangle, faInfoCircle, faHouse, faCopy, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import SiteSelect from '@/components/ui/SiteSelect';
+import HelpButton from '@/components/ui/HelpButton';
 
 interface UrlInspectionResult {
   inspectionResult?: {
@@ -222,13 +223,31 @@ export default function UrlInspectionPage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            🔍 Проверка URL
-          </h1>
-          <p className="text-gray-600">
-            Проверьте статус индексации URL в Google Search Console
-          </p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              🔍 Проверка URL
+            </h1>
+            <p className="text-gray-600">
+              Проверьте статус индексации URL в Google Search Console
+            </p>
+          </div>
+          <HelpButton title="Что такое «Проверка URL»">
+            <p>
+              Раздел показывает, <strong>что Google знает про конкретную страницу</strong>: в индексе ли она,
+              когда её сканировали, какую страницу Google считает «главной» версией (каноническая) и нет ли проблем.
+            </p>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>Выберите <strong>сайт</strong> (свойство) — важно, чтобы протокол (http/https) совпадал с проверяемым адресом.</li>
+              <li>Впишите <strong>адрес страницы</strong> или нажмите «Проверить главную», чтобы подставить главную.</li>
+              <li>Нажмите <strong>«Проверить URL»</strong> — появится статус индексации, канониклы и детали сканирования.</li>
+              <li>Кнопка <strong>«Отправить на переобход»</strong> просит переиндексацию через сервис 2index (нужен ключ в Настройках).</li>
+            </ol>
+            <p className="text-gray-500 text-xs">
+              «Каноническая (Google определил)» — какую версию страницы Google выбрал главной; «указана на странице» —
+              какую вы задали в коде. Если они разные — Google предпочёл другую страницу.
+            </p>
+          </HelpButton>
         </div>
 
         {/* Input Section */}

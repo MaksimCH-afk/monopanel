@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import Link from 'next/link';
 import Chart from 'chart.js/auto';
 import { useData } from '@/contexts/DataContext';
@@ -388,13 +389,25 @@ export default function OverviewPage() {
                 Отслеживание эффективности нескольких сайтов и анализ трендов
               </p>
             </div>
-            <button
-              onClick={handleRefreshData}
-              disabled={overviewLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {overviewLoading ? 'Загрузка...' : '🔄 Обновить данные'}
-            </button>
+            <div className="flex items-center gap-3">
+              <HelpButton title="Что такое «Обзор сайтов»">
+                <p>
+                  Раздел показывает <strong>несколько сайтов рядом</strong> — с ключевыми метриками и мини-графиком
+                  тренда по каждому. Удобно быстро сравнить проекты между собой.
+                </p>
+                <p>
+                  Какие сайты показывать (до 6) — выбирается в <strong>Настройках</strong> («сайты для обзора»).
+                  Период и фильтр по устройствам задаются в параметрах обзора ниже.
+                </p>
+              </HelpButton>
+              <button
+                onClick={handleRefreshData}
+                disabled={overviewLoading}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {overviewLoading ? 'Загрузка...' : '🔄 Обновить данные'}
+              </button>
+            </div>
           </div>
         </div>
 

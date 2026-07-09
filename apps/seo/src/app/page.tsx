@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import HelpButton from '@/components/ui/HelpButton';
 import MetricCard from '@/components/ui/MetricCard';
 import DashboardControls from '@/components/dashboard/DashboardControls';
 import { useData } from '@/contexts/DataContext';
@@ -1573,6 +1574,22 @@ export default function Dashboard() {
           )}
         </div>
         <div className="flex items-center space-x-3">
+          <HelpButton title="Что такое «Показатели трафика»">
+            <p>
+              Это <strong>основной отчёт по одному сайту</strong> из Google Search Console: сколько было
+              <strong> кликов</strong> (переходов из поиска), <strong>показов</strong> (сколько раз сайт видели в
+              выдаче), <strong>CTR</strong> (доля кликов от показов) и <strong>средняя позиция</strong> в поиске.
+            </p>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>Выберите <strong>сайт</strong> и <strong>период</strong> (или свои даты), при желании — тип устройства.</li>
+              <li>Нажмите <strong>«Загрузить данные»</strong>.</li>
+              <li>Ниже появятся график динамики и таблицы по <strong>запросам</strong>, <strong>страницам</strong> и <strong>странам</strong>.</li>
+            </ol>
+            <p className="text-gray-500 text-xs">
+              На графике можно включить отметки апдейтов Google, а данные экспортировать в CSV. Google отдаёт
+              статистику с задержкой ~3 дня.
+            </p>
+          </HelpButton>
           <Button
             onClick={handleRefreshData}
             disabled={performanceLoading || !selectedSite}
