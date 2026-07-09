@@ -45,6 +45,14 @@ interface PageData {
   position: number;
 }
 
+interface CountryData {
+  keys: string[];
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
 interface GSCData {
   rows: QueryData[];
   totalClicks: number;
@@ -54,6 +62,7 @@ interface GSCData {
   dailyData: DailyData[];
   topQueries: QueryData[];
   topPages: PageData[];
+  topCountries?: CountryData[];
 }
 
 interface CachedGSCData extends GSCData {
