@@ -65,7 +65,10 @@ export default function UrlInspectionPage() {
   useEffect(() => {
     fetchSites();
     if (sites.length > 0 && !selectedSite) {
-      setSelectedSite(sites[0]);
+      // По умолчанию предпочитаем https://-свойство (если у домена есть и http, и
+      // https-варианты в GSC), чтобы проверялись https-адреса.
+      const preferred = sites.find((s) => s.startsWith('https://')) || sites[0];
+      setSelectedSite(preferred);
     }
   }, [sites]);
 
@@ -245,10 +248,18 @@ export default function UrlInspectionPage() {
                 <option value="">Выберите сайт...</option>
                 {sites.map((site) => (
                   <option key={site} value={site}>
-                    {site.replace('https://', '').replace('http://', '')}
+                    {/* Показываем ПОЛНЫЙ адрес с протоколом: у одного домена в GSC
+                        могут быть отдельные свойства http:// и https:// — без
+                        протокола они выглядят одинаково, и легко выбрать не то
+                        (тогда GSC отвечает «URL не часть property»). */}
+                    {site.startsWith('sc-domain:') ? `Домен: ${site.slice('sc-domain:'.length)}` : site}
                   </option>
                 ))}
               </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Проверяемый URL должен точно совпадать по протоколу с выбранным свойством
+                (для <code>https://</code>-свойства — только <code>https://</code>-адреса).
+              </p>
             </div>
 
             <div>
