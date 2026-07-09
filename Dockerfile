@@ -100,8 +100,8 @@ RUN cd /srv/panel/apps/img \
     && npm run build
 
 # seo — Next 15. Конфликт peer-deps (@tremor/react хочет React 18, проект на 19) →
-# ставим с --legacy-peer-deps. Auth0 читается в рантайме; если install/build упадёт —
-# не валим весь образ (|| WARN), seo просто не будет предсобран (см. README, раздел seo).
+# ставим с --legacy-peer-deps. Если install/build упадёт — не валим весь образ
+# (|| WARN), seo просто не будет предсобран (см. README, раздел seo).
 # Адрес seo-бэкенда для БРАУЗЕРА зашивается в бандл на этапе сборки (NEXT_PUBLIC_*),
 # поэтому пробрасываем его как build-arg. По умолчанию localhost:5001 (как раньше);
 # для деплоя фронта/бэкенда на другом хосте задайте через build.args (см. compose).
@@ -109,7 +109,7 @@ ARG NEXT_PUBLIC_SEO_API_URL=http://localhost:5001
 ENV NEXT_PUBLIC_SEO_API_URL=$NEXT_PUBLIC_SEO_API_URL
 RUN cd /srv/panel/apps/seo \
     && (npm install --legacy-peer-deps && npm run build \
-        || echo "WARN: сборка seo не прошла — поправьте apps/seo (вероятно Auth0/окружение)")
+        || echo "WARN: сборка seo не прошла — поправьте apps/seo (вероятно окружение/peer-deps)")
 
 # content — Node/Express (единственная зависимость express; HTTP через native fetch).
 # Без ключей работает в mock-режиме; статику отдаёт сам сервер. Только прод-зависимости.

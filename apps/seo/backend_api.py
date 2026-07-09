@@ -1404,6 +1404,7 @@ def get_settings():
         "openaiApiKey": config.get('openaiApiKey', ''),
         "openaiModel": config.get('openaiModel', '') or DEFAULT_OPENAI_MODEL,
         "credentialsPath": config.get('credentialsPath', ''),
+        "hasClientSecret": bool(config.get('credentialsPath')) and os.path.exists(config.get('credentialsPath', '')),
         "trendsCredentialsPath": config.get('trendsCredentialsPath', ''),
         "isAuthorized": config.get('isAuthorized', False),
         "overviewSites": config.get('overviewSites', []),
@@ -1470,6 +1471,67 @@ def _oauth_return(ok, message):
     """Вернуть пользователя на страницу настроек фронта с результатом OAuth."""
     status = 'success' if ok else 'error'
     return redirect(f"{FRONTEND_URL}/settings?gscAuth={status}&msg={quote(message)}")
+
+
+@app.route('/api/gsc/client-secret', methods=['POST'])
+def save_gsc_client_secret():
+    """
+    Принять СОДЕРЖИМОЕ client_secret.json прямо из админки (вставкой) и сохранить
+    его в том /data/seo. Больше не нужно класть файл руками через терминал —
+    всё делается в интерфейсе. После сохранения путь прописывается в конфиг, и
+    можно сразу нажимать «Добавить аккаунт Google».
+    """
+    data = request.get_json(silent=True) or {}
+    raw = data.get('clientSecret', data.get('content', ''))
+
+    # Допускаем как строку с JSON, так и уже разобранный объект.
+    if isinstance(raw, dict):
+        parsed = raw
+    else:
+        raw = (raw or '').strip()
+        if not raw:
+            return jsonify({"error": "Пустое содержимое client_secret.json"}), 400
+        try:
+            parsed = json.loads(raw)
+        except Exception as e:  # noqa: BLE001
+            return jsonify({"error": f"Это не похоже на JSON: {e}"}), 400
+
+    # У валидного client_secret.json корневой ключ — 'web' или 'installed'.
+    root = None
+    client_type = None
+    for key in ('web', 'installed'):
+        section = parsed.get(key) if isinstance(parsed, dict) else None
+        if isinstance(section, dict):
+            root, client_type = section, key
+            break
+    if not root or not root.get('client_id'):
+        return jsonify({
+            "error": "Не похоже на client_secret.json: нет секции \"web\"/\"installed\" "
+                     "с полем client_id. Скачайте JSON OAuth-клиента в Google Cloud Console."
+        }), 400
+
+    dest = os.path.join(DATA_DIR, 'client_secret.json')
+    try:
+        with open(dest, 'w', encoding='utf-8') as f:
+            json.dump(parsed, f, ensure_ascii=False, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Не удалось сохранить файл: {e}"}), 500
+
+    config = load_config()
+    config['credentialsPath'] = dest
+    config['isAuthorized'] = False
+    save_config(config)
+
+    redirect_uris = root.get('redirect_uris') or []
+    return jsonify({
+        "success": True,
+        "credentialsPath": dest,
+        "clientType": client_type,
+        "redirectUri": OAUTH_REDIRECT_URI,
+        # Для типа «Веб-приложение» redirect_uri должен быть в списке разрешённых.
+        "redirectUriRegistered": (client_type != 'web') or (OAUTH_REDIRECT_URI in redirect_uris),
+        "message": "client_secret.json сохранён. Теперь нажмите «Добавить аккаунт Google».",
+    })
 
 
 @app.route('/api/oauth/google/start', methods=['GET', 'POST'])
