@@ -299,6 +299,53 @@ try {
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (domain_id) REFERENCES cloudflare_accounts(id)
         );
+
+        -- ===== Модуль «Деплой из ZIP» (Workers Static Assets) =====
+        -- Один сайт = один воркер. account_id ссылается на CF-аккаунт (cloudflare_credentials).
+        CREATE TABLE IF NOT EXISTS cf_deploy_sites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            account_id INTEGER NOT NULL,
+            domain TEXT NOT NULL,
+            worker_name TEXT NOT NULL,
+            zone_id TEXT,
+            workers_dev_url TEXT,
+            custom_domain_bound INTEGER DEFAULT 0,
+            ssl_status TEXT,
+            protection_mode TEXT DEFAULT 'static-only',
+            status TEXT DEFAULT 'draft',
+            files_count INTEGER DEFAULT 0,
+            last_deploy_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, account_id, domain),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (account_id) REFERENCES cloudflare_credentials(id)
+        );
+
+        -- Версии сайта под доменом: корень ('') и/или копии в подпапках ('en', 'es-cl').
+        CREATE TABLE IF NOT EXISTS cf_deploy_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id INTEGER NOT NULL,
+            prefix TEXT NOT NULL DEFAULT '',
+            source_prefix TEXT,
+            share_root_assets INTEGER DEFAULT 0,
+            canonical TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(site_id, prefix),
+            FOREIGN KEY (site_id) REFERENCES cf_deploy_sites(id)
+        );
+
+        -- Мета/hreflang-конфиг сайта — хранится в модуле, переприменяется при re-upload (FR-10.2).
+        CREATE TABLE IF NOT EXISTS cf_deploy_meta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id INTEGER NOT NULL,
+            config_json TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(site_id),
+            FOREIGN KEY (site_id) REFERENCES cf_deploy_sites(id)
+        );
     ");
 
     // Добавляем индекс для оптимизации фильтра по group_id
@@ -318,6 +365,8 @@ try {
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_bulk_operations_user ON cloudflare_bulk_operations(user_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_worker_scripts_user ON cloudflare_worker_scripts(user_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_worker_routes_domain ON cloudflare_worker_routes(domain_id)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_sites_user ON cf_deploy_sites(user_id)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_versions_site ON cf_deploy_versions(site_id)");
 
     try {
         $pdo->exec("ALTER TABLE cloudflare_accounts ADD COLUMN updated_at DATETIME");

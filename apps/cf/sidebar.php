@@ -38,7 +38,12 @@ $currentPage = basename($_SERVER['PHP_SELF']);
             <i class="fas fa-tasks"></i>
             <span>Очередь задач</span>
         </a>
-        
+
+        <a href="<?php echo BASE_PATH; ?>deploy.php" class="sidebar-link <?php echo $currentPage == 'deploy.php' ? 'active' : ''; ?>">
+            <i class="fas fa-rocket"></i>
+            <span>Деплой</span>
+        </a>
+
         <div class="sidebar-divider"></div>
         
         <!-- Security -->

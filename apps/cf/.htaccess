@@ -1,4 +1,15 @@
 # ===================================================
+# DEPLOY MODULE: загрузка больших ZIP-архивов (модуль «Деплой из ZIP»)
+# Размер архива не ограничен (ТЗ) — поднимаем лимиты загрузки PHP.
+# ===================================================
+<IfModule mod_php.c>
+    php_value upload_max_filesize 512M
+    php_value post_max_size 512M
+    php_value memory_limit 512M
+    php_value max_execution_time 300
+</IfModule>
+
+# ===================================================
 # BOT AND AI CRAWLER PROTECTION (SOFT LEVEL)
 # More sophisticated bot blocking is done at PHP level after session auth
 # ===================================================
