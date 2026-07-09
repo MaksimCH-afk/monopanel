@@ -90,6 +90,9 @@ class SiteSummary(Base):
     prev_ctr = Column(Float, default=0.0)
     prev_position = Column(Float, default=0.0)
 
+    # JSON-список дневных кликов текущего периода (для мини-графика/спарклайна на дашборде)
+    daily_clicks = Column(Text)
+
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -158,9 +161,31 @@ class IndexPage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+def _ensure_columns():
+    """
+    Лёгкие миграции для SQLite: create_all не добавляет новые колонки в уже
+    существующие таблицы, поэтому недостающие досоздаём вручную (ADD COLUMN).
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    wanted = {
+        'site_summary': [('daily_clicks', 'TEXT')],
+    }
+    for table, cols in wanted.items():
+        if not insp.has_table(table):
+            continue
+        existing = {c['name'] for c in insp.get_columns(table)}
+        with engine.begin() as conn:
+            for name, ddl_type in cols:
+                if name not in existing:
+                    conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {ddl_type}'))
+                    log.info("DB migrate: added %s.%s", table, name)
+
+
 def init_db():
-    """Создать таблицы, если их нет. Идемпотентно."""
+    """Создать таблицы, если их нет, и накатить лёгкие миграции. Идемпотентно."""
     Base.metadata.create_all(engine)
+    _ensure_columns()
     log.info("DB initialized at %s (tables: %s)",
              DB_PATH, ", ".join(Base.metadata.tables.keys()))
 

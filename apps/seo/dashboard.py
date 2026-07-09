@@ -7,6 +7,7 @@
 Рассчитано на 1000+ сайтов и несколько аккаунтов.
 """
 
+import json
 import logging
 import threading
 import time
@@ -96,14 +97,19 @@ def _totals_split(service, site_url, prev_start, end, cur_start):
             "rowLimit": 25000, "type": "web"}
     resp = _query_with_retry(service, site_url, body)
     cur, prev = _empty_bucket(), _empty_bucket()
+    cur_daily = {}  # date -> clicks (текущий период) для мини-графика
     for r in resp.get("rows", []):
         day = (r.get("keys") or [""])[0]
-        b = cur if day >= cur_start else prev
+        clicks = int(r.get("clicks", 0))
         impr = int(r.get("impressions", 0))
-        b["clicks"] += int(r.get("clicks", 0))
+        b = cur if day >= cur_start else prev
+        b["clicks"] += clicks
         b["impressions"] += impr
         b["pos_weighted"] += float(r.get("position", 0.0)) * impr
-    return _finalize_bucket(cur), _finalize_bucket(prev)
+        if day >= cur_start:
+            cur_daily[day] = clicks
+    daily = [cur_daily[d] for d in sorted(cur_daily)]
+    return _finalize_bucket(cur), _finalize_bucket(prev), daily
 
 
 def compute_summary(site_url, period_days):
@@ -112,11 +118,12 @@ def compute_summary(site_url, period_days):
     if not service:
         return None
     start, end, prev_start, prev_end = _period_ranges(period_days)
-    cur, prev = _totals_split(service, site_url, prev_start, end, start)
+    cur, prev, daily = _totals_split(service, site_url, prev_start, end, start)
     return {
         "account_email": gscm.account_email_for_site(site_url),
         "clicks": cur["clicks"], "impressions": cur["impressions"],
         "ctr": cur["ctr"], "position": cur["position"],
+        "daily_clicks": daily,
         "prev_clicks": prev["clicks"], "prev_impressions": prev["impressions"],
         "prev_ctr": prev["ctr"], "prev_position": prev["position"],
     }
@@ -134,6 +141,7 @@ def _upsert(site_url, period_days, data):
         row.ctr = data["ctr"]; row.position = data["position"]
         row.prev_clicks = data["prev_clicks"]; row.prev_impressions = data["prev_impressions"]
         row.prev_ctr = data["prev_ctr"]; row.prev_position = data["prev_position"]
+        row.daily_clicks = json.dumps(data.get("daily_clicks") or [])
 
 
 def _run_refresh(period_days):
@@ -202,6 +210,7 @@ def get_summary(period_days=28):
                 "ctr": r.ctr, "position": r.position,
                 "prev_clicks": r.prev_clicks, "prev_impressions": r.prev_impressions,
                 "prev_ctr": r.prev_ctr, "prev_position": r.prev_position,
+                "daily_clicks": json.loads(r.daily_clicks) if r.daily_clicks else [],
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             })
         return out

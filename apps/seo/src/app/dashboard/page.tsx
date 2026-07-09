@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import HelpButton from '@/components/ui/HelpButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faRefresh, faSpinner, faArrowUp, faArrowDown, faMinus, faSort } from '@fortawesome/free-solid-svg-icons';
+import { faRefresh, faSpinner, faArrowUp, faArrowDown, faMinus } from '@fortawesome/free-solid-svg-icons';
 
 interface SiteRow {
   site_url: string;
@@ -17,6 +17,7 @@ interface SiteRow {
   prev_impressions: number;
   prev_ctr: number;
   prev_position: number;
+  daily_clicks: number[];
   updated_at: string | null;
 }
 
@@ -72,6 +73,37 @@ function DeltaPos({ cur, prev }: { cur: number; prev: number }) {
     </span>
   );
 }
+
+// Мини-график (спарклайн) дневных кликов текущего периода.
+function Sparkline({ data, color = '#2563eb' }: { data: number[]; color?: string }) {
+  if (!data || data.length < 2) {
+    return <div className="h-12 flex items-center justify-center text-xs text-gray-300">нет данных за период</div>;
+  }
+  const w = 100, h = 32;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-12" aria-hidden>
+      <polyline points={`0,${h} ${pts} ${w},${h}`} fill={color} fillOpacity="0.08" stroke="none" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+// Варианты сортировки карточек (ключ + направление).
+const SORT_OPTIONS: { value: string; label: string; key: SortKey; dir: 'asc' | 'desc' }[] = [
+  { value: 'clicks-desc', label: 'Клики ↓', key: 'clicks', dir: 'desc' },
+  { value: 'impressions-desc', label: 'Показы ↓', key: 'impressions', dir: 'desc' },
+  { value: 'ctr-desc', label: 'CTR ↓', key: 'ctr', dir: 'desc' },
+  { value: 'position-asc', label: 'Позиция ↑ (лучшие)', key: 'position', dir: 'asc' },
+  { value: 'site_url-asc', label: 'Домен A→Я', key: 'site_url', dir: 'asc' },
+];
 
 export default function MainDashboardPage() {
   const [period, setPeriod] = useState(28);
@@ -137,15 +169,6 @@ export default function MainDashboardPage() {
     }
   };
 
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir(sortDir === 'desc' ? 'asc' : 'desc');
-    } else {
-      setSortKey(key);
-      setSortDir(key === 'site_url' ? 'asc' : 'desc');
-    }
-  };
-
   const filteredSorted = useMemo(() => {
     const q = search.toLowerCase();
     const filtered = sites.filter(
@@ -180,18 +203,6 @@ export default function MainDashboardPage() {
   }, [sites]);
 
   const progressPct = job && job.total ? Math.round((job.done / job.total) * 100) : 0;
-
-  const SortHeader = ({ label, k, right }: { label: string; k: SortKey; right?: boolean }) => (
-    <th
-      onClick={() => toggleSort(k)}
-      className={`px-3 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer select-none hover:text-blue-600 ${right ? 'text-right' : 'text-left'}`}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <FontAwesomeIcon icon={faSort} className={sortKey === k ? 'text-blue-600' : 'text-gray-300'} />
-      </span>
-    </th>
-  );
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -281,73 +292,83 @@ export default function MainDashboardPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="mb-3">
+        {/* Search + sort */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Поиск по сайту или аккаунту…"
-            className="w-full md:w-96 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="flex-1 min-w-[220px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
+          <select
+            value={`${sortKey}-${sortDir}`}
+            onChange={(e) => {
+              const opt = SORT_OPTIONS.find((o) => o.value === e.target.value);
+              if (opt) { setSortKey(opt.key); setSortDir(opt.dir); }
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg bg-white"
+          >
+            {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>Сортировка: {o.label}</option>)}
+          </select>
+          <span className="text-sm text-gray-500">Найдено: {filteredSorted.length}</span>
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
-          {loading && sites.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              <FontAwesomeIcon icon={faSpinner} className="animate-spin text-2xl mb-3 text-blue-600" />
-              <p>Загрузка…</p>
-            </div>
-          ) : filteredSorted.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              {job?.running
-                ? 'Метрики считаются, скоро появятся…'
-                : 'Нет данных. Подключите аккаунт в настройках и нажмите «Обновить».'}
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <SortHeader label="Сайт" k="site_url" />
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Аккаунт</th>
-                  <SortHeader label="Клики" k="clicks" right />
-                  <SortHeader label="Показы" k="impressions" right />
-                  <SortHeader label="CTR" k="ctr" right />
-                  <SortHeader label="Позиция" k="position" right />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredSorted.map((s) => (
-                  <tr key={s.site_url} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 text-sm text-gray-900 max-w-xs truncate" title={s.site_url}>
+        {/* Карточки сайтов с мини-графиками */}
+        {loading && sites.length === 0 ? (
+          <div className="p-8 text-center text-gray-500 bg-white rounded-lg border border-gray-200">
+            <FontAwesomeIcon icon={faSpinner} className="animate-spin text-2xl mb-3 text-blue-600" />
+            <p>Загрузка…</p>
+          </div>
+        ) : filteredSorted.length === 0 ? (
+          <div className="p-8 text-center text-gray-500 bg-white rounded-lg border border-gray-200">
+            {job?.running
+              ? 'Метрики считаются, скоро появятся…'
+              : 'Нет данных. Подключите аккаунт в настройках и нажмите «Обновить».'}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredSorted.map((s) => (
+              <div key={s.site_url} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-900 truncate" title={s.site_url}>
                       {s.site_url.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-gray-500 max-w-[180px] truncate" title={s.account_email || ''}>
-                      {s.account_email || '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="text-sm font-medium text-gray-900">{fmt(s.clicks)}</div>
-                      <DeltaPct cur={s.clicks} prev={s.prev_clicks} />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="text-sm text-gray-900">{fmt(s.impressions)}</div>
-                      <DeltaPct cur={s.impressions} prev={s.prev_impressions} />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="text-sm text-gray-900">{(s.ctr * 100).toFixed(2)}%</div>
-                      <DeltaPct cur={s.ctr} prev={s.prev_ctr} />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="text-sm text-gray-900">{s.position.toFixed(1)}</div>
-                      <DeltaPos cur={s.position} prev={s.prev_position} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                    </div>
+                    <div className="text-xs text-gray-400 truncate" title={s.account_email || ''}>{s.account_email || '—'}</div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-xl font-bold text-blue-700 leading-none">{fmt(s.clicks)}</div>
+                    <div className="text-[11px] text-gray-400">кликов</div>
+                    <DeltaPct cur={s.clicks} prev={s.prev_clicks} />
+                  </div>
+                </div>
+
+                <div className="my-3">
+                  <Sparkline data={s.daily_clicks} />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center border-t border-gray-100 pt-3">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{fmt(s.impressions)}</div>
+                    <div className="text-[11px] text-gray-400">показы</div>
+                    <DeltaPct cur={s.impressions} prev={s.prev_impressions} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{(s.ctr * 100).toFixed(2)}%</div>
+                    <div className="text-[11px] text-gray-400">CTR</div>
+                    <DeltaPct cur={s.ctr} prev={s.prev_ctr} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{s.position.toFixed(1)}</div>
+                    <div className="text-[11px] text-gray-400">позиция</div>
+                    <DeltaPos cur={s.position} prev={s.prev_position} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
