@@ -15,6 +15,9 @@ data/
 ├── img/                      ← SQLite + сгенерированные картинки
 ├── mail/
 │   └── config.json           ← креды Cloudflare mail (account/db id + API-токен) — СЕКРЕТ
+├── proxy/
+│   ├── account.json          ← аккаунт PacketStream (username + auth key + reseller token) — СЕКРЕТ
+│   └── profiles.json         ← сохранённые прокси-профили
 └── seo/
     ├── client_secret.json    ← Google OAuth (для данных GSC) — СЕКРЕТ, положить сюда
     ├── authorizedcreds.dat   ← сохранённый OAuth-токен (создаётся после входа)

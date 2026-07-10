@@ -120,6 +120,11 @@ RUN cd /srv/panel/apps/content && npm install --omit=dev
 # (Папка worker/ — деплой-артефакты в Cloudflare, в образе не запускается.)
 RUN cd /srv/panel/apps/mail && npm install --omit=dev
 
+# proxy — Node/Express (express + https-proxy-agent + socks-proxy-agent для теста
+# exit-IP). Control-plane для прокси PacketStream: собирает/хранит/раздаёт конфиги,
+# трафик через себя не пускает. Без ключей поднимается, строки — как шаблон. Только прод-зависимости.
+RUN cd /srv/panel/apps/proxy && npm install --omit=dev
+
 # ----------------------------------------------------------------------------
 # 6. Caddy-конфиг дашборда, supervisor, entrypoint
 # ----------------------------------------------------------------------------
@@ -128,8 +133,8 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/panel.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Порты: 333 дашборд + 3331..3338 приложения + 5001 (seo-flask, нужен браузеру)
-EXPOSE 333 3331 3332 3333 3334 3335 3336 3337 3338 5001
+# Порты: 333 дашборд + 3331..3339 приложения + 5001 (seo-flask, нужен браузеру)
+EXPOSE 333 3331 3332 3333 3334 3335 3336 3337 3338 3339 5001
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

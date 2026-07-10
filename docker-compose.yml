@@ -41,6 +41,7 @@ services:
       - "3336:3336"   # skins — Brandskins (/admin)
       - "3337:3337"   # content — Content Gap Analyzer (сущности + интент)
       - "3338:3338"   # mail  — Cloudflare Email Catcher (Worker + D1)
+      - "3339:3339"   # proxy — Прокси-менеджер PacketStream (control-plane)
       # seo-фронт обращается к бэкенду по http://localhost:5001 ИЗ БРАУЗЕРА,
       # поэтому 5001 приходится публиковать (в отличие от первоначального плана).
       - "5001:5001"   # seo   — Flask-бэкенд
@@ -57,6 +58,7 @@ services:
       - ./data/seo:/data/seo   # seo: client_secret.json + OAuth-токен GSC + seo.db + logs
       - ./data/content:/data/content  # content: API-ключи, введённые в UI (keys.json)
       - ./data/mail:/data/mail  # mail: креды Cloudflare, введённые в UI (config.json)
+      - ./data/proxy:/data/proxy  # proxy: аккаунт PacketStream + профили (account.json / profiles.json)
 
   # Redis — кэш и очереди для seo-бэкенда (ускорение под нагрузкой).
   redis:
