@@ -75,3 +75,6 @@ sessions/
 
 # Claude Code local files
 .claude/
+
+# Deploy module: постоянное хранилище исходников сайтов (fallback вне /data/cf)
+deploy_data/
