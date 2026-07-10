@@ -15,8 +15,8 @@ if (!function_exists('dbRetryOnLock')) {
      * Возвращает результат $fn. Пробрасывает исключение, если оно не про блокировку
      * или исчерпаны попытки.
      */
-    function dbRetryOnLock(callable $fn, $tries = 8) {
-        $delayMs = 120;
+    function dbRetryOnLock(callable $fn, $tries = 12) {
+        $delayMs = 100;
         for ($i = 1; ; $i++) {
             try {
                 return $fn();
@@ -26,8 +26,9 @@ if (!function_exists('dbRetryOnLock')) {
                         || stripos($msg, 'database is busy') !== false
                         || stripos($msg, 'database table is locked') !== false);
                 if (!$locked || $i >= $tries) throw $e;
-                usleep($delayMs * 1000);
-                $delayMs = min($delayMs * 2, 2000); // бэкофф: 120,240,…,макс 2с
+                // Бэкофф с джиттером (чтобы конкуренты не били в одну точку): ~100,200,…,макс 3с.
+                usleep(($delayMs + random_int(0, 100)) * 1000);
+                $delayMs = min($delayMs * 2, 3000);
             }
         }
     }
