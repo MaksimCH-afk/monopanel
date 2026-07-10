@@ -386,6 +386,12 @@ try {
     } catch (Exception $e) {
         // Колонка уже существует
     }
+    // UID аккаунта Cloudflare (accounts[0].id) — для дедупа: один CF-аккаунт = один кредентал.
+    try {
+        $pdo->exec("ALTER TABLE cloudflare_credentials ADD COLUMN cf_account_uid TEXT");
+    } catch (Exception $e) {
+        // Колонка уже существует
+    }
     // WHOIS/RDAP доп. поля (DNSSEC, abuse-контакт, источник данных) — глобально,
     // чтобы whois_api.php работал и без предварительного захода на страницу WHOIS.
     foreach (['whois_dnssec TEXT', 'whois_abuse TEXT', 'whois_source TEXT', 'last_monitor DATETIME', 'proxied INTEGER'] as $col) {

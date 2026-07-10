@@ -419,31 +419,52 @@ try {
             break;
 
         case 'save_as_account':
-            // Сохранить токен как аккаунт панели (чтобы не потерять и управлять доменами).
+            // Сохранить токен как аккаунт панели. Дедуп: один CF-аккаунт = один кредентал
+            // (ключ — cf_account_uid). Повторный токен того же аккаунта не плодит дубль,
+            // а обновляет существующий и досинхронизирует домены.
             $tok = trim($_POST['token'] ?? '');
             $label = trim($_POST['label'] ?? '');
             if ($tok === '') throw new Exception('Нет токена для сохранения');
-            // Уже добавлен? Если да — не выходим молча, а ДОГОНЯЕМ импорт зон:
-            // раньше кнопка при «уже в панели» была пустышкой и домены могли не подтянуться
-            // (напр. первый импорт прошёл с 0 доменов). Теперь досинхронизируем.
-            $ex = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
-            $ex->execute([$userId, $tok]);
-            $existing = $ex->fetch();
+
+            // Имя и UID аккаунта из CF (нужны Account Settings:Read).
+            $name = ''; $uid = '';
+            $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');
+            if (!empty($acc['success']) && !empty($acc['result'][0])) {
+                $name = $acc['result'][0]['name'] ?? '';
+                $uid  = $acc['result'][0]['id'] ?? '';
+            }
+            $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
+
+            // Существующий кредентал того же аккаунта: сначала по UID, затем по точному токену.
+            $existing = null;
+            if ($uid !== '') {
+                $q = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND cf_account_uid = ? LIMIT 1");
+                $q->execute([$userId, $uid]);
+                $existing = $q->fetch() ?: null;
+            }
+            if (!$existing) {
+                $q = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND api_key = ? LIMIT 1");
+                $q->execute([$userId, $tok]);
+                $existing = $q->fetch() ?: null;
+            }
+
             if ($existing) {
-                $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
+                // Обновляем токен и UID существующего аккаунта, досинхронизируем домены — без дубля.
+                dbRetryOnLock(function () use ($pdo, $existing, $tok, $uid) {
+                    $pdo->prepare("UPDATE cloudflare_credentials SET api_key = ?, auth_type = 'token',
+                        cf_account_uid = COALESCE(NULLIF(?, ''), cf_account_uid) WHERE id = ?")
+                        ->execute([$tok, $uid, $existing['id']]);
+                });
                 $imp = mtImportZones($pdo, $userId, (int)$existing['id'], $existing['email'], $tok, $grp ?: null);
-                logAction($pdo, $userId, 'Аккаунт уже в панели — досинхронизация доменов',
-                    "{$existing['email']}: импортировано/обновлено доменов: " . ($imp['count'] ?? 0));
+                logAction($pdo, $userId, 'Аккаунт уже в панели — обновление токена и доменов',
+                    "{$existing['email']}: доменов: " . ($imp['count'] ?? 0));
                 echo json_encode(['success' => true, 'already' => true,
                     'imported' => $imp['count'] ?? 0, 'import_error' => $imp['error'] ?? null]);
                 break;
             }
-            // Имя аккаунта из CF (если у токена есть Account Settings Read)
-            $name = '';
-            $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');
-            if (!empty($acc['success']) && !empty($acc['result'][0]['name'])) $name = $acc['result'][0]['name'];
+
+            // Новый аккаунт.
             $email = $label ?: ($name ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $tok), -8)));
-            // Уникальность email: добавим суффикс при коллизии
             $base = $email; $i = 2;
             while (true) {
                 $c = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ?");
@@ -451,14 +472,75 @@ try {
                 if (!$c->fetchColumn()) break;
                 $email = $base . ' #' . $i; $i++;
             }
-            dbRetryOnLock(function () use ($pdo, $userId, $email, $tok) {
-                $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
+            dbRetryOnLock(function () use ($pdo, $userId, $email, $tok, $uid) {
+                $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type, cf_account_uid) VALUES (?, ?, ?, 'token', ?)")
+                    ->execute([$userId, $email, $tok, $uid !== '' ? $uid : null]);
             });
             $credId = (int)$pdo->lastInsertId();
-            $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
             $imp = mtImportZones($pdo, $userId, $credId, $email, $tok, $grp ?: null);
-            logAction($pdo, $userId, 'Аккаунт добавлен в панель', "через мастер-токен: {$email}, импортировано доменов: " . ($imp['count'] ?? 0));
+            logAction($pdo, $userId, 'Аккаунт добавлен в панель', "через мастер-токен: {$email}, доменов: " . ($imp['count'] ?? 0));
             echo json_encode(['success' => true, 'label' => $email, 'imported' => $imp['count'] ?? 0]);
+            break;
+
+        case 'dedup_accounts':
+            // Чистка дублей: один CF-аккаунт мог попасть в панель несколько раз (Account, #2, #3).
+            // Заполняем cf_account_uid где пусто, группируем по UID (фоллбэк — имя без " #N"),
+            // оставляем один кредентал, перецепляем домены и токены, лишние удаляем.
+            $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
+                FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
+
+            // 1) Досоздать UID где пусто (best-effort по токену аккаунта).
+            foreach ($creds as &$c) {
+                if (empty($c['cf_account_uid']) && !empty($c['api_key'])) {
+                    $a = cfMasterApi($c['api_key'], 'GET', 'accounts?per_page=1');
+                    if (!empty($a['success']) && !empty($a['result'][0]['id'])) {
+                        $c['cf_account_uid'] = $a['result'][0]['id'];
+                        $uidVal = $c['cf_account_uid']; $cid = $c['id'];
+                        dbRetryOnLock(function () use ($pdo, $uidVal, $cid) {
+                            $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ? WHERE id = ?")->execute([$uidVal, $cid]);
+                        });
+                    }
+                }
+            }
+            unset($c);
+
+            // 2) Группировка.
+            $groups = [];
+            foreach ($creds as $c) {
+                $key = !empty($c['cf_account_uid'])
+                    ? ('uid:' . $c['cf_account_uid'])
+                    : ('name:' . preg_replace('/\s+#\d+$/', '', $c['email']));
+                $groups[$key][] = $c;
+            }
+
+            // 3) Слияние.
+            $mergedGroups = 0; $deleted = 0; $report = [];
+            foreach ($groups as $items) {
+                if (count($items) < 2) continue;
+                usort($items, function ($a, $b) {
+                    $as = preg_match('/\s+#\d+$/', $a['email']) ? 1 : 0;
+                    $bs = preg_match('/\s+#\d+$/', $b['email']) ? 1 : 0;
+                    if ($as !== $bs) return $as - $bs;      // без суффикса — приоритетнее
+                    return (int)$a['id'] - (int)$b['id'];   // затем меньший id
+                });
+                $keep = $items[0];
+                $dupEmails = [];
+                for ($k = 1; $k < count($items); $k++) {
+                    $dup = $items[$k];
+                    dbRetryOnLock(function () use ($pdo, $userId, $dup, $keep) {
+                        $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ? WHERE user_id = ? AND account_id = ?")->execute([$keep['id'], $userId, $dup['id']]);
+                        $pdo->prepare("UPDATE cloudflare_api_tokens SET account_id = ? WHERE user_id = ? AND account_id = ?")->execute([$keep['id'], $userId, $dup['id']]);
+                        $pdo->prepare("DELETE FROM cloudflare_credentials WHERE id = ? AND user_id = ?")->execute([$dup['id'], $userId]);
+                    });
+                    $dupEmails[] = $dup['email'];
+                    $deleted++;
+                }
+                $mergedGroups++;
+                $report[] = ['keep' => $keep['email'], 'removed' => $dupEmails];
+            }
+            logAction($pdo, $userId, 'Дедуп аккаунтов', "групп: $mergedGroups, удалено дублей: $deleted");
+            echo json_encode(['success' => true, 'merged_groups' => $mergedGroups, 'deleted' => $deleted,
+                'total' => count($creds), 'report' => $report]);
             break;
 
         case 'delete_master':

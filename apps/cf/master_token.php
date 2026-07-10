@@ -97,6 +97,7 @@ include 'sidebar.php';
             <textarea id="domainsInput" class="form-control mb-2" rows="4" placeholder="по одному домену в строке:&#10;example.com&#10;site2.net"></textarea>
             <button class="btn btn-primary" onclick="addDomains()"><i class="fas fa-plus me-1"></i>Создать домены</button>
             <button class="btn btn-outline-secondary ms-1" onclick="importEmpty()"><i class="fas fa-download me-1"></i>Импортировать/обновить домены (все аккаунты)</button>
+            <button class="btn btn-outline-warning ms-1" onclick="dedupAccounts()"><i class="fas fa-object-group me-1"></i>Убрать дубли аккаунтов</button>
             <div id="addDomainsOut" class="mt-2"></div>
         </div>
     </div>
@@ -273,6 +274,24 @@ function importEmpty() {
         html += '</ul>';
         $('#addDomainsOut').html(html);
         showToast('Импорт завершён', 'success');
+    })
+    .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут' : 'Ошибка соединения') + '</span>'); });
+}
+function dedupAccounts() {
+    if (!confirm('Объединить дубли аккаунтов? Домены и токены перецепятся на один кредентал, лишние удалятся. Это безопасно и необратимо.')) return;
+    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Ищу и объединяю дубли…</div>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000, data: { action: 'dedup_accounts' } })
+    .done(function(r) {
+        if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
+        if (!r.deleted) { $('#addDomainsOut').html('<span class="text-muted small">Дублей не найдено (аккаунтов: ' + r.total + ').</span>'); return; }
+        let html = '<div class="small text-success mb-1">Объединено групп: ' + r.merged_groups + ', удалено дублей: ' + r.deleted + '</div><ul class="mb-0 ps-3 small">';
+        (r.report || []).forEach(function(x) {
+            html += '<li>Оставлен <b>' + $('<div>').text(x.keep).html() + '</b>, убраны: ' + $('<div>').text((x.removed || []).join(', ')).html() + '</li>';
+        });
+        html += '</ul>';
+        $('#addDomainsOut').html(html);
+        showToast('Дубли объединены', 'success');
+        if (typeof loadMasters === 'function') loadMasters();
     })
     .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут' : 'Ошибка соединения') + '</span>'); });
 }
