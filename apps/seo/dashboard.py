@@ -144,11 +144,19 @@ def _upsert(site_url, period_days, data):
         row.daily_clicks = json.dumps(data.get("daily_clicks") or [])
 
 
-def _run_refresh(period_days):
+def _run_refresh(period_days, only_missing=False):
     started = time.time()
-    log.info("Dashboard refresh started (period=%sd)", period_days)
+    log.info("Dashboard refresh started (period=%sd, only_missing=%s)", period_days, only_missing)
     try:
         sites = gscm.all_site_urls()
+        if only_missing:
+            # Считаем только новые сайты (без готовой сводки) — чтобы не гонять
+            # заново уже посчитанные сотни сайтов.
+            with session_scope() as s:
+                have = {r[0] for r in s.query(SiteSummary.site_url)
+                        .filter_by(period_days=period_days).all()}
+            sites = [x for x in sites if x not in have]
+            log.info("Dashboard refresh: %s new site(s) to compute", len(sites))
         with _lock:
             _job["total"] = len(sites)
 
@@ -179,14 +187,18 @@ def _run_refresh(period_days):
             _job["finished_at"] = time.time()
 
 
-def refresh_all(period_days=28):
-    """Запустить фоновое обновление. False, если уже идёт."""
+def refresh_all(period_days=28, only_missing=False):
+    """
+    Запустить фоновое обновление. False, если уже идёт.
+    only_missing=True — считать только сайты без готовой сводки (для синхронизации
+    новых сайтов без пересчёта всех остальных).
+    """
     with _lock:
         if _job["running"]:
             return False
         _job.update(running=True, done=0, total=0, period=period_days,
                     started_at=time.time(), finished_at=None, error=None)
-    threading.Thread(target=_run_refresh, args=(period_days,), daemon=True).start()
+    threading.Thread(target=_run_refresh, args=(period_days, only_missing), daemon=True).start()
     return True
 
 
@@ -196,13 +208,20 @@ def job_status():
 
 
 def get_summary(period_days=28):
-    """Прочитать готовый кэш метрик по всем сайтам за период."""
+    """
+    Прочитать готовый кэш метрик по сайтам за период. Показываем только
+    ПОДТВЕРЖДЁННЫЕ сайты — неподтверждённые (и удалённые из GSC) в анализ не идут,
+    даже если от них осталась старая сводка.
+    """
+    verified = set(gscm.all_site_urls())
     with session_scope() as s:
         rows = (s.query(SiteSummary)
                 .filter_by(period_days=period_days)
                 .order_by(SiteSummary.clicks.desc()).all())
         out = []
         for r in rows:
+            if r.site_url not in verified:
+                continue
             out.append({
                 "site_url": r.site_url,
                 "account_email": r.account_email,

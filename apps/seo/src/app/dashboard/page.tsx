@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import HelpButton from '@/components/ui/HelpButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faRefresh, faSpinner, faArrowUp, faArrowDown, faMinus } from '@fortawesome/free-solid-svg-icons';
+import { faRefresh, faSpinner, faArrowUp, faArrowDown, faMinus, faRotate, faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons';
 
 interface SiteRow {
   site_url: string;
@@ -117,6 +117,10 @@ export default function MainDashboardPage() {
   const [visibleCount, setVisibleCount] = useState(24);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Вкладка «Не подтверждённые»
+  const [showUnverified, setShowUnverified] = useState(false);
+  const [unverified, setUnverified] = useState<{ site_url: string; account_email: string | null }[]>([]);
+  const [unverifiedLoading, setUnverifiedLoading] = useState(false);
 
   const loadSummary = useCallback(async (p: number) => {
     setLoading(true);
@@ -169,6 +173,36 @@ export default function MainDashboardPage() {
       setJob(data.job || { running: true, done: 0, total: 0, period, error: null });
     } catch (e) {
       console.error('Error triggering refresh:', e);
+    }
+  };
+
+  // Синхронизация: подтянуть новые сайты из GSC и посчитать метрики ТОЛЬКО для них
+  // (уже загруженные не пересчитываются).
+  const syncSites = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period }),
+      });
+      const data = await res.json();
+      setJob(data.job || { running: true, done: 0, total: 0, period, error: null });
+    } catch (e) {
+      console.error('Error syncing sites:', e);
+    }
+  };
+
+  const openUnverified = async () => {
+    setShowUnverified(true);
+    setUnverifiedLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/accounts/unverified`);
+      const data = await res.json();
+      setUnverified(Array.isArray(data.sites) ? data.sites : []);
+    } catch {
+      setUnverified([]);
+    } finally {
+      setUnverifiedLoading(false);
     }
   };
 
@@ -234,7 +268,24 @@ export default function MainDashboardPage() {
               Единый обзор по всем сайтам и аккаунтам{lastUpdated ? ` · обновлено ${lastUpdated}` : ''}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={syncSites}
+              disabled={job?.running}
+              className="px-3 py-2 border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2 text-sm"
+              title="Подтянуть новые сайты из Google (уже загруженные не пересчитываются)"
+            >
+              <FontAwesomeIcon icon={job?.running ? faSpinner : faRotate} className={job?.running ? 'animate-spin' : ''} />
+              <span>Синхронизировать</span>
+            </button>
+            <button
+              onClick={openUnverified}
+              className="px-3 py-2 border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2 text-sm"
+              title="Сайты со статусом «не подтверждён в консоли» по всем аккаунтам"
+            >
+              <FontAwesomeIcon icon={faTriangleExclamation} className="text-yellow-500" />
+              <span>Не подтверждённые</span>
+            </button>
             <HelpButton title="Что такое «Главный дашборд»">
               <p>
                 Это <strong>единая сводка сразу по всем вашим сайтам и Google-аккаунтам</strong>. По каждому сайту —
@@ -244,7 +295,9 @@ export default function MainDashboardPage() {
               <ul className="list-disc list-inside space-y-1.5">
                 <li>Вверху — общие итоги по всем сайтам; карточки «Клики/Показы/CTR».</li>
                 <li>Таблица ниже — по каждому сайту; столбцы можно <strong>сортировать</strong>, а поле поиска фильтрует по домену или аккаунту.</li>
-                <li><strong>«Обновить»</strong> пересчитывает данные из Google (идёт в фоне — виден прогресс).</li>
+                <li><strong>«Обновить»</strong> пересчитывает данные по всем сайтам из Google (идёт в фоне — виден прогресс).</li>
+                <li><strong>«Синхронизировать»</strong> — подтянуть только <em>новые</em> сайты из Google и посчитать метрики лишь для них (уже загруженные сотни сайтов заново не считаются — быстро).</li>
+                <li><strong>«Не подтверждённые»</strong> — список сайтов, добавленных в аккаунт, но без подтверждённого владения; в анализ они не идут.</li>
               </ul>
               <p className="text-gray-500 text-xs">
                 Метка «обновлено …» показывает время последнего пересчёта. «new» вместо стрелки означает, что в прошлом
@@ -395,6 +448,53 @@ export default function MainDashboardPage() {
             {visible.length < filteredSorted.length
               ? 'Прокрутите, чтобы показать ещё…'
               : `Показаны все: ${filteredSorted.length}`}
+          </div>
+        )}
+
+        {/* Модалка «Не подтверждённые» — собирает неподтверждённые сайты по всем аккаунтам */}
+        {showUnverified && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowUnverified(false)}>
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FontAwesomeIcon icon={faTriangleExclamation} className="text-yellow-500" />
+                  Не подтверждённые сайты{!unverifiedLoading ? ` (${unverified.length})` : ''}
+                </h2>
+                <button onClick={() => setShowUnverified(false)} className="text-gray-400 hover:text-gray-700" aria-label="Закрыть">
+                  <FontAwesomeIcon icon={faXmark} className="text-xl" />
+                </button>
+              </div>
+              <div className="px-6 py-3 text-xs text-gray-500 border-b border-gray-100">
+                Эти сайты добавлены в аккаунт Google, но право собственности не подтверждено. В анализ они не
+                попадают. Подтвердите их в Google Search Console, затем нажмите «Синхронизировать».
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {unverifiedLoading ? (
+                  <div className="p-8 text-center text-gray-500">
+                    <FontAwesomeIcon icon={faSpinner} className="animate-spin text-2xl text-blue-600" />
+                  </div>
+                ) : unverified.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">Неподтверждённых сайтов нет 🎉</div>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {unverified.map((u) => (
+                      <li key={`${u.account_email}|${u.site_url}`} className="px-6 py-2.5 flex items-center justify-between gap-3">
+                        <a href={u.site_url.replace(/^sc-domain:/, 'https://')} target="_blank" rel="noopener noreferrer"
+                           className="text-sm text-blue-700 hover:underline truncate" title={u.site_url}>
+                          {u.site_url.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}
+                        </a>
+                        <span className="text-xs text-gray-400 flex-shrink-0 truncate max-w-[200px]" title={u.account_email || ''}>{u.account_email || '—'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 text-right">
+                <button onClick={() => setShowUnverified(false)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                  Закрыть
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
