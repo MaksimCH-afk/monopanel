@@ -168,6 +168,36 @@ include 'sidebar.php';
             </div>
         </div>
     </div>
+
+    <!-- Мои сайты (FR-7 привязка/SSL, FR-9 обновление) -->
+    <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-server me-2"></i>Мои сайты</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshSites" title="Обновить список">
+                <i class="fas fa-rotate"></i>
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Домен</th><th>Аккаунт</th><th>Режим</th>
+                            <th>Custom Domain</th><th>SSL</th><th class="text-end">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sitesBody">
+                        <tr><td colspan="6" class="text-muted small">Загрузка…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-text mt-2">
+                <i class="fas fa-circle-info me-1"></i>Обновление сайта (FR-9): выберите тот же аккаунт и домен,
+                загрузите новый ZIP и нажмите «Опубликовать» — версия заменится атомарно (неизменённые файлы
+                не перезаливаются). Правки мета/подпапок — фаза&nbsp;4.
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Всплывающее окно: файлы > 25 MiB (FR-1) -->
@@ -441,10 +471,22 @@ $pageScripts = <<<'JS'
 
             if (data.success) {
                 const url = data.workers_dev_url;
-                finalEl.innerHTML = '<div class="alert alert-success mb-0">'
+                let html = '<div class="alert alert-success mb-2">'
                     + '<i class="fas fa-circle-check me-2"></i>Сайт опубликован. '
                     + (url ? ('<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>') : 'URL уточните в Cloudflare.')
                     + '</div>';
+                if (data.zone_in_account) {
+                    html += '<button type="button" class="btn btn-primary btn-sm" id="bindAfterDeploy">'
+                        + '<i class="fas fa-link me-2"></i>Привязать домен ' + domainInput.value.trim() + ' + SSL</button>';
+                } else {
+                    html += '<div class="text-muted small"><i class="fas fa-circle-info me-1"></i>'
+                        + 'Зоны домена нет в этом аккаунте — привязка недоступна (§8). Сайт живёт на workers.dev.</div>';
+                }
+                finalEl.innerHTML = html;
+                const bindBtn = document.getElementById('bindAfterDeploy');
+                if (bindBtn) bindBtn.addEventListener('click', () =>
+                    bindDomain(accountSelect.value, domainInput.value.trim()));
+                loadSites();
                 showToast('Сайт опубликован', 'success');
             } else {
                 if (data.report && data.report.oversized && data.report.oversized.length) {
@@ -462,6 +504,91 @@ $pageScripts = <<<'JS'
             refreshButtons();
         }
     });
+
+    // ---- Мои сайты (FR-7 / FR-9) ----
+    const sitesBody = document.getElementById('sitesBody');
+
+    async function apiPost(params) {
+        const fd = new FormData();
+        Object.keys(params).forEach(k => fd.append(k, params[k]));
+        const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
+        return resp.json();
+    }
+
+    async function loadSites() {
+        try {
+            const data = await apiPost({ action: 'list_sites' });
+            const sites = (data && data.sites) || [];
+            if (!sites.length) {
+                sitesBody.innerHTML = '<tr><td colspan="6" class="text-muted small">Пока нет опубликованных сайтов.</td></tr>';
+                return;
+            }
+            sitesBody.innerHTML = '';
+            sites.forEach(s => {
+                const bound = Number(s.custom_domain_bound) === 1;
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td><div class="fw-semibold">' + s.domain + '</div>'
+                        + (s.workers_dev_url ? '<a href="' + s.workers_dev_url + '" target="_blank" rel="noopener" class="small">workers.dev ↗</a>' : '') + '</td>'
+                    + '<td class="small">' + (s.account_email || '') + '</td>'
+                    + '<td><span class="badge bg-' + (s.protection_mode === 'worker-first' ? 'warning text-dark' : 'secondary') + '">' + s.protection_mode + '</span></td>'
+                    + '<td>' + (bound ? '<span class="text-success"><i class="fas fa-link me-1"></i>привязан</span>' : '<span class="text-muted">нет</span>') + '</td>'
+                    + '<td class="small">' + (bound ? (s.ssl_status || '—') : '—') + '</td>'
+                    + '<td class="text-end"></td>';
+                const actions = tr.querySelector('td:last-child');
+                if (bound) {
+                    const site = 'https://' + s.domain;
+                    actions.innerHTML =
+                        '<a href="' + site + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary me-1">Открыть</a>'
+                        + '<button class="btn btn-sm btn-outline-secondary me-1" data-act="ssl">SSL</button>'
+                        + '<button class="btn btn-sm btn-outline-danger" data-act="unbind">Отвязать</button>';
+                    actions.querySelector('[data-act="ssl"]').onclick = () => checkSsl(s.account_id, s.domain);
+                    actions.querySelector('[data-act="unbind"]').onclick = () => unbindDomain(s.account_id, s.domain);
+                } else {
+                    actions.innerHTML = '<button class="btn btn-sm btn-primary" data-act="bind">Привязать + SSL</button>';
+                    actions.querySelector('[data-act="bind"]').onclick = () => bindDomain(s.account_id, s.domain);
+                }
+                sitesBody.appendChild(tr);
+            });
+        } catch (e) {
+            sitesBody.innerHTML = '<tr><td colspan="6" class="text-danger small">Ошибка загрузки: ' + e.message + '</td></tr>';
+        }
+    }
+
+    async function bindDomain(accountId, domain) {
+        if (!confirm('Привязать домен ' + domain + ' к этому сайту и включить SSL?\n\n'
+            + 'Cloudflare создаст DNS-запись и выпустит сертификат. Если домен привязан к другому '
+            + 'воркеру — он будет перепривязан на этот сайт.')) return;
+        try {
+            const data = await apiPost({ action: 'bind_domain', account_id: accountId, domain: domain, confirm: 1 });
+            if (data.success) {
+                showToast('Домен привязан. SSL: ' + (data.ssl_status || '—'), 'success');
+                loadSites();
+            } else {
+                showToast(data.error || 'Ошибка привязки', 'error');
+            }
+        } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
+    }
+
+    async function unbindDomain(accountId, domain) {
+        if (!confirm('Отвязать домен ' + domain + '? Сайт останется доступен на *.workers.dev.')) return;
+        try {
+            const data = await apiPost({ action: 'unbind_domain', account_id: accountId, domain: domain });
+            if (data.success) { showToast('Домен отвязан', 'success'); loadSites(); }
+            else showToast(data.error || 'Ошибка отвязки', 'error');
+        } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
+    }
+
+    async function checkSsl(accountId, domain) {
+        try {
+            const data = await apiPost({ action: 'binding_status', account_id: accountId, domain: domain });
+            if (data.success) { showToast('SSL: ' + (data.ssl_status || '—') + (data.bound ? '' : ' (не привязан)'), 'info'); loadSites(); }
+            else showToast(data.error || 'Ошибка проверки', 'error');
+        } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
+    }
+
+    document.getElementById('refreshSites').addEventListener('click', loadSites);
+    loadSites();
 })();
 JS;
 

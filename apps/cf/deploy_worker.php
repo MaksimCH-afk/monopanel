@@ -129,6 +129,107 @@ function cfDeployCheckDomain($pdo, $credentials, $accountCfId, $domain, $scriptN
 }
 
 /* =========================================================================
+ *  FR-7. Привязка Custom Domain и SSL (только по подтверждению)
+ * ========================================================================= */
+
+/**
+ * Привязывает домен к воркеру как Custom Domain (идемпотентный upsert — покрывает
+ * и перепривязку с другого воркера). Cloudflare сам создаёт DNS-запись и SSL.
+ * PUT /accounts/{id}/workers/domains {hostname, service, zone_id, environment}.
+ *
+ * @return array ['success'=>bool,'domain_id'=>?,'error'=>?]
+ */
+function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptName, $domain, $proxies, $userId) {
+    if (!$zoneId) {
+        return ['success' => false, 'error' => 'Нет зоны в аккаунте — привязка невозможна (§8).'];
+    }
+    $resp = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "accounts/$accountCfId/workers/domains", 'PUT', [
+            'hostname'    => $domain,
+            'service'     => $scriptName,
+            'zone_id'     => $zoneId,
+            'environment' => 'production',
+        ], $proxies, $userId, $credentials['auth_type'] ?? null);
+
+    if (empty($resp['success'])) {
+        $msg = $resp['api_errors'][0]['message'] ?? ('HTTP ' . ($resp['http_code'] ?? 0));
+        return ['success' => false, 'error' => 'workers/domains PUT: ' . $msg];
+    }
+    $d = $resp['data'];
+    $id = is_object($d) ? ($d->id ?? null) : ($d['id'] ?? null);
+    return ['success' => true, 'domain_id' => $id];
+}
+
+/**
+ * Отвязывает домен от воркера: находит запись Custom Domain по hostname и удаляет её.
+ * DELETE /accounts/{id}/workers/domains/{domain_id}.
+ *
+ * @return array ['success'=>bool,'error'=>?]
+ */
+function cfDeployUnbindDomain($pdo, $credentials, $accountCfId, $domain, $proxies, $userId) {
+    $wd = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "accounts/$accountCfId/workers/domains?hostname=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+    if (empty($wd['success']) || empty($wd['data'])) {
+        return ['success' => true, 'error' => null]; // уже не привязан — считаем успехом
+    }
+    $rec = is_array($wd['data']) ? reset($wd['data']) : $wd['data'];
+    $id = is_object($rec) ? ($rec->id ?? null) : ($rec['id'] ?? null);
+    if (!$id) return ['success' => true, 'error' => null];
+
+    $del = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "accounts/$accountCfId/workers/domains/$id", 'DELETE', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+    // DELETE у CF отвечает 200 с пустым result — cloudflareApiRequestDetailed вернёт success=false
+    // только при не-200. Считаем успехом при http 200.
+    if (($del['http_code'] ?? 0) === 200 || !empty($del['success'])) {
+        return ['success' => true, 'error' => null];
+    }
+    $msg = $del['api_errors'][0]['message'] ?? ('HTTP ' . ($del['http_code'] ?? 0));
+    return ['success' => false, 'error' => 'workers/domains DELETE: ' . $msg];
+}
+
+/**
+ * Состояние привязки и SSL для домена (для UI после привязки / кнопки «Проверить SSL»).
+ * SSL для Custom Domain выпускается автоматически; читаем статус edge-сертификата зоны.
+ *
+ * @return array ['bound'=>bool,'bound_to'=>?,'ssl_status'=>string]
+ */
+function cfDeployBindingStatus($pdo, $credentials, $accountCfId, $zoneId, $scriptName, $domain, $proxies, $userId) {
+    $out = ['bound' => false, 'bound_to' => null, 'ssl_status' => 'неизвестно'];
+
+    $wd = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "accounts/$accountCfId/workers/domains?hostname=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+    if (!empty($wd['success']) && !empty($wd['data'])) {
+        $rec = is_array($wd['data']) ? reset($wd['data']) : $wd['data'];
+        $svc = is_object($rec) ? ($rec->service ?? null) : ($rec['service'] ?? null);
+        if ($svc) { $out['bound'] = true; $out['bound_to'] = $svc; }
+    }
+
+    // Статус edge-сертификата зоны (best-effort): ssl/verification возвращает
+    // certificate_status по хостам зоны ('active' = сертификат выпущен).
+    if ($zoneId) {
+        $ver = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+            "zones/$zoneId/ssl/verification", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+        if (!empty($ver['success']) && !empty($ver['data'])) {
+            $status = null;
+            foreach ((array)$ver['data'] as $item) {
+                $host = is_object($item) ? ($item->hostname ?? '') : ($item['hostname'] ?? '');
+                $cs   = is_object($item) ? ($item->certificate_status ?? '') : ($item['certificate_status'] ?? '');
+                if ($host === $domain) { $status = $cs; break; }
+                if ($status === null && $cs) { $status = $cs; } // фоллбэк на первый
+            }
+            if ($status) {
+                $out['ssl_status'] = ($status === 'active') ? 'активен' : ('выпускается (' . $status . ')');
+            } else {
+                $out['ssl_status'] = $out['bound'] ? 'выпускается' : 'нет';
+            }
+        } elseif ($out['bound']) {
+            $out['ssl_status'] = 'выпускается';
+        }
+    }
+    return $out;
+}
+
+/* =========================================================================
  *  Извлечение архива и подготовка набора ассетов (FR-3)
  * ========================================================================= */
 

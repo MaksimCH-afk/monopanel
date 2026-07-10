@@ -231,6 +231,102 @@ try {
             ]);
             break;
 
+        case 'list_sites':
+            // FR-9: список опубликованных сайтов для управления и обновления.
+            $stmt = $pdo->prepare("SELECT s.*, c.email AS account_email
+                FROM cf_deploy_sites s
+                JOIN cloudflare_credentials c ON c.id = s.account_id
+                WHERE s.user_id = ? ORDER BY s.updated_at DESC");
+            $stmt->execute([$userId]);
+            echo json_encode(['success' => true, 'sites' => $stmt->fetchAll()]);
+            break;
+
+        case 'bind_domain':
+            // FR-7: привязка Custom Domain + SSL. ТОЛЬКО по явному подтверждению (confirm=1).
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            if (empty($_POST['confirm'])) throw new Exception('Требуется подтверждение привязки домена.');
+            if ($accId <= 0) throw new Exception('Не выбран аккаунт Cloudflare.');
+
+            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
+            $proxies = getProxies($pdo, $userId);
+            $scriptName = cfWorkerScriptName($domain);
+
+            // Сайт должен быть уже задеплоен (воркер существует).
+            $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id=? AND account_id=? AND domain=?");
+            $stmt->execute([$userId, $accId, $domain]);
+            $siteId = $stmt->fetchColumn();
+            if (!$siteId) throw new Exception('Сайт не найден — сначала опубликуйте его.');
+
+            $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
+            if (!$resolve['zone_in_account'] || !$resolve['zone_id']) {
+                throw new Exception('Зоны домена нет в этом аккаунте — привязка невозможна (§8). '
+                    . 'Перенесите зону в аккаунт или деплойте в аккаунт-владелец зоны.');
+            }
+
+            $bind = cfDeployBindDomain($pdo, $credentials, $resolve['account_cf_id'],
+                $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
+            if (!$bind['success']) {
+                logAction($pdo, $userId, 'Deploy Bind Failed', "domain=$domain err=" . $bind['error']);
+                throw new Exception($bind['error']);
+            }
+
+            $status = cfDeployBindingStatus($pdo, $credentials, $resolve['account_cf_id'],
+                $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
+
+            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                updated_at=datetime('now') WHERE id=?")
+                ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
+
+            logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl=" . $status['ssl_status']);
+            echo json_encode(['success' => true, 'domain' => $domain,
+                'site_url' => 'https://' . $domain, 'ssl_status' => $status['ssl_status']]);
+            break;
+
+        case 'unbind_domain':
+            // Отвязка Custom Domain (сайт остаётся на *.workers.dev).
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            if ($accId <= 0) throw new Exception('Не выбран аккаунт Cloudflare.');
+
+            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
+            $proxies = getProxies($pdo, $userId);
+            $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
+
+            $un = cfDeployUnbindDomain($pdo, $credentials, $resolve['account_cf_id'], $domain, $proxies, $userId);
+            if (!$un['success']) throw new Exception($un['error']);
+
+            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL,
+                updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
+                ->execute([$userId, $accId, $domain]);
+
+            logAction($pdo, $userId, 'Deploy Unbind', "domain=$domain");
+            echo json_encode(['success' => true, 'domain' => $domain]);
+            break;
+
+        case 'binding_status':
+            // Перечитать статус привязки/SSL (кнопка «Проверить SSL»).
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            if ($accId <= 0) throw new Exception('Не выбран аккаунт Cloudflare.');
+
+            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
+            $proxies = getProxies($pdo, $userId);
+            $scriptName = cfWorkerScriptName($domain);
+            $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
+
+            $status = cfDeployBindingStatus($pdo, $credentials, $resolve['account_cf_id'],
+                $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
+
+            if ($status['bound']) {
+                $pdo->prepare("UPDATE cf_deploy_sites SET ssl_status=?, custom_domain_bound=1,
+                    updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
+                    ->execute([$status['ssl_status'], $userId, $accId, $domain]);
+            }
+            echo json_encode(['success' => true, 'domain' => $domain,
+                'bound' => $status['bound'], 'bound_to' => $status['bound_to'], 'ssl_status' => $status['ssl_status']]);
+            break;
+
         default:
             throw new Exception('Неизвестное действие');
     }
