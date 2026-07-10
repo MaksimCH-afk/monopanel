@@ -113,6 +113,9 @@ export default function MainDashboardPage() {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('clicks');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Бесконечный скролл: сколько карточек показываем сейчас (догружаем при прокрутке).
+  const [visibleCount, setVisibleCount] = useState(24);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadSummary = useCallback(async (p: number) => {
@@ -183,6 +186,22 @@ export default function MainDashboardPage() {
       return ((av as number) - (bv as number)) * dir;
     });
   }, [sites, search, sortKey, sortDir]);
+
+  // При смене поиска/сортировки/периода показываем снова с начала.
+  useEffect(() => { setVisibleCount(24); }, [search, sortKey, sortDir, period]);
+
+  const visible = useMemo(() => filteredSorted.slice(0, visibleCount), [filteredSorted, visibleCount]);
+
+  // Догружаем следующую порцию, когда «маячок» внизу попадает в зону видимости.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || visible.length >= filteredSorted.length) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setVisibleCount((c) => c + 24);
+    }, { rootMargin: '600px' });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visible.length, filteredSorted.length]);
 
   const totals = useMemo(() => {
     return sites.reduce(
@@ -327,8 +346,8 @@ export default function MainDashboardPage() {
               : 'Нет данных. Подключите аккаунт в настройках и нажмите «Обновить».'}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filteredSorted.map((s) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {visible.map((s) => (
               <div key={s.site_url} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -367,6 +386,15 @@ export default function MainDashboardPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Маячок бесконечной прокрутки + счётчик */}
+        {filteredSorted.length > 0 && (
+          <div ref={sentinelRef} className="py-6 text-center text-sm text-gray-400">
+            {visible.length < filteredSorted.length
+              ? 'Прокрутите, чтобы показать ещё…'
+              : `Показаны все: ${filteredSorted.length}`}
           </div>
         )}
       </div>

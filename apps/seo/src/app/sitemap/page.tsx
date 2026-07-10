@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
 import HelpButton from '@/components/ui/HelpButton';
+import SiteSelect from '@/components/ui/SiteSelect';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -301,19 +302,7 @@ export default function SitemapPage() {
           <label htmlFor="site-select" className="block text-sm font-medium text-gray-700 mb-2">
             Сайт (доступно: {sites.length})
           </label>
-          <select
-            id="site-select"
-            value={selectedSite}
-            onChange={(e) => setSelectedSite(e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">Выберите сайт...</option>
-            {sites.map((site) => (
-              <option key={site} value={site}>
-                {site.replace('https://', '').replace('http://', '')}
-              </option>
-            ))}
-          </select>
+          <SiteSelect id="site-select" sites={sites} value={selectedSite} onChange={setSelectedSite} />
         </div>
 
         {/* Submit Form */}

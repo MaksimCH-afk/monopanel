@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import HelpButton from '@/components/ui/HelpButton';
+import SiteSelect from '@/components/ui/SiteSelect';
 import { useData } from '@/contexts/DataContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExclamationTriangle, faTrophy, faArrowDown } from '@fortawesome/free-solid-svg-icons';
@@ -661,18 +662,7 @@ export default function TrafficInsightsPage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Сайт (доступно: {sites.length})
               </label>
-              <select
-                value={selectedSite}
-                onChange={(e) => setSelectedSite(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              >
-                <option value="">Выберите сайт...</option>
-                {sites.map((site) => (
-                  <option key={site} value={site}>
-                    {site.replace('https://', '').replace('http://', '')}
-                  </option>
-                ))}
-              </select>
+              <SiteSelect sites={sites} value={selectedSite} onChange={setSelectedSite} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
