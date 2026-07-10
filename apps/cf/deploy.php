@@ -36,7 +36,9 @@ include 'sidebar.php';
         <div>
             <strong>Загрузите ZIP → проверьте архив → выберите аккаунт и домен → опубликуйте.</strong>
             Лимит 25&nbsp;MiB <em>на каждый файл</em> (размер архива не ограничен). Публикация идёт на
-            служебный <code>*.workers.dev</code>. Привязка домена и SSL подключаются на фазе&nbsp;3.
+            служебный <code>*.workers.dev</code>; если домен в выбранном аккаунте — его можно привязать
+            (Custom Domain + SSL) в блоке «Мои сайты». Тогда воркер обслуживает домен на edge Cloudflare
+            с приоритетом над прежним сервером.
         </div>
     </div>
 
@@ -541,9 +543,20 @@ $pageScripts = <<<'JS'
                 rows.push('<strong>SSL:</strong> ' + (s.ssl_active ? 'активен' : 'выключен'));
             }
             rows.push('<div class="mt-2">' + s.summary + '</div>');
-            rows.push('<div class="text-muted mt-1"><i class="fas fa-circle-info me-1"></i>'
-                + 'Привязка домена и SSL подключаются на фазе 3. Сейчас публикация идёт на служебный '
-                + '<code>*.workers.dev</code>.</div>');
+            // Пояснение о приоритете относительно возможного старого сервера.
+            if (s.zone_in_account) {
+                rows.push('<div class="alert alert-light border mt-2 mb-0 py-2">'
+                    + '<i class="fas fa-circle-info me-1"></i><strong>Приоритет.</strong> '
+                    + 'Домен в этом аккаунте, NS указывают на Cloudflare. После привязки Custom Domain '
+                    + 'запрос обслуживает воркер на edge Cloudflare — до старого сервера трафик не доходит, '
+                    + 'воркер имеет приоритет над прежней A-записью/origin.</div>');
+            } else {
+                rows.push('<div class="alert alert-light border mt-2 mb-0 py-2">'
+                    + '<i class="fas fa-circle-info me-1"></i><strong>Приоритет.</strong> '
+                    + 'Зоны нет в этом аккаунте — публикация живёт только на <code>*.workers.dev</code> и '
+                    + '<strong>не влияет на боевой домен</strong>: по нему по-прежнему отвечает текущий сервер '
+                    + '(куда указывают nameservers). Чтобы переключить — перенесите зону в этот аккаунт (смена NS).</div>');
+            }
             document.getElementById('domainStateBody').innerHTML = rows.join('<br>');
             document.getElementById('domainState').classList.remove('d-none');
         } catch (e) {
