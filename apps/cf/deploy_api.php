@@ -7,6 +7,15 @@
  * следующие фазы.
  */
 
+// ВАЖНО: подавляем вывод PHP-ошибок В ТЕЛО ответа ДО подключения файлов —
+// иначе любое предупреждение/deprecation из include-цепочки утечёт как HTML
+// и фронт получит «Unexpected token '<'». Ошибки по-прежнему идут в error_log.
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
+// Буфер ловит любой посторонний вывод; перед JSON мы его очищаем.
+ob_start();
+
 require_once 'config.php';
 require_once 'functions.php';
 require_once 'deploy_lib.php';
@@ -15,13 +24,11 @@ require_once 'deploy_edits.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-// Эндпоинт всегда обязан отвечать JSON-ом. Гасим вывод PHP-ошибок в тело ответа
-// (иначе фронт получает HTML → «Unexpected token '<'») и на фатальной ошибке
-// отдаём аккуратный JSON вместо страницы ошибки.
-ini_set('display_errors', '0');
+// На фатальной ошибке отдаём JSON вместо HTML-страницы ошибки.
 register_shutdown_function(function () {
     $e = error_get_last();
     if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        while (ob_get_level() > 0) { ob_end_clean(); }
         if (!headers_sent()) {
             http_response_code(500);
             header('Content-Type: application/json; charset=utf-8');
@@ -29,6 +36,13 @@ register_shutdown_function(function () {
         echo json_encode(['success' => false, 'error' => 'Внутренняя ошибка: ' . $e['message']]);
     }
 });
+
+/** Единая точка вывода JSON: сбрасывает любой посторонний вывод из буфера. */
+function cfDeployRespond($data) {
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    if (!headers_sent()) { header('Content-Type: application/json; charset=utf-8'); }
+    echo json_encode($data);
+}
 
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
@@ -536,5 +550,5 @@ try {
 } catch (Throwable $e) {
     // Throwable, а не Exception: ловим и Error/TypeError (иначе PHP отдаёт HTML).
     http_response_code(400);
-    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    cfDeployRespond(['success' => false, 'error' => $e->getMessage()]);
 }
