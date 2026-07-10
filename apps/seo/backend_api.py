@@ -1936,6 +1936,22 @@ def get_sitemap():
         print(f"{'='*60}\n", file=sys.stderr, flush=True)
         return jsonify({"error": f"Sitemap API error: {error_message}"}), 400
 
+@app.route('/api/sitemaps/urlcount', methods=['GET'])
+def sitemap_urlcount():
+    """
+    Посчитать URL в карте сайта, скачав её напрямую. Нужно для колонки
+    «Содержимое»: GSC отдаёт contents только по обычным картам, а у sitemap-индекса
+    показывает пусто — здесь считаем URL сами (рекурсивно по дочерним, с лимитом).
+    """
+    feedpath = (request.args.get('feedpath') or '').strip()
+    if not feedpath:
+        return jsonify({"error": "feedpath обязателен"}), 400
+    try:
+        return jsonify(seo_indexation.count_sitemap_urls(feedpath))
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/sitemaps/submit', methods=['POST'])
 def submit_sitemap():
     """Submit a sitemap for a site"""

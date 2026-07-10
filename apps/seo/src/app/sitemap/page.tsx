@@ -41,6 +41,23 @@ export default function SitemapPage() {
   const [selectedSitemapDetail, setSelectedSitemapDetail] = useState<Sitemap | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // Подсчёт URL по кнопке (когда GSC не отдаёт «Содержимое», обычно у индекса).
+  const [urlCounts, setUrlCounts] = useState<Record<string, { loading?: boolean; urls?: number; child?: number; isIndex?: boolean; capped?: boolean; error?: string }>>({});
+
+  const countUrls = async (path: string) => {
+    setUrlCounts((prev) => ({ ...prev, [path]: { loading: true } }));
+    try {
+      const res = await fetch(`${API_BASE}/api/sitemaps/urlcount?feedpath=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setUrlCounts((prev) => ({ ...prev, [path]: { error: data.error || 'Ошибка' } }));
+      } else {
+        setUrlCounts((prev) => ({ ...prev, [path]: { urls: data.urls, child: data.child_sitemaps, isIndex: data.is_index, capped: data.capped } }));
+      }
+    } catch {
+      setUrlCounts((prev) => ({ ...prev, [path]: { error: 'Не удалось посчитать' } }));
+    }
+  };
 
   useEffect(() => {
     fetchSites();
@@ -277,6 +294,11 @@ export default function SitemapPage() {
                   <li><strong>Удалить</strong> — убрать карту из Search Console (сам файл на сайте остаётся).</li>
                 </ul>
                 <p className="text-gray-500 text-xs">Google обрабатывает карту не мгновенно — статус может обновиться не сразу.</p>
+                <p className="text-gray-500 text-xs">
+                  <strong>Про «Содержимое»:</strong> Google показывает число URL только для обычных карт. У
+                  <em> карты-индекса</em> (файл, ссылающийся на другие карты) в GSC содержимое пустое — поэтому там
+                  есть кнопка <strong>«Посчитать URL»</strong>: она скачивает файл карты и считает адреса сама.
+                </p>
               </HelpButton>
               <Button
                 onClick={() => setShowSubmitForm(!showSubmitForm)}
@@ -487,8 +509,28 @@ export default function SitemapPage() {
                                 </span>
                               ))}
                             </div>
+                          ) : urlCounts[sitemap.path]?.urls !== undefined ? (
+                            <div className="text-xs text-gray-800">
+                              <span className="font-medium">{urlCounts[sitemap.path]!.urls!.toLocaleString()}</span> URL
+                              {urlCounts[sitemap.path]!.isIndex && (
+                                <span className="text-gray-400"> · индекс, карт: {urlCounts[sitemap.path]!.child}</span>
+                              )}
+                              {urlCounts[sitemap.path]!.capped && <span className="text-gray-400"> (лимит)</span>}
+                            </div>
+                          ) : urlCounts[sitemap.path]?.error ? (
+                            <span className="text-xs text-red-500" title={urlCounts[sitemap.path]!.error}>ошибка</span>
                           ) : (
-                            <span className="text-xs text-gray-400">N/A</span>
+                            <button
+                              type="button"
+                              onClick={() => countUrls(sitemap.path)}
+                              disabled={urlCounts[sitemap.path]?.loading}
+                              className="text-xs text-blue-600 hover:underline disabled:text-gray-400"
+                              title={sitemap.isSitemapsIndex ? 'GSC не показывает содержимое индекса — посчитаем URL из файла' : 'Посчитать URL из файла карты'}
+                            >
+                              {urlCounts[sitemap.path]?.loading ? (
+                                <><FontAwesomeIcon icon={faSpinner} className="animate-spin mr-1" />считаем…</>
+                              ) : 'Посчитать URL'}
+                            </button>
                           )}
                         </td>
                         <td className="px-3 py-3">

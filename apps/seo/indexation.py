@@ -102,6 +102,47 @@ def _fetch_sitemap_urls(sitemap_url, depth=0, seen=None):
     return urls
 
 
+def count_sitemap_urls(sitemap_url, max_children=80, timeout=20):
+    """
+    Посчитать URL в карте сайта (для индекса — рекурсивно по дочерним, с лимитом).
+    Быстрый ответ для колонки «Содержимое» на вкладке «Карта сайта», когда GSC не
+    отдаёт contents (обычно у sitemap-индекса — GSC считает содержимое только по
+    дочерним картам). Возвращает {urls, child_sitemaps, is_index, capped}.
+    """
+    seen = set()
+    result = {"urls": 0, "child_sitemaps": 0, "is_index": False, "capped": False}
+
+    def walk(u, depth):
+        if u in seen or depth > 4:
+            return
+        if len(seen) >= max_children:
+            result["capped"] = True
+            return
+        seen.add(u)
+        try:
+            resp = http_requests.get(u, headers={"User-Agent": UA}, timeout=timeout)
+            if resp.status_code != 200:
+                return
+            root = ET.fromstring(resp.content)
+        except Exception as e:  # noqa: BLE001
+            log.warning("count_sitemap fetch/parse failed %s: %s", u, e)
+            return
+        if root.tag.lower().endswith('sitemapindex'):
+            if depth == 0:
+                result["is_index"] = True
+            child_locs = [el.text.strip() for el in root.iter()
+                          if el.tag.lower().endswith('loc') and el.text]
+            result["child_sitemaps"] += len(child_locs)
+            for loc in child_locs:
+                walk(loc, depth + 1)
+        else:
+            result["urls"] += sum(1 for el in root.iter()
+                                  if el.tag.lower().endswith('loc') and el.text)
+
+    walk(sitemap_url, 0)
+    return result
+
+
 def _run_crawl(site_url, sitemap_url):
     try:
         log.info("Sitemap crawl start: site=%s sitemap=%s", site_url, sitemap_url)
