@@ -46,7 +46,11 @@ services:
       - "5001:5001"   # seo   — Flask-бэкенд
     volumes:
       # Постоянные данные (папка ./data в .gitignore — секреты не идут в git).
-      - ./data/cf:/data/cf     # cf-БД (токены Cloudflare) + credentials.txt
+      - ./data/cf:/data/cf     # cf: credentials.txt + исходники сайтов деплоя (bind-mount, видно с хоста)
+      # cf-БД (SQLite) — на named volume (ext4 внутри VM), а НЕ на bind-mount:
+      # WAL и блокировки SQLite на bind-mount под macOS ненадёжны → "database is locked"/"malformed".
+      # Entrypoint переносит существующую БД из /data/cf в этот том при первом старте.
+      - cf_db:/var/cfdb
       - ./data/ank:/data/ank   # ank-БД (проекты, стратегии)
       - ./data/arc:/data/arc   # arc-БД (прогоны) — стартует с чистого листа
       - ./data/img:/data/img   # img: SQLite + сгенерированные картинки
@@ -62,3 +66,7 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - ./data/redis:/data   # AOF-персистентность кэша
+
+volumes:
+  # cf-БД SQLite на локальной ФС VM (надёжные блокировки/WAL), а не на bind-mount.
+  cf_db:
