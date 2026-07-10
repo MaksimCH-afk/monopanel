@@ -9,6 +9,12 @@ $stmt = $pdo->prepare("SELECT id, email, status FROM cloudflare_credentials WHER
 $stmt->execute([$userId]);
 $accounts = $stmt->fetchAll();
 
+// Наличие scoped-токена «Мастер-токен» по аккаунту (нужен для Workers Scripts:Edit).
+$tokenCounts = [];
+$ts = $pdo->prepare("SELECT account_id, COUNT(*) AS c FROM cloudflare_api_tokens WHERE user_id = ? GROUP BY account_id");
+$ts->execute([$userId]);
+foreach ($ts->fetchAll() as $r) { $tokenCounts[(int)$r['account_id']] = (int)$r['c']; }
+
 include 'sidebar.php';
 ?>
 
@@ -62,25 +68,28 @@ include 'sidebar.php';
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Аккаунт Cloudflare</label>
-                        <select class="form-select" id="accountSelect">
-                            <option value="">— выберите аккаунт —</option>
+                        <input type="text" class="form-control" id="accountSearch" list="accountList"
+                               placeholder="начните вводить email аккаунта…" autocomplete="off">
+                        <datalist id="accountList">
                             <?php foreach ($accounts as $acc): ?>
-                                <option value="<?php echo (int)$acc['id']; ?>">
-                                    <?php echo htmlspecialchars($acc['email']); ?>
-                                    <?php echo $acc['status'] !== 'active' ? ' (' . htmlspecialchars($acc['status']) . ')' : ''; ?>
-                                </option>
+                                <?php $lbl = $acc['email'] . ($acc['status'] !== 'active' ? ' (' . $acc['status'] . ')' : ''); ?>
+                                <option data-id="<?php echo (int)$acc['id']; ?>"
+                                        data-hastoken="<?php echo !empty($tokenCounts[(int)$acc['id']]) ? '1' : '0'; ?>"
+                                        value="<?php echo htmlspecialchars($lbl); ?>"></option>
                             <?php endforeach; ?>
-                        </select>
+                        </datalist>
+                        <input type="hidden" id="accountSelect" value="">
                         <?php if (empty($accounts)): ?>
                             <div class="form-text text-warning">Нет аккаунтов Cloudflare — добавьте их в «Мастер-токен».</div>
                         <?php else: ?>
-                            <div class="form-text">Домен должен принадлежать этому аккаунту (проверим на фазе 2).</div>
+                            <div class="form-text" id="accountHint">Начните вводить — список отфильтруется. Токен берётся из «Мастер-токен».</div>
                         <?php endif; ?>
                     </div>
                     <div class="mb-2">
                         <label class="form-label">Домен сайта</label>
-                        <input type="text" class="form-control" id="domainInput" placeholder="example.com" autocomplete="off">
-                        <div class="form-text">Имя воркера будет получено из домена автоматически.</div>
+                        <input type="text" class="form-control" id="domainInput" list="domainList" placeholder="example.com" autocomplete="off">
+                        <datalist id="domainList"></datalist>
+                        <div class="form-text" id="domainHint">Выберите аккаунт — подтянем его домены. Можно ввести домен вручную.</div>
                     </div>
                 </div>
             </div>
@@ -307,11 +316,20 @@ $pageScripts = <<<'JS'
     const validateBtn = document.getElementById('validateBtn');
     const checkDomainBtn = document.getElementById('checkDomainBtn');
     const publishBtn = document.getElementById('publishBtn');
-    const accountSelect = document.getElementById('accountSelect');
+    const accountSelect = document.getElementById('accountSelect');   // скрытый: хранит id аккаунта
+    const accountSearch = document.getElementById('accountSearch');    // поисковый ввод
     const domainInput = document.getElementById('domainInput');
+    const domainList = document.getElementById('domainList');
     const reportArea = document.getElementById('reportArea');
     let selectedFile = null;
     let archiveValid = false;
+    let accountZones = [];   // домены выбранного аккаунта (для проверки наличия)
+
+    // Карта: подпись аккаунта -> { id, hasToken } (из datalist).
+    const accountMap = {};
+    document.querySelectorAll('#accountList option').forEach(o => {
+        accountMap[o.value] = { id: o.dataset.id, hasToken: o.dataset.hastoken === '1' };
+    });
 
     function currentMode() {
         const el = document.querySelector('input[name="mode"]:checked');
@@ -329,8 +347,57 @@ $pageScripts = <<<'JS'
         r.addEventListener('change', () => {
             document.getElementById('workerFirstWarn').classList.toggle('d-none', currentMode() !== 'worker-first');
         }));
-    accountSelect.addEventListener('change', refreshButtons);
-    domainInput.addEventListener('input', refreshButtons);
+
+    // --- Выбор аккаунта (поиск по email) ---
+    const accountHint = document.getElementById('accountHint');
+    let loadedZonesAccountId = null;
+    async function onAccountChosen() {
+        const entry = accountMap[accountSearch.value.trim()];
+        accountSelect.value = entry ? entry.id : '';
+        refreshButtons();
+        if (!entry) { if (accountHint) accountHint.textContent = 'Аккаунт не распознан — выберите из списка.'; return; }
+        if (entry.id === loadedZonesAccountId) { updateDomainHint(); return; } // уже загружено
+        loadedZonesAccountId = entry.id;
+        domainList.innerHTML = '';
+        accountZones = [];
+        if (!entry.hasToken && accountHint) {
+            accountHint.innerHTML = '<span class="text-warning"><i class="fas fa-triangle-exclamation me-1"></i>'
+                + 'У аккаунта нет scoped-токена — создайте его в «Мастер-токен» (право Workers Scripts:Edit).</span>';
+        } else if (accountHint) {
+            accountHint.innerHTML = '<span class="text-muted">Подтягиваю домены аккаунта…</span>';
+        }
+        // Подтянуть домены аккаунта (FR-5 проверка наличия домена).
+        try {
+            const data = await apiPost({ action: 'account_zones', account_id: entry.id });
+            if (data.success) {
+                accountZones = data.zones || [];
+                domainList.innerHTML = '';
+                accountZones.forEach(z => {
+                    const o = document.createElement('option'); o.value = z; domainList.appendChild(o);
+                });
+                if (accountHint) accountHint.innerHTML = '<span class="text-muted">Доменов в аккаунте: '
+                    + accountZones.length + '. Выберите из списка или введите вручную.</span>';
+            } else if (accountHint) {
+                accountHint.innerHTML = '<span class="text-danger">' + (data.error || 'Не удалось получить домены аккаунта') + '</span>';
+            }
+        } catch (e) { if (accountHint) accountHint.innerHTML = '<span class="text-danger">Ошибка сети: ' + e.message + '</span>'; }
+        updateDomainHint();
+    }
+    accountSearch.addEventListener('change', onAccountChosen);
+    accountSearch.addEventListener('input', () => { if (accountMap[accountSearch.value.trim()]) onAccountChosen(); else { accountSelect.value=''; refreshButtons(); } });
+
+    // --- Проверка наличия домена в аккаунте ---
+    const domainHint = document.getElementById('domainHint');
+    function updateDomainHint() {
+        const d = domainInput.value.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/\/$/,'');
+        if (!d || !accountSelect.value) { domainHint.textContent = 'Выберите аккаунт — подтянем его домены. Можно ввести вручную.'; return; }
+        if (accountZones.length && accountZones.map(z=>z.toLowerCase()).includes(d)) {
+            domainHint.innerHTML = '<span class="text-success"><i class="fas fa-circle-check me-1"></i>Домен есть в аккаунте — привязка домена будет доступна.</span>';
+        } else {
+            domainHint.innerHTML = '<span class="text-secondary"><i class="fas fa-circle-info me-1"></i>Домена нет в этом аккаунте — публикация пойдёт на *.workers.dev (привязка домена недоступна, §8).</span>';
+        }
+    }
+    domainInput.addEventListener('input', () => { refreshButtons(); updateDomainHint(); });
 
     function fmtSize(bytes) {
         if (!bytes && bytes !== 0) return '—';

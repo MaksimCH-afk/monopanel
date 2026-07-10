@@ -15,6 +15,21 @@ require_once 'deploy_edits.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
+// Эндпоинт всегда обязан отвечать JSON-ом. Гасим вывод PHP-ошибок в тело ответа
+// (иначе фронт получает HTML → «Unexpected token '<'») и на фатальной ошибке
+// отдаём аккуратный JSON вместо страницы ошибки.
+ini_set('display_errors', '0');
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        echo json_encode(['success' => false, 'error' => 'Внутренняя ошибка: ' . $e['message']]);
+    }
+});
+
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
     echo json_encode(['success' => false, 'error' => 'Не авторизован']);
@@ -61,8 +76,13 @@ function cfDeployUploadErrorText($code) {
 }
 
 /**
- * Загружает учётные данные CF-аккаунта (cloudflare_credentials) по его id.
- * Возвращает ['email'=>..,'api_key'=>..,'auth_type'=>null] (auth_type определится автоматически).
+ * Загружает учётные данные CF-аккаунта по его id (cloudflare_credentials.id).
+ *
+ * Приоритет — scoped API-токен из раздела «Мастер-токен» (cloudflare_api_tokens):
+ * у него есть право Workers Scripts:Edit, нужное для Static Assets. Если токена нет —
+ * откатываемся на api_key из cloudflare_credentials (Global Key / старый ключ).
+ *
+ * @return array ['email'=>..,'api_key'=>..,'auth_type'=>'bearer'|null,'source'=>'token'|'legacy']
  */
 function cfDeployLoadCredentials($pdo, $userId, $accountId) {
     $stmt = $pdo->prepare("SELECT id, email, api_key, status FROM cloudflare_credentials WHERE id = ? AND user_id = ?");
@@ -71,7 +91,15 @@ function cfDeployLoadCredentials($pdo, $userId, $accountId) {
     if (!$row) {
         throw new Exception('Аккаунт Cloudflare не найден.');
     }
-    return ['email' => $row['email'], 'api_key' => $row['api_key'], 'auth_type' => null];
+
+    // Предпочитаем scoped-токен мастер-токена (самый свежий) для этого аккаунта.
+    $tokens = listCloudflareApiTokens($pdo, $userId, $accountId);
+    if (!empty($tokens) && !empty($tokens[0]['token'])) {
+        return ['email' => $row['email'], 'api_key' => trim($tokens[0]['token']),
+                'auth_type' => 'bearer', 'source' => 'token'];
+    }
+
+    return ['email' => $row['email'], 'api_key' => $row['api_key'], 'auth_type' => null, 'source' => 'legacy'];
 }
 
 /**
@@ -268,6 +296,36 @@ try {
                 'zone_in_account' => $resolve['zone_in_account'],
                 'steps'           => $deploy['steps'] ?? [],
             ]);
+            break;
+
+        case 'account_zones':
+            // Список зон (доменов) выбранного аккаунта — для проверки наличия домена
+            // и выпадающего списка (FR-4/FR-5). Ручной ввод остаётся возможен на фронте.
+            $accId = (int)($_POST['account_id'] ?? 0);
+            if ($accId <= 0) throw new Exception('Не выбран аккаунт Cloudflare.');
+            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
+            $proxies = getProxies($pdo, $userId);
+
+            $zones = [];
+            for ($page = 1; $page <= 3; $page++) {
+                $resp = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+                    "zones?per_page=50&page=$page", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+                if (empty($resp['success']) || empty($resp['data'])) {
+                    if ($page === 1 && !empty($resp['api_errors'])) {
+                        throw new Exception('Cloudflare: ' . ($resp['api_errors'][0]['message'] ?? 'нет доступа к зонам')
+                            . ' (проверьте права токена: Zone:Read).');
+                    }
+                    break;
+                }
+                foreach ($resp['data'] as $z) {
+                    $name = is_object($z) ? ($z->name ?? null) : ($z['name'] ?? null);
+                    if ($name) $zones[] = $name;
+                }
+                if (count($resp['data']) < 50) break;
+            }
+            sort($zones);
+            echo json_encode(['success' => true, 'zones' => array_values(array_unique($zones)),
+                'auth_source' => $credentials['source'] ?? 'legacy']);
             break;
 
         case 'list_sites':
@@ -475,7 +533,8 @@ try {
         default:
             throw new Exception('Неизвестное действие');
     }
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    // Throwable, а не Exception: ловим и Error/TypeError (иначе PHP отдаёт HTML).
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }
