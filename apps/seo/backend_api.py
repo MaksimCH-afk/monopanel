@@ -589,6 +589,12 @@ def refresh_accounts_endpoint():
     return jsonify({"success": True, "sites": total, "accounts": gscm.list_accounts()})
 
 
+@app.route('/api/accounts/unverified', methods=['GET'])
+def unverified_sites_endpoint():
+    """Неподтверждённые сайты по всем аккаунтам (для вкладки «Не подтверждённые»)."""
+    return jsonify({"sites": gscm.unverified_site_urls()})
+
+
 @app.route('/api/accounts/add-site', methods=['POST'])
 def add_site_endpoint():
     """
@@ -630,6 +636,20 @@ def dashboard_refresh():
                  request.args.get('period', 28)))
     started = seo_dashboard.refresh_all(period)
     return jsonify({"started": started, "job": seo_dashboard.job_status()})
+
+
+@app.route('/api/dashboard/sync', methods=['POST'])
+def dashboard_sync():
+    """
+    Синхронизация: перечитать списки сайтов по всем аккаунтам (быстро) и посчитать
+    метрики ТОЛЬКО для новых сайтов (без готовой сводки). Уже загруженные сотни
+    сайтов заново не пересчитываются.
+    """
+    period = int((request.get_json(silent=True) or {}).get('period',
+                 request.args.get('period', 28)))
+    total = gscm.refresh_all_sites()  # обновить списки сайтов (в т.ч. новые/неподтверждённые)
+    started = seo_dashboard.refresh_all(period, only_missing=True)
+    return jsonify({"started": started, "sites": total, "job": seo_dashboard.job_status()})
 
 
 @app.route('/api/dashboard/status', methods=['GET'])

@@ -88,14 +88,21 @@ def get_account_email(creds):
     return info.get('email')
 
 
+UNVERIFIED = 'siteUnverifiedUser'
+
+
 def fetch_sites(service):
-    """Список верифицированных сайтов аккаунта: [(site_url, permission_level)]."""
+    """
+    Все сайты аккаунта: [(site_url, permission_level)] — включая неподтверждённые.
+    Неподтверждённые хранятся, но в анализ (_site_index) не попадают; их отдельно
+    показывает вкладка «Не подтверждённые».
+    """
     resp = service.sites().list().execute()
     out = []
     for e in resp.get('siteEntry', []):
         url = e.get('siteUrl', '')
         perm = e.get('permissionLevel')
-        if perm != 'siteUnverifiedUser' and str(url).startswith('http'):
+        if str(url).startswith('http'):
             out.append((url, perm))
     return out
 
@@ -157,14 +164,17 @@ def rebuild_registry():
         accounts = [(a.id, a.email, a.token_json) for a in s.query(Account).all()]
         sites_by_acc = {}
         for row in s.query(Site).all():
-            sites_by_acc.setdefault(row.account_id, []).append(row.site_url)
+            sites_by_acc.setdefault(row.account_id, []).append((row.site_url, row.permission_level))
 
     for acc_id, email, token_json in accounts:
         try:
             creds = _refresh_and_persist(email, creds_from_json(token_json))
             _tokens_by_email[email] = creds.to_json()
-            for url in sites_by_acc.get(acc_id, []):
-                _site_index[url] = email
+            # В анализ идут только ПОДТВЕРЖДЁННЫЕ сайты; неподтверждённые — в БД,
+            # но не в индексе (их показывает вкладка «Не подтверждённые»).
+            for url, perm in sites_by_acc.get(acc_id, []):
+                if perm != UNVERIFIED:
+                    _site_index[url] = email
         except Exception as e:  # noqa: BLE001
             log.warning("rebuild_registry: account %s failed: %s", email, e)
 
@@ -231,6 +241,16 @@ def all_site_urls():
     if not _site_index and not _tokens_by_email:
         rebuild_registry()
     return sorted(_site_index.keys())
+
+
+def unverified_site_urls():
+    """Неподтверждённые сайты по всем аккаунтам: [{site_url, account_email}]."""
+    with session_scope() as s:
+        rows = (s.query(Site.site_url, Account.email)
+                .join(Account, Site.account_id == Account.id)
+                .filter(Site.permission_level == UNVERIFIED)
+                .order_by(Site.site_url).all())
+    return [{"site_url": u, "account_email": e} for (u, e) in rows]
 
 
 def account_email_for_site(site_url):
