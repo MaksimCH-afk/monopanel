@@ -1,0 +1,475 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Прокси-менеджер</title>
+<style>
+  :root{
+    --bg:#EAEBF3; --panel:#fff; --ink:#1E2333; --muted:#767C8F; --faint:#9AA0B2;
+    --line:#E6E8F1; --accent:#4F46E5; --accent-ink:#4338CA; --accent-soft:#EEF0FE;
+    --chip:#F3F4FA; --ok:#0E9F6E; --ok-soft:#E6F6EF; --warn:#B4791C; --warn-soft:#FBF3E2;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:var(--sans); color:var(--ink); background:var(--bg);
+    -webkit-font-smoothing:antialiased; padding:26px 22px 60px;
+  }
+  .wrap{max-width:1120px; margin:0 auto}
+  .eyebrow{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent-ink); font-weight:700; display:flex; align-items:center; gap:8px}
+  .eyebrow::before{content:""; width:3px; height:13px; background:var(--accent); border-radius:2px; display:inline-block}
+  .lead{color:var(--muted); font-size:14px; margin:8px 0 22px}
+
+  .grid{display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:18px; align-items:start}
+  @media(max-width:840px){ .grid{grid-template-columns:1fr} body{padding:18px 14px 48px} }
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:0 1px 2px rgba(30,35,51,.04), 0 8px 24px rgba(30,35,51,.04)}
+  .card .hd{display:flex; align-items:center; gap:11px; padding:16px 18px; border-bottom:1px solid var(--line)}
+  .card .bd{padding:18px}
+  .ico{width:34px;height:34px;border-radius:9px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:800;letter-spacing:.04em;flex:none}
+  .card h2{font-size:15px;margin:0;font-weight:650}
+  .card h2 + .sub{font-size:12px;color:var(--faint);margin-top:1px}
+
+  label.f{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 6px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:15px}
+  .row > div{flex:1 1 160px;min-width:0}
+  input,select{
+    width:100%;font-family:var(--sans);font-size:13.5px;color:var(--ink);
+    background:#FafbFd;border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none;
+  }
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  input::placeholder{color:var(--faint)}
+  .hint{font-size:11.5px;color:var(--faint);margin-top:5px}
+  .hint.ok{color:var(--ok)}
+
+  .seg{display:flex;background:var(--chip);border-radius:9px;padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:transparent;font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--muted);padding:7px 8px;border-radius:7px;cursor:pointer;transition:.12s}
+  .seg button[aria-pressed="true"]{background:#fff;color:var(--accent-ink);box-shadow:0 1px 2px rgba(30,35,51,.10)}
+
+  .preview{background:#12162A;border-radius:11px;padding:14px 15px;margin:4px 0 12px}
+  .preview .plabel{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#7E88B0;font-weight:700;margin-bottom:8px}
+  .preview code{font-family:var(--mono);font-size:12.5px;color:#D8DDF5;word-break:break-all;line-height:1.55;display:block}
+  .preview .accent{color:#8AA0FF}
+  .preview .param{color:#5FD3A6}
+
+  .fmttabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+  .fmttabs button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:5px 10px;font-size:11.5px;font-weight:600;color:var(--muted);cursor:pointer}
+  .fmttabs button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
+
+  .btn{font-family:var(--sans);font-size:13px;font-weight:650;border-radius:9px;padding:9px 15px;cursor:pointer;border:1px solid transparent;transition:.12s}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent-ink)}
+  .btn.ghost{background:#fff;border-color:var(--line);color:var(--ink)}
+  .btn.ghost:hover{border-color:#C9CDDC}
+  .btn.tiny{padding:5px 10px;font-size:11.5px;font-weight:600}
+  .btnbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+
+  .prof{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-bottom:11px}
+  .prof:last-child{margin-bottom:0}
+  .prof .top{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  .prof .name{font-weight:650;font-size:13.5px}
+  .prof .spread{margin-left:auto;display:flex;gap:6px}
+  .badge{font-size:10.5px;font-weight:700;letter-spacing:.03em;padding:3px 8px;border-radius:20px;text-transform:uppercase}
+  .b-proto{background:var(--accent-soft);color:var(--accent-ink)}
+  .b-rot{background:var(--chip);color:var(--muted)}
+  .b-sticky{background:var(--ok-soft);color:var(--ok)}
+  .b-geo{background:#F1EEFB;color:#6C4BD8}
+  .prof .str{font-family:var(--mono);font-size:11.5px;color:var(--muted);background:#F7F8FC;border-radius:7px;padding:8px 10px;word-break:break-all;line-height:1.5}
+  .prof .foot{display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap}
+  .assign{font-size:12px;color:var(--muted)}
+  .assign select{width:auto;display:inline-block;padding:5px 8px;font-size:12px}
+  .link{background:none;border:0;color:var(--accent-ink);font-weight:600;font-size:12px;cursor:pointer;padding:4px 2px}
+  .link.danger{color:#C6455C}
+  .exitip{font-family:var(--mono);font-size:11.5px;color:var(--ok);margin-left:auto}
+
+  .empty{text-align:center;color:var(--faint);font-size:13px;padding:26px 10px;border:1px dashed var(--line);border-radius:11px}
+
+  .balance{display:flex;align-items:baseline;gap:10px}
+  .balance .num{font-size:30px;font-weight:750;letter-spacing:-.02em}
+  .balance .unit{color:var(--muted);font-size:13px;font-weight:600}
+  .kv{display:flex;justify-content:space-between;font-size:12.5px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .kv:last-child{border-bottom:0}
+  .kv .k{color:var(--muted)} .kv .v{font-weight:600;font-family:var(--mono);font-size:12px}
+  .note{font-size:12px;color:var(--muted);background:var(--warn-soft);border:1px solid #F1E2C0;border-radius:9px;padding:10px 12px;line-height:1.5}
+  .note b{color:var(--warn)}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#12162A;color:#fff;font-size:13px;font-weight:600;padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:.2s}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .stack{display:grid;gap:18px}
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Прокси-менеджер</div>
+  <div class="lead">Собирает и хранит прокси PacketStream, назначает их вашим софтам. Трафик софты гоняют напрямую — панель только управляет. Ключ хранится на бэкенде, строки собирает сервер.</div>
+
+  <div class="grid">
+    <!-- ЛЕВО: билдер -->
+    <div class="card">
+      <div class="hd"><div class="ico">PS</div><div><h2>Новый профиль</h2><div class="sub">proxy.packetstream.io</div></div></div>
+      <div class="bd">
+
+        <div class="row">
+          <div>
+            <label class="f">Аккаунт — username</label>
+            <input id="acc-user" placeholder="ваш PacketStream username" autocomplete="off">
+          </div>
+          <div>
+            <label class="f">Аккаунт — auth key</label>
+            <input id="acc-key" type="password" placeholder="ключ из Network Access" autocomplete="off">
+            <div class="hint" id="acc-key-hint"></div>
+          </div>
+        </div>
+        <div class="btnbar" style="margin:-4px 0 15px">
+          <button class="btn ghost tiny" id="save-acc">Сохранить доступ</button>
+          <span class="hint" id="acc-status"></span>
+        </div>
+
+        <div class="row">
+          <div>
+            <label class="f">Название профиля</label>
+            <input id="p-name" placeholder="напр. US-скрапер">
+          </div>
+          <div>
+            <label class="f">Страна</label>
+            <select id="p-country"></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label class="f">Протокол</label>
+            <div class="seg" id="seg-proto">
+              <button data-v="https" aria-pressed="true">HTTPS</button>
+              <button data-v="socks5">SOCKS5</button>
+              <button data-v="http">HTTP</button>
+            </div>
+          </div>
+          <div>
+            <label class="f">IP</label>
+            <div class="seg" id="seg-rot">
+              <button data-v="rotating" aria-pressed="true">Rotating</button>
+              <button data-v="sticky">Sticky</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview">
+          <div class="plabel">Строка подключения (шаблон)</div>
+          <code id="pv"></code>
+        </div>
+
+        <div class="fmttabs" id="fmt">
+          <button data-v="url" aria-pressed="true">URL</button>
+          <button data-v="list">host:port:user:pass</button>
+          <button data-v="env">.env</button>
+          <button data-v="curl">cURL</button>
+        </div>
+
+        <div class="btnbar">
+          <button class="btn primary" id="save">Сохранить профиль</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ПРАВО: баланс + профили -->
+    <div class="stack">
+      <div class="card">
+        <div class="hd"><div class="ico" style="background:#0E9F6E">$</div><div><h2>Баланс и расход</h2><div class="sub">через Reseller API</div></div></div>
+        <div class="bd">
+          <div class="balance"><span class="num" id="bal">—</span><span class="unit">GB осталось</span></div>
+          <div style="height:12px"></div>
+          <div class="kv"><span class="k">Израсходовано за 14 дней</span><span class="v" id="used">—</span></div>
+          <div class="kv"><span class="k">Активных профилей</span><span class="v" id="cnt">0</span></div>
+          <div style="height:12px"></div>
+          <div class="row" style="margin-bottom:8px">
+            <div>
+              <label class="f">Reseller token (Bearer)</label>
+              <input id="acc-reseller" type="password" placeholder="токен из Reseller-доступа" autocomplete="off">
+              <div class="hint" id="acc-reseller-hint"></div>
+            </div>
+          </div>
+          <div class="note"><b>Нужен доступ.</b> Баланс отдаёт только Reseller API (<span style="font-family:var(--mono)">reseller.packetstream.io</span>, Bearer-токен) — его выдают после заявки. Токен хранится на бэкенде; кнопка ниже дёргает <span style="font-family:var(--mono)">/api/reseller/balance</span>.</div>
+          <div style="height:12px"></div>
+          <div class="btnbar">
+            <button class="btn ghost tiny" id="save-reseller">Сохранить токен</button>
+            <button class="btn ghost tiny" id="refresh-bal">Обновить баланс</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="hd"><div class="ico" style="background:#6C4BD8">#</div><div><h2>Профили</h2><div class="sub">назначены вашим приложениям</div></div></div>
+        <div class="bd"><div id="list"></div></div>
+      </div>
+
+      <div class="card">
+        <div class="hd"><div class="ico" style="background:#767C8F">↔</div><div><h2>Данные панели</h2><div class="sub">перенос между окружениями</div></div></div>
+        <div class="bd">
+          <div class="btnbar">
+            <button class="btn ghost tiny" id="export">Скопировать всё (JSON)</button>
+            <button class="btn ghost tiny" id="import">Импорт из JSON</button>
+          </div>
+          <div style="height:10px"></div>
+          <div class="sub" style="font-size:12px;color:var(--faint)">Профили и настройки хранит бэкенд (<span style="font-family:var(--mono)">/api/proxy/*</span>) в томе <span style="font-family:var(--mono)">/data/proxy</span>. Экспорт не содержит ключ — он остаётся на сервере.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== Данные PacketStream (для превью-шаблона; истину собирает сервер) ===== */
+const HOST = "proxy.packetstream.io";
+const PORTS   = { http:31112, https:31111, socks5:31113 };
+const SCHEMES = { http:"http",  https:"https", socks5:"socks5h" };
+
+const COUNTRIES = [
+  ["","Любая (глобально)"],["US","США"],["GB","Великобритания"],["DE","Германия"],["FR","Франция"],
+  ["NL","Нидерланды"],["CA","Канада"],["AU","Австралия"],["ES","Испания"],["IT","Италия"],
+  ["PL","Польша"],["SE","Швеция"],["CH","Швейцария"],["AT","Австрия"],["BE","Бельгия"],
+  ["BR","Бразилия"],["MX","Мексика"],["AR","Аргентина"],["JP","Япония"],["KR","Ю. Корея"],
+  ["SG","Сингапур"],["IN","Индия"],["ID","Индонезия"],["TR","Турция"],["AE","ОАЭ"],
+  ["SA","Сауд. Аравия"],["IL","Израиль"],["ZA","ЮАР"],["UA","Украина"],["RO","Румыния"],
+  ["CZ","Чехия"],["PT","Португалия"],["IE","Ирландия"],["NO","Норвегия"],["DK","Дания"],
+  ["FI","Финляндия"],["HK","Гонконг"],["TW","Тайвань"],["TH","Таиланд"],["VN","Вьетнам"],
+  ["PH","Филиппины"],["MY","Малайзия"],["CL","Чили"],["CO","Колумбия"],["GR","Греция"],
+  ["HU","Венгрия"],["BG","Болгария"],["NZ","Н. Зеландия"],["EG","Египет"],["NG","Нигерия"]
+];
+
+/* Приложения панели — цель назначения профиля (TZ §4) */
+const APPS = [
+  ["","— не назначен"],["cf","Cloudflare Panel"],["seo","SEO Dashboard"],["anc","Генератор анкоров"],
+  ["img","ImageGen"],["arc","Web Archive"],["skin","Brandskins"],["gap","Content Gap"],["mail","Почта"]
+];
+
+/* ===== Состояние ===== */
+let profiles = [];                 // приходят с бэкенда (у каждого .strings)
+let account  = null;               // статус аккаунта (маскированный)
+const draft = { name:"", country:"", proto:"https", sticky:false };
+let fmt = "url";
+
+const $ = s => document.querySelector(s);
+
+/* ===== API-хелперы ===== */
+async function api(path, opts){
+  const r = await fetch(path, Object.assign({ headers:{ "Content-Type":"application/json" } }, opts||{}));
+  const txt = await r.text();
+  let data; try { data = txt ? JSON.parse(txt) : {}; } catch { data = {}; }
+  if(!r.ok){ const e = new Error(data.error || ("HTTP "+r.status)); e.status = r.status; e.data = data; throw e; }
+  return data;
+}
+
+/* ===== Превью-шаблон билдера (ключ маскируется — сервер знает реальный) ===== */
+function keyPlaceholder(){
+  if(account && account.auth_key && account.auth_key.set) return account.auth_key.masked || "••••";
+  return "AUTH_KEY";
+}
+function userPlaceholder(){
+  if(account && account.username && account.username.value) return account.username.value;
+  return "USERNAME";
+}
+function previewHTML(p){
+  const user = userPlaceholder();
+  const port = PORTS[p.proto], scheme = SCHEMES[p.proto];
+  let pass = `<span class="accent">${keyPlaceholder()}</span>`;
+  if(p.country) pass += `<span class="param">_country-${p.country}</span>`;
+  if(p.sticky)  pass += `<span class="param">_session-########</span>`;
+  return `${scheme}://${user}:${pass}@${HOST}:<span class="accent">${port}</span>`;
+}
+
+/* ===== Рендер ===== */
+function renderPreview(){ $("#pv").innerHTML = previewHTML(draft); }
+
+function renderAccount(){
+  const u = account && account.username;
+  const k = account && account.auth_key;
+  const r = account && account.reseller_token;
+  $("#acc-user").placeholder = (u && u.value) ? u.value : "ваш PacketStream username";
+  const kh = $("#acc-key-hint");
+  if(k && k.set){ kh.textContent = `сохранён: ${k.masked} (${k.source})`; kh.className = "hint ok"; }
+  else { kh.textContent = "не задан"; kh.className = "hint"; }
+  const rh = $("#acc-reseller-hint");
+  if(r && r.set){ rh.textContent = `сохранён: ${r.masked}`; rh.className = "hint ok"; }
+  else { rh.textContent = "не задан — баланс недоступен"; rh.className = "hint"; }
+  $("#acc-status").textContent = (account && account.configured) ? "аккаунт готов" : "заполните username и auth key";
+  renderPreview();
+}
+
+function renderList(){
+  const el = $("#list");
+  $("#cnt").textContent = profiles.length;
+  if(!profiles.length){ el.innerHTML = `<div class="empty">Профилей пока нет.<br>Соберите первый слева и нажмите «Сохранить».</div>`; return; }
+  el.innerHTML = profiles.map(p=>{
+    const geo = p.country ? `<span class="badge b-geo">${p.country}</span>` : "";
+    const rot = p.sticky ? `<span class="badge b-sticky">Sticky</span>` : `<span class="badge b-rot">Rotating</span>`;
+    const opts = APPS.map(([v,l])=>`<option value="${v}" ${p.app_id===v?"selected":""}>${l}</option>`).join("");
+    const str = (p.strings && p.strings.url) ? p.strings.url : "";
+    return `<div class="prof" data-id="${p.id}">
+      <div class="top">
+        <span class="name">${escapeHtml(p.name||"без имени")}</span>
+        <span class="badge b-proto">${p.proto.toUpperCase()}</span> ${geo} ${rot}
+        <span class="spread">
+          ${p.sticky ? `<button class="link" data-act="regen" title="новый sticky-IP">пересоздать сессию</button>` : ""}
+          <button class="link danger" data-act="del">удалить</button>
+        </span>
+      </div>
+      <div class="str">${escapeHtml(str)}</div>
+      <div class="foot">
+        <span class="assign">→ <select data-act="assign">${opts}</select></span>
+        <button class="link" data-act="copy">копировать (${fmt})</button>
+        <button class="link" data-act="test">тест IP</button>
+        <span class="exitip" data-exit></span>
+      </div>
+    </div>`;
+  }).join("");
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+function render(){ renderAccount(); renderList(); }
+
+/* ===== Тосты / копирование ===== */
+let tt;
+function toast(m){ const t=$("#toast"); t.textContent=m; t.classList.add("show"); clearTimeout(tt); tt=setTimeout(()=>t.classList.remove("show"),1800); }
+async function copy(text,msg){ try{ await navigator.clipboard.writeText(text); }catch{ const a=document.createElement("textarea"); a.value=text; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); } toast(msg||"Скопировано"); }
+
+/* ===== Загрузка ===== */
+async function loadSettings(){ const d = await api("/api/proxy/settings"); account = d.account; }
+async function loadProfiles(){ profiles = await api("/api/proxy/profiles"); }
+async function boot(){
+  try { await loadSettings(); } catch(e){ /* ignore */ }
+  try { await loadProfiles(); } catch(e){ /* ignore */ }
+  render();
+}
+
+/* ===== Сохранение доступа (username + auth key) ===== */
+$("#save-acc").addEventListener("click", async ()=>{
+  const body = {};
+  const u = $("#acc-user").value.trim();
+  const k = $("#acc-key").value.trim();
+  if(u) body.username = u;
+  if(k) body.auth_key = k;
+  if(!Object.keys(body).length){ toast("Введите username и/или auth key"); return; }
+  try{
+    const d = await api("/api/proxy/settings", { method:"POST", body: JSON.stringify(body) });
+    account = d.account; $("#acc-key").value=""; render();
+    toast(d.persisted ? "Доступ сохранён" : "Сохранено (без записи на диск)");
+    await loadProfiles(); renderList();   // строки пересоберутся с новым ключом
+  }catch(e){ toast("Ошибка сохранения: "+e.message); }
+});
+
+/* ===== Сохранение Reseller-токена ===== */
+$("#save-reseller").addEventListener("click", async ()=>{
+  const t = $("#acc-reseller").value.trim();
+  if(!t){ toast("Введите Reseller-токен"); return; }
+  try{
+    const d = await api("/api/proxy/settings", { method:"POST", body: JSON.stringify({ reseller_token:t }) });
+    account = d.account; $("#acc-reseller").value=""; renderAccount();
+    toast("Токен сохранён");
+  }catch(e){ toast("Ошибка сохранения: "+e.message); }
+});
+
+/* ===== События билдера ===== */
+$("#p-name").addEventListener("input", e=>{ draft.name=e.target.value; });
+
+const csel=$("#p-country");
+csel.innerHTML = COUNTRIES.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+csel.addEventListener("change", e=>{ draft.country=e.target.value; renderPreview(); });
+
+function seg(id,after){
+  document.querySelectorAll(`#${id} button`).forEach(b=>b.addEventListener("click",()=>{
+    document.querySelectorAll(`#${id} button`).forEach(x=>x.setAttribute("aria-pressed","false"));
+    b.setAttribute("aria-pressed","true"); after(b.dataset.v); renderPreview();
+  }));
+}
+seg("seg-proto",v=>draft.proto=v);
+seg("seg-rot",v=>{ draft.sticky = v==="sticky"; });
+
+document.querySelectorAll("#fmt button").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll("#fmt button").forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true"); fmt=b.dataset.v; renderList();
+}));
+
+/* ===== Сохранить профиль ===== */
+$("#save").addEventListener("click", async ()=>{
+  if(!account || !account.configured){ toast("Сначала сохраните username и auth key"); return; }
+  try{
+    const body = { name:draft.name.trim(), country:draft.country, proto:draft.proto, sticky:draft.sticky };
+    await api("/api/proxy/profiles", { method:"POST", body: JSON.stringify(body) });
+    draft.name=""; $("#p-name").value="";
+    await loadProfiles(); renderList(); toast("Профиль сохранён");
+  }catch(e){ toast("Ошибка: "+e.message); }
+});
+
+/* ===== События списка ===== */
+$("#list").addEventListener("click", async e=>{
+  const btn=e.target.closest("[data-act]"); if(!btn) return;
+  const card=e.target.closest(".prof"); const id=card.dataset.id;
+  const p=profiles.find(x=>x.id===id); if(!p) return;
+  const act=btn.dataset.act;
+  if(act==="del"){
+    try{ await api("/api/proxy/profiles/"+id, { method:"DELETE" }); await loadProfiles(); renderList(); toast("Удалён"); }
+    catch(e){ toast("Ошибка удаления: "+e.message); }
+  }
+  if(act==="copy"){
+    const val = (p.strings && p.strings[fmt]) ? p.strings[fmt] : (p.strings && p.strings.url);
+    copy(val, `Строка скопирована (${fmt})`);
+  }
+  if(act==="regen"){
+    try{ await api("/api/proxy/profiles/"+id, { method:"PATCH", body: JSON.stringify({ regenerate_session:true }) }); await loadProfiles(); renderList(); toast("Сессия пересоздана"); }
+    catch(e){ toast("Ошибка: "+e.message); }
+  }
+  if(act==="test"){ testProxy(p, card.querySelector("[data-exit]")); }
+});
+$("#list").addEventListener("change", async e=>{
+  const sel=e.target.closest('[data-act="assign"]'); if(!sel) return;
+  const id=e.target.closest(".prof").dataset.id;
+  try{ await api("/api/proxy/profiles/"+id, { method:"PATCH", body: JSON.stringify({ app_id: sel.value }) }); await loadProfiles(); toast("Назначено"); }
+  catch(e){ toast("Ошибка: "+e.message); }
+});
+
+/* ===== Тест exit-IP (бэкенд гоняет запрос через прокси) ===== */
+async function testProxy(p, out){
+  out.textContent="проверяю…";
+  try{
+    const d = await api(`/api/proxy/test?id=${p.id}`);
+    out.textContent = `${d.ip} · ${d.country_iso||"?"}${d.city?" · "+d.city:""}`;
+  }catch(e){
+    out.textContent = e.data && e.data.detail ? ("ошибка: "+e.data.detail) : "ошибка теста";
+  }
+}
+
+/* ===== Баланс (Reseller API) ===== */
+async function refreshBalance(){
+  try{
+    const d = await api("/api/reseller/balance");
+    $("#bal").textContent = (d.gb_remaining ?? "—");
+    $("#used").textContent = (d.gb_used_14d ?? "—") + " GB";
+    if(d.mock) toast("Reseller: демо-данные (mock)");
+  }catch(e){
+    if(e.status===409) toast("Подключите Reseller API (сохраните токен)");
+    else toast("Reseller: "+(e.data && e.data.detail || e.message));
+  }
+}
+$("#refresh-bal").addEventListener("click", refreshBalance);
+
+/* ===== Экспорт / импорт (без секретов) ===== */
+$("#export").addEventListener("click",()=>{
+  const clean = profiles.map(({strings, ...p})=>p);   // без собранных строк/ключа
+  copy(JSON.stringify({ profiles: clean }, null, 2), "JSON скопирован (без ключа)");
+});
+$("#import").addEventListener("click", async ()=>{
+  const raw=prompt("Вставьте JSON профилей:"); if(!raw) return;
+  let d; try{ d=JSON.parse(raw); }catch{ toast("Некорректный JSON"); return; }
+  if(!Array.isArray(d.profiles)){ toast("Нет массива profiles"); return; }
+  let ok=0;
+  for(const p of d.profiles){
+    try{ await api("/api/proxy/profiles", { method:"POST", body: JSON.stringify({ name:p.name, country:p.country, proto:p.proto, sticky:p.sticky }) }); ok++; }
+    catch{ /* пропускаем битые */ }
+  }
+  await loadProfiles(); renderList(); toast(`Импортировано: ${ok}`);
+});
+
+boot();
+</script>
