@@ -18,6 +18,7 @@ ob_start();
 
 require_once 'config.php';
 require_once 'functions.php';
+require_once 'db_retry.php';
 require_once 'deploy_lib.php';
 require_once 'deploy_worker.php';
 require_once 'deploy_edits.php';
@@ -262,22 +263,27 @@ try {
             $accountCfId = $resolve['account_cf_id'];
 
             // Сайт заводим/находим ДО деплоя (нужен siteId для хранилища исходника).
-            $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
-            $stmt->execute([$userId, $accId, $domain]);
-            $siteId = $stmt->fetchColumn();
-            if ($siteId) {
-                $pdo->prepare("UPDATE cf_deploy_sites SET worker_name=?, zone_id=?, protection_mode=?,
-                    updated_at=datetime('now') WHERE id=?")
-                    ->execute([$scriptName, $resolve['zone_id'], $mode, $siteId]);
-            } else {
-                $pdo->prepare("INSERT INTO cf_deploy_sites
-                    (user_id, account_id, domain, worker_name, zone_id, protection_mode, status)
-                    VALUES (?, ?, ?, ?, ?, ?, 'draft')")
-                    ->execute([$userId, $accId, $domain, $scriptName, $resolve['zone_id'], $mode]);
-                $siteId = $pdo->lastInsertId();
-            }
-            $pdo->prepare("INSERT OR IGNORE INTO cf_deploy_versions (site_id, prefix) VALUES (?, '')")
-                ->execute([$siteId]);
+            // Всё одним ретрай-блоком: read→write под фоновой нагрузкой чувствителен к
+            // "database is locked" (BUSY_SNAPSHOT).
+            $siteId = dbRetryOnLock(function () use ($pdo, $userId, $accId, $domain, $scriptName, $resolve, $mode) {
+                $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
+                $stmt->execute([$userId, $accId, $domain]);
+                $sid = $stmt->fetchColumn();
+                if ($sid) {
+                    $pdo->prepare("UPDATE cf_deploy_sites SET worker_name=?, zone_id=?, protection_mode=?,
+                        updated_at=datetime('now') WHERE id=?")
+                        ->execute([$scriptName, $resolve['zone_id'], $mode, $sid]);
+                } else {
+                    $pdo->prepare("INSERT INTO cf_deploy_sites
+                        (user_id, account_id, domain, worker_name, zone_id, protection_mode, status)
+                        VALUES (?, ?, ?, ?, ?, ?, 'draft')")
+                        ->execute([$userId, $accId, $domain, $scriptName, $resolve['zone_id'], $mode]);
+                    $sid = $pdo->lastInsertId();
+                }
+                $pdo->prepare("INSERT OR IGNORE INTO cf_deploy_versions (site_id, prefix) VALUES (?, '')")
+                    ->execute([$sid]);
+                return $sid;
+            });
 
             // Распаковка исходника в постоянное хранилище (для правок без re-upload — FR-10).
             $extract = cfDeployExtractZip($file['tmp_name'], $report['root_prefix']);
@@ -293,10 +299,12 @@ try {
                 $siteId, $domain, $mode, $proxies, $userId);
 
             if ($deploy['success']) {
-                $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, status='deployed',
-                    files_count=?, last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
-                    ->execute([$deploy['workers_dev_url'] ?? null, $deploy['files_count'] ?? 0, $siteId]);
-                logAction($pdo, $userId, 'Deploy Success',
+                dbRetryOnLock(function () use ($pdo, $deploy, $siteId) {
+                    $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, status='deployed',
+                        files_count=?, last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+                        ->execute([$deploy['workers_dev_url'] ?? null, $deploy['files_count'] ?? 0, $siteId]);
+                });
+                logActionSafe($pdo, $userId, 'Deploy Success',
                     "domain=$domain worker=$scriptName mode=$mode url=" . ($deploy['workers_dev_url'] ?? '?'));
             } else {
                 logAction($pdo, $userId, 'Deploy Failed', "domain=$domain worker=$scriptName err=" . ($deploy['error'] ?? '?'));

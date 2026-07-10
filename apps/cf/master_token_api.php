@@ -484,27 +484,27 @@ try {
 
         case 'dedup_accounts':
             // Чистка дублей: один CF-аккаунт мог попасть в панель несколько раз (Account, #2, #3).
-            // Заполняем cf_account_uid где пусто, группируем по UID (фоллбэк — имя без " #N"),
-            // оставляем один кредентал, перецепляем домены и токены, лишние удаляем.
+            // Чтобы не ловить "database is locked" (BUSY_SNAPSHOT при read→write вперемешку с
+            // фоновыми cf-queue/cf-monitor), делаем так:
+            //   1) все сетевые вызовы (резолв UID) — БЕЗ записи в БД;
+            //   2) ВСЕ записи — одной короткой транзакцией BEGIN IMMEDIATE (берём write-лок сразу),
+            //      обёрнутой в ретрай.
             $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
                 FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
 
-            // 1) Досоздать UID где пусто (best-effort по токену аккаунта).
-            foreach ($creds as &$c) {
+            // 1) Резолв UID (сеть) — только в память, без записи.
+            $uidUpdates = [];
+            foreach ($creds as $idx => $c) {
                 if (empty($c['cf_account_uid']) && !empty($c['api_key'])) {
                     $a = cfMasterApi($c['api_key'], 'GET', 'accounts?per_page=1');
                     if (!empty($a['success']) && !empty($a['result'][0]['id'])) {
-                        $c['cf_account_uid'] = $a['result'][0]['id'];
-                        $uidVal = $c['cf_account_uid']; $cid = $c['id'];
-                        dbRetryOnLock(function () use ($pdo, $uidVal, $cid) {
-                            $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ? WHERE id = ?")->execute([$uidVal, $cid]);
-                        });
+                        $creds[$idx]['cf_account_uid'] = $a['result'][0]['id'];
+                        $uidUpdates[(int)$c['id']] = $a['result'][0]['id'];
                     }
                 }
             }
-            unset($c);
 
-            // 2) Группировка.
+            // 2) Группировка и план слияния (в памяти).
             $groups = [];
             foreach ($creds as $c) {
                 $key = !empty($c['cf_account_uid'])
@@ -512,9 +512,7 @@ try {
                     : ('name:' . preg_replace('/\s+#\d+$/', '', $c['email']));
                 $groups[$key][] = $c;
             }
-
-            // 3) Слияние.
-            $mergedGroups = 0; $deleted = 0; $report = [];
+            $merges = []; $report = [];
             foreach ($groups as $items) {
                 if (count($items) < 2) continue;
                 usort($items, function ($a, $b) {
@@ -524,21 +522,45 @@ try {
                     return (int)$a['id'] - (int)$b['id'];   // затем меньший id
                 });
                 $keep = $items[0];
-                $dupEmails = [];
+                $removeIds = []; $removeEmails = [];
                 for ($k = 1; $k < count($items); $k++) {
-                    $dup = $items[$k];
-                    dbRetryOnLock(function () use ($pdo, $userId, $dup, $keep) {
-                        $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ? WHERE user_id = ? AND account_id = ?")->execute([$keep['id'], $userId, $dup['id']]);
-                        $pdo->prepare("UPDATE cloudflare_api_tokens SET account_id = ? WHERE user_id = ? AND account_id = ?")->execute([$keep['id'], $userId, $dup['id']]);
-                        $pdo->prepare("DELETE FROM cloudflare_credentials WHERE id = ? AND user_id = ?")->execute([$dup['id'], $userId]);
-                    });
-                    $dupEmails[] = $dup['email'];
-                    $deleted++;
+                    $removeIds[] = (int)$items[$k]['id'];
+                    $removeEmails[] = $items[$k]['email'];
                 }
-                $mergedGroups++;
-                $report[] = ['keep' => $keep['email'], 'removed' => $dupEmails];
+                $merges[] = ['keep' => (int)$keep['id'], 'remove' => $removeIds];
+                $report[] = ['keep' => $keep['email'], 'removed' => $removeEmails];
             }
-            logAction($pdo, $userId, 'Дедуп аккаунтов', "групп: $mergedGroups, удалено дублей: $deleted");
+            $mergedGroups = count($merges);
+
+            // 3) Все записи — одной транзакцией BEGIN IMMEDIATE с ретраем (быстро, без сети внутри).
+            $deleted = 0;
+            dbRetryOnLock(function () use ($pdo, $userId, $uidUpdates, $merges, &$deleted) {
+                $deleted = 0;
+                $pdo->exec('BEGIN IMMEDIATE');
+                try {
+                    foreach ($uidUpdates as $cid => $uidVal) {
+                        $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ? WHERE id = ? AND user_id = ?")
+                            ->execute([$uidVal, $cid, $userId]);
+                    }
+                    foreach ($merges as $m) {
+                        foreach ($m['remove'] as $rid) {
+                            $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ? WHERE user_id = ? AND account_id = ?")
+                                ->execute([$m['keep'], $userId, $rid]);
+                            $pdo->prepare("UPDATE cloudflare_api_tokens SET account_id = ? WHERE user_id = ? AND account_id = ?")
+                                ->execute([$m['keep'], $userId, $rid]);
+                            $pdo->prepare("DELETE FROM cloudflare_credentials WHERE id = ? AND user_id = ?")
+                                ->execute([$rid, $userId]);
+                            $deleted++;
+                        }
+                    }
+                    $pdo->exec('COMMIT');
+                } catch (Throwable $e) {
+                    try { $pdo->exec('ROLLBACK'); } catch (Throwable $ignore) {}
+                    throw $e;
+                }
+            });
+
+            logActionSafe($pdo, $userId, 'Дедуп аккаунтов', "групп: $mergedGroups, удалено дублей: $deleted");
             echo json_encode(['success' => true, 'merged_groups' => $mergedGroups, 'deleted' => $deleted,
                 'total' => count($creds), 'report' => $report]);
             break;
