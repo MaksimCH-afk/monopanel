@@ -133,6 +133,11 @@ export default function IndexationPage() {
               Если страница не в индексе, по ней не идёт трафик из поиска. Раздел помогает собрать список
               страниц, проверить их статус и отправить недостающие на переобход.
             </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+              Не путать с разделом <strong>«Карты сайта»</strong>: там вы <em>управляете</em> самими sitemap-файлами
+              в Google (добавить/удалить/статус). Здесь sitemap используется только как <em>источник списка
+              страниц</em> для проверки индексации — карту в Google этот раздел не меняет.
+            </div>
             <div>
               <p className="font-semibold text-gray-900 mb-1">Как пользоваться — по шагам:</p>
               <ol className="list-decimal list-inside space-y-1.5">
