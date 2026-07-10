@@ -644,69 +644,82 @@ function cfDeployEnableWorkersDev($pdo, $credentials, $accountCfId, $scriptName,
  */
 function cfDeployRun($pdo, $credentials, $accountCfId, $scriptName, $zipPath, $report, $mode, $proxies, $userId) {
     $steps = [];
-    $addStep = function ($name, $ok, $info = '') use (&$steps) {
-        $steps[] = ['step' => $name, 'ok' => $ok, 'info' => $info];
-    };
-
     // 1) Распаковка
     $ext = cfDeployExtractZip($zipPath, $report['root_prefix']);
     if (isset($ext['error'])) {
-        $addStep('Распаковка', false, $ext['error']);
-        return ['success' => false, 'steps' => $steps, 'error' => $ext['error']];
+        return ['success' => false, 'steps' => [['step' => 'Распаковка', 'ok' => false, 'info' => $ext['error']]],
+                'error' => $ext['error']];
     }
     $dir = $ext['dir'];
     $files = $ext['files'];
-    $addStep('Распаковка', true, count($files) . ' файлов');
+    $steps[] = ['step' => 'Распаковка', 'ok' => true, 'info' => count($files) . ' файлов'];
 
     try {
         // 2) Чистые URL и кэш (FR-3)
         $config = cfDeployPrepareAssets($dir, $files);
-        $addStep('Чистые URL и кэш', true,
-            'html_handling=' . $config['html_handling'] . ', not_found=' . $config['not_found_handling']);
+        $steps[] = ['step' => 'Чистые URL и кэш', 'ok' => true,
+            'info' => 'html_handling=' . $config['html_handling'] . ', not_found=' . $config['not_found_handling']];
 
-        // 3) Манифест
-        $mf = cfDeployBuildManifest($dir, $files);
-        $addStep('Хэш-манифест', true, count($mf['manifest']) . ' файлов');
-
-        // 4) Upload-сессия
-        $sess = cfDeployCreateUploadSession($pdo, $credentials, $accountCfId, $scriptName, $mf['manifest'], $proxies, $userId);
-        if (!$sess['success']) {
-            $addStep('Upload-сессия', false, $sess['error']);
-            return ['success' => false, 'steps' => $steps, 'error' => $sess['error']];
-        }
-        $bucketCount = array_sum(array_map('count', $sess['buckets']));
-        $addStep('Upload-сессия', true, $bucketCount . ' файлов к загрузке');
-
-        // 5) Загрузка бакетов
-        $up = cfDeployUploadBuckets($accountCfId, $sess['jwt'], $sess['buckets'], $mf['byHash'], $proxies);
-        if (!$up['success']) {
-            $addStep('Загрузка файлов', false, $up['error']);
-            return ['success' => false, 'steps' => $steps, 'error' => $up['error']];
-        }
-        $addStep('Загрузка файлов', true, $up['uploaded'] . ' загружено (остальные — дедуп по хэшу)');
-
-        // 6) Создание/обновление воркера
-        $put = cfDeployPutWorker($credentials, $accountCfId, $scriptName, $up['completion_jwt'], $config, $mode, $proxies);
-        if (!$put['success']) {
-            $addStep('Деплой воркера', false, $put['error']);
-            return ['success' => false, 'steps' => $steps, 'error' => $put['error']];
-        }
-        $addStep('Деплой воркера', true, 'имя ' . $scriptName . ' (' . $mode . ')');
-
-        // 7) Публикация на *.workers.dev
-        $dev = cfDeployEnableWorkersDev($pdo, $credentials, $accountCfId, $scriptName, $proxies, $userId);
-        if (!$dev['success']) {
-            $addStep('Публикация на workers.dev', false, $dev['error']);
-            // Воркер задеплоен, но URL не получили — не критично.
-            return ['success' => true, 'steps' => $steps, 'workers_dev_url' => null,
-                    'config' => $config, 'files_count' => count($files),
-                    'error' => $dev['error']];
-        }
-        $addStep('Публикация на workers.dev', true, $dev['url']);
-
-        return ['success' => true, 'steps' => $steps, 'workers_dev_url' => $dev['url'],
-                'config' => $config, 'files_count' => count($files)];
+        // 3-7) Публикация
+        $pub = cfDeployPublishDir($pdo, $credentials, $accountCfId, $scriptName, $dir, $files, $config, $mode, $proxies, $userId);
+        $pub['steps'] = array_merge($steps, $pub['steps']);
+        return $pub;
     } finally {
         cfDeployRmrf($dir);
     }
+}
+
+/**
+ * Публикует ГОТОВЫЙ набор ассетов (директория + список файлов + конфиг) на Static Assets:
+ * манифест → upload-сессия → бакеты → PUT воркера → *.workers.dev.
+ * Используется и прямым деплоем (cfDeployRun), и сборкой версий/меты (фаза 4).
+ *
+ * @return array ['success'=>bool,'steps'=>[...],'workers_dev_url'=>?,'config'=>...,'files_count'=>int,'error'=>?]
+ */
+function cfDeployPublishDir($pdo, $credentials, $accountCfId, $scriptName, $dir, $files, $config, $mode, $proxies, $userId) {
+    $steps = [];
+    $addStep = function ($name, $ok, $info = '') use (&$steps) {
+        $steps[] = ['step' => $name, 'ok' => $ok, 'info' => $info];
+    };
+
+    // Манифест
+    $mf = cfDeployBuildManifest($dir, $files);
+    $addStep('Хэш-манифест', true, count($mf['manifest']) . ' файлов');
+
+    // Upload-сессия
+    $sess = cfDeployCreateUploadSession($pdo, $credentials, $accountCfId, $scriptName, $mf['manifest'], $proxies, $userId);
+    if (!$sess['success']) {
+        $addStep('Upload-сессия', false, $sess['error']);
+        return ['success' => false, 'steps' => $steps, 'error' => $sess['error']];
+    }
+    $bucketCount = array_sum(array_map('count', $sess['buckets']));
+    $addStep('Upload-сессия', true, $bucketCount . ' файлов к загрузке');
+
+    // Загрузка бакетов
+    $up = cfDeployUploadBuckets($accountCfId, $sess['jwt'], $sess['buckets'], $mf['byHash'], $proxies);
+    if (!$up['success']) {
+        $addStep('Загрузка файлов', false, $up['error']);
+        return ['success' => false, 'steps' => $steps, 'error' => $up['error']];
+    }
+    $addStep('Загрузка файлов', true, $up['uploaded'] . ' загружено (остальные — дедуп по хэшу)');
+
+    // Создание/обновление воркера
+    $put = cfDeployPutWorker($credentials, $accountCfId, $scriptName, $up['completion_jwt'], $config, $mode, $proxies);
+    if (!$put['success']) {
+        $addStep('Деплой воркера', false, $put['error']);
+        return ['success' => false, 'steps' => $steps, 'error' => $put['error']];
+    }
+    $addStep('Деплой воркера', true, 'имя ' . $scriptName . ' (' . $mode . ')');
+
+    // Публикация на *.workers.dev
+    $dev = cfDeployEnableWorkersDev($pdo, $credentials, $accountCfId, $scriptName, $proxies, $userId);
+    if (!$dev['success']) {
+        $addStep('Публикация на workers.dev', false, $dev['error']);
+        return ['success' => true, 'steps' => $steps, 'workers_dev_url' => null,
+                'config' => $config, 'files_count' => count($files), 'error' => $dev['error']];
+    }
+    $addStep('Публикация на workers.dev', true, $dev['url']);
+
+    return ['success' => true, 'steps' => $steps, 'workers_dev_url' => $dev['url'],
+            'config' => $config, 'files_count' => count($files)];
 }

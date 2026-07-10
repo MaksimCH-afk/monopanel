@@ -220,6 +220,63 @@ include 'sidebar.php';
     </div>
 </div>
 
+<!-- Версии и мета (FR-10) -->
+<div class="modal fade" id="versionsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-sitemap me-2"></i>Версии и мета: <span id="vmDomain"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <div id="vmNoSource" class="alert alert-warning small d-none">
+                    <i class="fas fa-triangle-exclamation me-2"></i>Нет сохранённого исходника — загрузите ZIP для этого
+                    домена заново, тогда правки версий/меты станут доступны.
+                </div>
+
+                <h6 class="mb-2">Версии сайта</h6>
+                <div class="table-responsive mb-2">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr>
+                            <th>Версия</th><th>hreflang-локаль</th><th class="text-center">x-default</th><th></th>
+                        </tr></thead>
+                        <tbody id="vmVersions"></tbody>
+                    </table>
+                </div>
+
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-sm-4">
+                        <label class="form-label small mb-1">Новая подпапка</label>
+                        <input type="text" class="form-control form-control-sm" id="vmNewPrefix" placeholder="en, es-cl">
+                    </div>
+                    <div class="col-sm-5">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="vmShare">
+                            <label class="form-check-label small" for="vmShare">делить ассеты с корнем (не дублировать)</label>
+                        </div>
+                    </div>
+                    <div class="col-sm-3">
+                        <button type="button" class="btn btn-sm btn-primary w-100" id="vmAdd">
+                            <i class="fas fa-plus me-1"></i>Добавить копию
+                        </button>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="form-text mb-0">
+                        canonical проставляется автоматически (каждая версия — на себя). Локаль пуста → версия не входит
+                        в hreflang-кластер.
+                    </div>
+                    <button type="button" class="btn btn-success btn-sm" id="vmSaveMeta">
+                        <i class="fas fa-floppy-disk me-1"></i>Сохранить мету и переиздать
+                    </button>
+                </div>
+                <div id="vmStatus" class="small mt-2"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php
 $pageStyles = <<<CSS
 .deploy-dropzone {
@@ -541,13 +598,19 @@ $pageScripts = <<<'JS'
                     actions.innerHTML =
                         '<a href="' + site + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary me-1">Открыть</a>'
                         + '<button class="btn btn-sm btn-outline-secondary me-1" data-act="ssl">SSL</button>'
-                        + '<button class="btn btn-sm btn-outline-danger" data-act="unbind">Отвязать</button>';
+                        + '<button class="btn btn-sm btn-outline-danger me-1" data-act="unbind">Отвязать</button>';
                     actions.querySelector('[data-act="ssl"]').onclick = () => checkSsl(s.account_id, s.domain);
                     actions.querySelector('[data-act="unbind"]').onclick = () => unbindDomain(s.account_id, s.domain);
                 } else {
-                    actions.innerHTML = '<button class="btn btn-sm btn-primary" data-act="bind">Привязать + SSL</button>';
+                    actions.innerHTML = '<button class="btn btn-sm btn-primary me-1" data-act="bind">Привязать + SSL</button>';
                     actions.querySelector('[data-act="bind"]').onclick = () => bindDomain(s.account_id, s.domain);
                 }
+                // Версии/мета (FR-10) — для всех сайтов.
+                const verBtn = document.createElement('button');
+                verBtn.className = 'btn btn-sm btn-outline-dark';
+                verBtn.innerHTML = '<i class="fas fa-sitemap"></i> Версии';
+                verBtn.onclick = () => openVersions(s.account_id, s.domain);
+                actions.appendChild(verBtn);
                 sitesBody.appendChild(tr);
             });
         } catch (e) {
@@ -586,6 +649,105 @@ $pageScripts = <<<'JS'
             else showToast(data.error || 'Ошибка проверки', 'error');
         } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
     }
+
+    // ---- Версии и мета (FR-10) ----
+    let vmCtx = { accountId: null, domain: null };
+    const vmModalEl = document.getElementById('versionsModal');
+    const vmVersions = document.getElementById('vmVersions');
+
+    function vmLabel(prefix) { return prefix === '' ? '/ (корень)' : '/' + prefix + '/'; }
+
+    function renderVersions(data) {
+        document.getElementById('vmDomain').textContent = data.domain;
+        document.getElementById('vmNoSource').classList.toggle('d-none', !!data.has_source);
+        const meta = data.meta || { locales: {}, x_default: '' };
+        const locales = meta.locales || {};
+        vmVersions.innerHTML = '';
+        (data.versions || []).forEach(v => {
+            const prefix = (v.prefix || '').replace(/\/+$/,'');
+            const tr = document.createElement('tr');
+            const loc = locales[prefix] || '';
+            const isXd = (meta.x_default || '') === prefix;
+            tr.innerHTML =
+                '<td class="fw-semibold">' + vmLabel(prefix)
+                    + (Number(v.share_root_assets) === 1 ? ' <span class="badge bg-light text-dark">общие ассеты</span>' : '') + '</td>'
+                + '<td><input type="text" class="form-control form-control-sm vm-loc" data-prefix="' + prefix
+                    + '" value="' + loc + '" placeholder="ru, en, es-CL" style="max-width:120px"></td>'
+                + '<td class="text-center"><input type="radio" name="vmxd" class="vm-xd" data-prefix="' + prefix + '"' + (isXd ? ' checked' : '') + '></td>'
+                + '<td class="text-end"></td>';
+            if (prefix !== '') {
+                const rm = document.createElement('button');
+                rm.className = 'btn btn-sm btn-outline-danger';
+                rm.innerHTML = '<i class="fas fa-trash"></i>';
+                rm.onclick = () => removeSubfolder(prefix);
+                tr.querySelector('td:last-child').appendChild(rm);
+            }
+            vmVersions.appendChild(tr);
+        });
+    }
+
+    async function openVersions(accountId, domain) {
+        vmCtx = { accountId, domain };
+        document.getElementById('vmStatus').textContent = '';
+        try {
+            const data = await apiPost({ action: 'list_versions', account_id: accountId, domain: domain });
+            if (!data.success) { showToast(data.error || 'Ошибка', 'error'); return; }
+            renderVersions(data);
+            new bootstrap.Modal(vmModalEl).show();
+        } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
+    }
+
+    async function refreshVersions() {
+        const data = await apiPost({ action: 'list_versions', account_id: vmCtx.accountId, domain: vmCtx.domain });
+        if (data.success) renderVersions(data);
+    }
+
+    function vmSetStatus(html) { document.getElementById('vmStatus').innerHTML = html; }
+
+    async function addSubfolder() {
+        const prefix = document.getElementById('vmNewPrefix').value.trim();
+        const share = document.getElementById('vmShare').checked ? 1 : 0;
+        if (!prefix) { showToast('Укажите префикс подпапки', 'warning'); return; }
+        vmSetStatus('<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Копирую и переиздаю…</span>');
+        try {
+            const data = await apiPost({ action: 'add_subfolder', account_id: vmCtx.accountId, domain: vmCtx.domain, prefix, share_assets: share });
+            if (data.success) {
+                vmSetStatus('<span class="text-success">Подпапка ' + data.url + ' создана и переиздана.</span>');
+                document.getElementById('vmNewPrefix').value = '';
+                await refreshVersions(); loadSites();
+            } else { vmSetStatus('<span class="text-danger">' + (data.error || 'Ошибка') + '</span>'); }
+        } catch (e) { vmSetStatus('<span class="text-danger">Ошибка сети: ' + e.message + '</span>'); }
+    }
+
+    async function removeSubfolder(prefix) {
+        if (!confirm('Удалить версию /' + prefix + '/ и переиздать сайт?')) return;
+        vmSetStatus('<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Удаляю и переиздаю…</span>');
+        try {
+            const data = await apiPost({ action: 'remove_subfolder', account_id: vmCtx.accountId, domain: vmCtx.domain, prefix });
+            if (data.success) { vmSetStatus('<span class="text-success">Версия удалена.</span>'); await refreshVersions(); loadSites(); }
+            else vmSetStatus('<span class="text-danger">' + (data.error || 'Ошибка') + '</span>');
+        } catch (e) { vmSetStatus('<span class="text-danger">Ошибка сети: ' + e.message + '</span>'); }
+    }
+
+    async function saveMeta() {
+        const locales = {};
+        document.querySelectorAll('.vm-loc').forEach(i => {
+            const v = i.value.trim();
+            if (v) locales[i.dataset.prefix] = v;
+        });
+        const xd = document.querySelector('.vm-xd:checked');
+        const xDefault = xd ? xd.dataset.prefix : '';
+        vmSetStatus('<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Сохраняю и переиздаю…</span>');
+        try {
+            const data = await apiPost({ action: 'save_meta', account_id: vmCtx.accountId, domain: vmCtx.domain,
+                locales: JSON.stringify(locales), x_default: xDefault, enabled: 1 });
+            if (data.success) { vmSetStatus('<span class="text-success">Мета сохранена и переиздана.</span>'); loadSites(); }
+            else vmSetStatus('<span class="text-danger">' + (data.error || 'Ошибка') + '</span>');
+        } catch (e) { vmSetStatus('<span class="text-danger">Ошибка сети: ' + e.message + '</span>'); }
+    }
+
+    document.getElementById('vmAdd').addEventListener('click', addSubfolder);
+    document.getElementById('vmSaveMeta').addEventListener('click', saveMeta);
 
     document.getElementById('refreshSites').addEventListener('click', loadSites);
     loadSites();

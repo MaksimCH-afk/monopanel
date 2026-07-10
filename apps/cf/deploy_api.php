@@ -11,6 +11,7 @@ require_once 'config.php';
 require_once 'functions.php';
 require_once 'deploy_lib.php';
 require_once 'deploy_worker.php';
+require_once 'deploy_edits.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -71,6 +72,37 @@ function cfDeployLoadCredentials($pdo, $userId, $accountId) {
         throw new Exception('Аккаунт Cloudflare не найден.');
     }
     return ['email' => $row['email'], 'api_key' => $row['api_key'], 'auth_type' => null];
+}
+
+/**
+ * Пересобирает и переиздаёт сайт (корень + подпапки + мета) из постоянного исходника.
+ * Общая точка для add_subfolder / remove_subfolder / save_meta.
+ */
+function cfDeployRebuildSite($pdo, $userId, $accId, $domain) {
+    $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+    if (!$site) throw new Exception('Сайт не найден — сначала опубликуйте его.');
+    if (!cfDeployHasSource($site['id'])) {
+        throw new Exception('Нет сохранённого исходника сайта. Загрузите ZIP заново, затем повторите правку.');
+    }
+    $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
+    $proxies = getProxies($pdo, $userId);
+    $scriptName = $site['worker_name'] ?: cfWorkerScriptName($domain);
+    $mode = $site['protection_mode'] ?: 'static-only';
+
+    $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
+    if (!$resolve['account_cf_id']) {
+        throw new Exception($resolve['error'] ?? 'Не удалось определить аккаунт Cloudflare.');
+    }
+
+    $deploy = cfDeployAssembleAndPublish($pdo, $credentials, $resolve['account_cf_id'],
+        $scriptName, $site['id'], $domain, $mode, $proxies, $userId);
+
+    if ($deploy['success']) {
+        $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, files_count=?,
+            last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+            ->execute([$deploy['workers_dev_url'] ?? $site['workers_dev_url'], $deploy['files_count'] ?? 0, $site['id']]);
+    }
+    return $deploy;
 }
 
 /** Нормализация и базовая проверка домена. */
@@ -187,34 +219,41 @@ try {
             }
             $accountCfId = $resolve['account_cf_id'];
 
-            $deploy = cfDeployRun($pdo, $credentials, $accountCfId, $scriptName,
-                $file['tmp_name'], $report, $mode, $proxies, $userId);
+            // Сайт заводим/находим ДО деплоя (нужен siteId для хранилища исходника).
+            $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
+            $stmt->execute([$userId, $accId, $domain]);
+            $siteId = $stmt->fetchColumn();
+            if ($siteId) {
+                $pdo->prepare("UPDATE cf_deploy_sites SET worker_name=?, zone_id=?, protection_mode=?,
+                    updated_at=datetime('now') WHERE id=?")
+                    ->execute([$scriptName, $resolve['zone_id'], $mode, $siteId]);
+            } else {
+                $pdo->prepare("INSERT INTO cf_deploy_sites
+                    (user_id, account_id, domain, worker_name, zone_id, protection_mode, status)
+                    VALUES (?, ?, ?, ?, ?, ?, 'draft')")
+                    ->execute([$userId, $accId, $domain, $scriptName, $resolve['zone_id'], $mode]);
+                $siteId = $pdo->lastInsertId();
+            }
+            $pdo->prepare("INSERT OR IGNORE INTO cf_deploy_versions (site_id, prefix) VALUES (?, '')")
+                ->execute([$siteId]);
+
+            // Распаковка исходника в постоянное хранилище (для правок без re-upload — FR-10).
+            $extract = cfDeployExtractZip($file['tmp_name'], $report['root_prefix']);
+            if (isset($extract['error'])) throw new Exception($extract['error']);
+            try {
+                cfDeploySaveRootSource($siteId, $extract['dir'], $extract['files']);
+            } finally {
+                cfDeployRmrf($extract['dir']);
+            }
+
+            // Сборка (корень + подпапки + мета) и публикация.
+            $deploy = cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptName,
+                $siteId, $domain, $mode, $proxies, $userId);
 
             if ($deploy['success']) {
-                // Фиксируем сайт в модуле (корневая версия).
-                $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
-                $stmt->execute([$userId, $accId, $domain]);
-                $siteId = $stmt->fetchColumn();
-
-                if ($siteId) {
-                    $pdo->prepare("UPDATE cf_deploy_sites SET worker_name=?, zone_id=?, workers_dev_url=?,
-                        protection_mode=?, status='deployed', files_count=?, last_deploy_at=datetime('now'),
-                        updated_at=datetime('now') WHERE id=?")
-                        ->execute([$scriptName, $resolve['zone_id'], $deploy['workers_dev_url'] ?? null,
-                                   $mode, $deploy['files_count'] ?? 0, $siteId]);
-                } else {
-                    $pdo->prepare("INSERT INTO cf_deploy_sites
-                        (user_id, account_id, domain, worker_name, zone_id, workers_dev_url,
-                         protection_mode, status, files_count, last_deploy_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'deployed', ?, datetime('now'))")
-                        ->execute([$userId, $accId, $domain, $scriptName, $resolve['zone_id'],
-                                   $deploy['workers_dev_url'] ?? null, $mode, $deploy['files_count'] ?? 0]);
-                    $siteId = $pdo->lastInsertId();
-                }
-                // Корневая версия.
-                $pdo->prepare("INSERT OR IGNORE INTO cf_deploy_versions (site_id, prefix) VALUES (?, '')")
-                    ->execute([$siteId]);
-
+                $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, status='deployed',
+                    files_count=?, last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+                    ->execute([$deploy['workers_dev_url'] ?? null, $deploy['files_count'] ?? 0, $siteId]);
                 logAction($pdo, $userId, 'Deploy Success',
                     "domain=$domain worker=$scriptName mode=$mode url=" . ($deploy['workers_dev_url'] ?? '?'));
             } else {
@@ -325,6 +364,112 @@ try {
             }
             echo json_encode(['success' => true, 'domain' => $domain,
                 'bound' => $status['bound'], 'bound_to' => $status['bound_to'], 'ssl_status' => $status['ssl_status']]);
+            break;
+
+        case 'list_versions':
+            // FR-10: версии сайта (корень + подпапки) и текущий мета-конфиг.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+
+            $stmt = $pdo->prepare("SELECT prefix, source_prefix, share_root_assets FROM cf_deploy_versions
+                WHERE site_id = ? ORDER BY prefix");
+            $stmt->execute([$site['id']]);
+            $versions = $stmt->fetchAll();
+            $meta = cfDeployLoadMeta($pdo, $site['id']);
+
+            echo json_encode([
+                'success'  => true,
+                'domain'   => $domain,
+                'has_source' => cfDeployHasSource($site['id']),
+                'versions' => $versions,
+                'meta'     => $meta,
+            ]);
+            break;
+
+        case 'add_subfolder':
+            // FR-10.1: копия сайта в подпапку (/en/, /es-cl/).
+            $accId   = (int)($_POST['account_id'] ?? 0);
+            $domain  = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $prefix  = cfDeployNormalizePrefix($_POST['prefix'] ?? '');
+            $share   = !empty($_POST['share_assets']) ? 1 : 0;
+
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден — сначала опубликуйте его.');
+            if ($prefix === '') throw new Exception('Не указан префикс подпапки.');
+
+            $pdo->prepare("INSERT INTO cf_deploy_versions (site_id, prefix, source_prefix, share_root_assets)
+                VALUES (?, ?, '', ?)
+                ON CONFLICT(site_id, prefix) DO UPDATE SET share_root_assets = excluded.share_root_assets,
+                    updated_at = datetime('now')")
+                ->execute([$site['id'], $prefix, $share]);
+
+            $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
+            logAction($pdo, $userId, 'Deploy Subfolder', "domain=$domain prefix=$prefix share=$share ok=" . ($deploy['success'] ? 1 : 0));
+            echo json_encode(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
+                'prefix' => $prefix, 'url' => 'https://' . $domain . '/' . $prefix . '/', 'steps' => $deploy['steps'] ?? []]);
+            break;
+
+        case 'remove_subfolder':
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $prefix = cfDeployNormalizePrefix($_POST['prefix'] ?? '');
+
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+
+            $pdo->prepare("DELETE FROM cf_deploy_versions WHERE site_id = ? AND prefix = ?")
+                ->execute([$site['id'], $prefix]);
+            // Убираем удалённую версию из мета-локалей.
+            $meta = cfDeployLoadMeta($pdo, $site['id']);
+            if (isset($meta['locales'][$prefix])) { unset($meta['locales'][$prefix]); }
+            if (($meta['x_default'] ?? '') === $prefix) { $meta['x_default'] = ''; }
+            cfDeploySaveMeta($pdo, $site['id'], $meta);
+
+            $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
+            logAction($pdo, $userId, 'Deploy Subfolder Removed', "domain=$domain prefix=$prefix");
+            echo json_encode(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null, 'steps' => $deploy['steps'] ?? []]);
+            break;
+
+        case 'save_meta':
+            // FR-10.2: canonical/hreflang/x-default. Конфиг хранится в модуле и переприменяется.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+
+            $localesIn = $_POST['locales'] ?? '{}';
+            $locales = is_array($localesIn) ? $localesIn : json_decode($localesIn, true);
+            if (!is_array($locales)) $locales = [];
+            // Санитизация: ключ — известный префикс версии, значение — код локали.
+            $stmt = $pdo->prepare("SELECT prefix FROM cf_deploy_versions WHERE site_id = ?");
+            $stmt->execute([$site['id']]);
+            $known = array_column($stmt->fetchAll(), 'prefix');
+            $clean = [];
+            foreach ($locales as $pfx => $loc) {
+                $pfx = trim((string)$pfx, '/');
+                if (!in_array($pfx, $known, true)) continue;
+                $loc = trim((string)$loc);
+                if ($loc !== '' && !preg_match('/^[a-zA-Z]{2}(-[a-zA-Z0-9]{2,8})?$/', $loc)) {
+                    throw new Exception('Некорректный код локали: ' . htmlspecialchars($loc));
+                }
+                if ($loc !== '') $clean[$pfx] = $loc;
+            }
+            $xDefault = trim((string)($_POST['x_default'] ?? ''), '/');
+            if ($xDefault !== '' && !in_array($xDefault, $known, true)) $xDefault = '';
+
+            $meta = [
+                'enabled'   => !empty($_POST['enabled']) || !empty($clean),
+                'x_default' => $xDefault,
+                'locales'   => $clean,
+            ];
+            cfDeploySaveMeta($pdo, $site['id'], $meta);
+
+            $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
+            logAction($pdo, $userId, 'Deploy Meta Saved', "domain=$domain locales=" . count($clean));
+            echo json_encode(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
+                'meta' => $meta, 'steps' => $deploy['steps'] ?? []]);
             break;
 
         default:
