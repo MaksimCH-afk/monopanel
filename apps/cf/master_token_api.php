@@ -423,10 +423,21 @@ try {
             $tok = trim($_POST['token'] ?? '');
             $label = trim($_POST['label'] ?? '');
             if ($tok === '') throw new Exception('Нет токена для сохранения');
-            // Уже добавлен?
-            $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
+            // Уже добавлен? Если да — не выходим молча, а ДОГОНЯЕМ импорт зон:
+            // раньше кнопка при «уже в панели» была пустышкой и домены могли не подтянуться
+            // (напр. первый импорт прошёл с 0 доменов). Теперь досинхронизируем.
+            $ex = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
             $ex->execute([$userId, $tok]);
-            if ($ex->fetchColumn()) { echo json_encode(['success' => true, 'already' => true]); break; }
+            $existing = $ex->fetch();
+            if ($existing) {
+                $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
+                $imp = mtImportZones($pdo, $userId, (int)$existing['id'], $existing['email'], $tok, $grp ?: null);
+                logAction($pdo, $userId, 'Аккаунт уже в панели — досинхронизация доменов',
+                    "{$existing['email']}: импортировано/обновлено доменов: " . ($imp['count'] ?? 0));
+                echo json_encode(['success' => true, 'already' => true,
+                    'imported' => $imp['count'] ?? 0, 'import_error' => $imp['error'] ?? null]);
+                break;
+            }
             // Имя аккаунта из CF (если у токена есть Account Settings Read)
             $name = '';
             $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');

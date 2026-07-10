@@ -219,7 +219,14 @@ function saveAsAccount() {
     if (!tok) { showToast('Нет токена', 'warning'); return; }
     $.post('master_token_api.php', { action: 'save_as_account', token: tok }, function(r) {
         if (r.success) {
-            $('#saveAccOut').html(r.already ? '<span class="text-muted">Уже в панели</span>' : ('<span class="text-success">Добавлен: <b>' + $('<div>').text(r.label || '').html() + '</b></span>'));
+            if (r.already) {
+                let msg = '<span class="text-muted">Уже в панели</span>';
+                if (r.import_error) msg += ' <span class="text-danger">(импорт доменов: ' + $('<div>').text(r.import_error).html() + ')</span>';
+                else msg += ' <span class="text-success">— досинхронизировано доменов: ' + (r.imported || 0) + '</span>';
+                $('#saveAccOut').html(msg);
+            } else {
+                $('#saveAccOut').html('<span class="text-success">Добавлен: <b>' + $('<div>').text(r.label || '').html() + '</b> (доменов: ' + (r.imported || 0) + ')</span>');
+            }
             showToast('Аккаунт в панели', 'success');
         } else showToast('Ошибка: ' + (r.error || ''), 'error');
     }, 'json').fail(function(){ showToast('Ошибка соединения', 'error'); });
