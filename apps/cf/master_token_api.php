@@ -489,8 +489,12 @@ try {
             //   1) все сетевые вызовы (резолв UID) — БЕЗ записи в БД;
             //   2) ВСЕ записи — одной короткой транзакцией BEGIN IMMEDIATE (берём write-лок сразу),
             //      обёрнутой в ретрай.
-            $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
-                FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
+            // Чтения тоже под ретраем: фоновые cf-monitor/cf-queue/import могут держать
+            // краткую блокировку, из-за которой даже SELECT отдаёт BUSY_SNAPSHOT.
+            $creds = dbRetryOnLock(function () use ($pdo, $userId) {
+                return $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
+                    FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
+            });
 
             // 1) Резолв UID (сеть) — только в память, без записи.
             $uidUpdates = [];
@@ -507,16 +511,19 @@ try {
             // 1b) Обогащаем кредеталы признаками «ценности» (только чтение, до транзакции):
             //     мастер-токен (api_key совпадает с master_tokens.token), число кастомных
             //     токенов (cloudflare_api_tokens) и число доменов.
-            $masterTokset = [];
-            foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
-                        ->fetchAll(PDO::FETCH_COLUMN) as $mt) { $masterTokset[$mt] = true; }
-            $scopedCount = []; $domCount = [];
-            foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_api_tokens WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
-                $scopedCount[(int)$r['account_id']] = (int)$r['c'];
-            }
-            foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_accounts WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
-                $domCount[(int)$r['account_id']] = (int)$r['c'];
-            }
+            [$masterTokset, $scopedCount, $domCount] = dbRetryOnLock(function () use ($pdo, $userId) {
+                $mset = [];
+                foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
+                            ->fetchAll(PDO::FETCH_COLUMN) as $mt) { $mset[$mt] = true; }
+                $sc = []; $dc = [];
+                foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_api_tokens WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
+                    $sc[(int)$r['account_id']] = (int)$r['c'];
+                }
+                foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_accounts WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
+                    $dc[(int)$r['account_id']] = (int)$r['c'];
+                }
+                return [$mset, $sc, $dc];
+            });
             $baseName = function ($email) { return preg_replace('/\s*#\d+$/', '', trim((string)$email)); };
             // Чем выше балл — тем «главнее» аккаунт при выборе, кого оставить.
             // Приоритет: мастер-токен → кастомный токен → auth_type=token → наличие ключа/uid → домены.
@@ -616,7 +623,7 @@ try {
                     try { $pdo->exec('ROLLBACK'); } catch (Throwable $ignore) {}
                     throw $e;
                 }
-            });
+            }, 30); // больше попыток: операция разовая, но может конкурировать с фоновой записью/import
 
             logActionSafe($pdo, $userId, 'Дедуп аккаунтов', "групп: $mergedGroups, удалено дублей: $deleted");
             echo json_encode(['success' => true, 'merged_groups' => $mergedGroups, 'deleted' => $deleted,
