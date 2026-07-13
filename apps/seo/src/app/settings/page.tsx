@@ -689,10 +689,10 @@ export default function SettingsPage() {
               <h3 className="text-sm font-semibold text-gray-800">Мониторинг беклинков</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label htmlFor="xmlriver-user" className="block text-xs font-medium text-gray-700 mb-1">XMLRIVER — user ID</label>
+                  <label htmlFor="xmlriver-user" className="block text-xs font-medium text-gray-700 mb-1">XMLRIVER — user ID (число, не email)</label>
                   <input id="xmlriver-user" type="text" value={settings.xmlriverUser}
                     onChange={(e) => setSettings({ ...settings, xmlriverUser: e.target.value })}
-                    placeholder="напр. 12345"
+                    placeholder="напр. 15012"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
                 </div>
                 <div>
@@ -711,9 +711,13 @@ export default function SettingsPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-500">
-                XMLRIVER — проверка индексации беклинков (<a href="https://xmlriver.com/api/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">docs</a>).
-                2index Ninja — отправка беклинков на индексацию (<a href="https://2index.ninja/api-documentation" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">docs</a>).
-                Используются на странице «Беклинки».
+                <strong>Где взять XMLRIVER:</strong> кабинет XMLRiver → «Настройки сбора» → блок «URL для запросов».
+                В ссылке вида <code>…?user=15012&amp;key=4e71edba…</code> число после <code>user=</code> — это <strong>user ID</strong>,
+                а длинная строка после <code>key=</code> — это <strong>API key</strong>. Email сюда вписывать не нужно.
+                (<a href="https://xmlriver.com/api/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">docs</a>)
+                <br />
+                2index Ninja — отправка на индексацию (<a href="https://2index.ninja/api-documentation" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">docs</a>).
+                Используются на страницах «Индексация» и «Беклинки».
               </p>
             </div>
 
