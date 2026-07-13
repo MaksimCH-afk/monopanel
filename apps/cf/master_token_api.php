@@ -489,113 +489,119 @@ try {
             //   1) все сетевые вызовы (резолв UID) — БЕЗ записи в БД;
             //   2) ВСЕ записи — одной короткой транзакцией BEGIN IMMEDIATE (берём write-лок сразу),
             //      обёрнутой в ретрай.
-            // Чтения тоже под ретраем: фоновые cf-monitor/cf-queue/import могут держать
-            // краткую блокировку, из-за которой даже SELECT отдаёт BUSY_SNAPSHOT.
-            $creds = dbRetryOnLock(function () use ($pdo, $userId) {
-                return $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
-                    FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
+            // 1) Резолв UID (сеть) — БЕЗ БД-транзакции: быстрое чтение кредеталов (автокоммит),
+            //    затем сетевые вызовы только в память. Ничего не пишем и не держим снапшот.
+            $creds0 = dbRetryOnLock(function () use ($pdo, $userId) {
+                return $pdo->query("SELECT id, api_key, cf_account_uid
+                    FROM cloudflare_credentials WHERE user_id = $userId")->fetchAll();
             });
-
-            // 1) Резолв UID (сеть) — только в память, без записи.
             $uidUpdates = [];
-            foreach ($creds as $idx => $c) {
+            foreach ($creds0 as $c) {
                 if (empty($c['cf_account_uid']) && !empty($c['api_key'])) {
                     $a = cfMasterApi($c['api_key'], 'GET', 'accounts?per_page=1');
                     if (!empty($a['success']) && !empty($a['result'][0]['id'])) {
-                        $creds[$idx]['cf_account_uid'] = $a['result'][0]['id'];
                         $uidUpdates[(int)$c['id']] = $a['result'][0]['id'];
                     }
                 }
             }
 
-            // 1b) Обогащаем кредеталы признаками «ценности» (только чтение, до транзакции):
-            //     мастер-токен (api_key совпадает с master_tokens.token), число кастомных
-            //     токенов (cloudflare_api_tokens) и число доменов.
-            [$masterTokset, $scopedCount, $domCount] = dbRetryOnLock(function () use ($pdo, $userId) {
-                $mset = [];
-                foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
-                            ->fetchAll(PDO::FETCH_COLUMN) as $mt) { $mset[$mt] = true; }
-                $sc = []; $dc = [];
-                foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_api_tokens WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
-                    $sc[(int)$r['account_id']] = (int)$r['c'];
-                }
-                foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_accounts WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
-                    $dc[(int)$r['account_id']] = (int)$r['c'];
-                }
-                return [$mset, $sc, $dc];
-            });
             $baseName = function ($email) { return preg_replace('/\s*#\d+$/', '', trim((string)$email)); };
-            // Чем выше балл — тем «главнее» аккаунт при выборе, кого оставить.
-            // Приоритет: мастер-токен → кастомный токен → auth_type=token → наличие ключа/uid → домены.
-            $valueScore = function ($c) use ($masterTokset, $scopedCount, $domCount) {
-                $id = (int)$c['id'];
-                $hasMaster = !empty($c['api_key']) && isset($masterTokset[$c['api_key']]);
-                $hasScoped = !empty($scopedCount[$id]);
-                $isToken   = ($c['auth_type'] ?? '') === 'token';
-                $hasKey    = !empty($c['api_key']);
-                $hasUid    = !empty($c['cf_account_uid']);
-                return ($hasMaster ? 1 : 0) * 100000 + ($hasScoped ? 1 : 0) * 10000
-                     + ($isToken ? 1 : 0) * 1000 + ($hasKey ? 1 : 0) * 100 + ($hasUid ? 1 : 0) * 10
-                     + min((int)($domCount[$id] ?? 0), 9);
-            };
 
-            // 2) Группировка по нормализованному имени (имя аккаунта = e-mail, значит одно имя =
-            //    один CF-аккаунт). Это ловит и дубли с пустым uid. Защита: если внутри имени
-            //    встретились РАЗНЫЕ ненулевые uid — это разные аккаунты, разводим их по uid.
-            $named = [];
-            foreach ($creds as $c) { $named[strtolower($baseName($c['email']))][] = $c; }
-            $groups = [];
-            foreach ($named as $nm => $items) {
-                $uids = array_values(array_unique(array_filter(array_map(
-                    function ($x) { return $x['cf_account_uid'] ?? ''; }, $items))));
-                if (count($uids) > 1) {
-                    foreach ($items as $c) {
-                        $k = !empty($c['cf_account_uid']) ? ('uid:' . $c['cf_account_uid']) : ('name:' . $nm);
-                        $groups[$k][] = $c;
-                    }
-                } else {
-                    foreach ($items as $c) { $groups['name:' . $nm][] = $c; }
-                }
-            }
-
-            $merges = []; $report = [];
-            foreach ($groups as $items) {
-                if (count($items) < 2) continue;
-                usort($items, function ($a, $b) use ($valueScore) {
-                    $sa = $valueScore($a); $sb = $valueScore($b);
-                    if ($sa !== $sb) return $sb - $sa;      // ценнее (мастер/кастом-токен) — раньше
-                    $as = preg_match('/\s*#\d+$/', $a['email']) ? 1 : 0;
-                    $bs = preg_match('/\s*#\d+$/', $b['email']) ? 1 : 0;
-                    if ($as !== $bs) return $as - $bs;      // затем без суффикса
-                    return (int)$a['id'] - (int)$b['id'];   // затем меньший id
-                });
-                $keep = $items[0];
-                $removeIds = []; $removeEmails = [];
-                for ($k = 1; $k < count($items); $k++) {
-                    $removeIds[] = (int)$items[$k]['id'];
-                    $removeEmails[] = $items[$k]['email'];
-                }
-                // Итоговые ключ/тип/uid — лучшие в группе (если у keep чего-то нет, берём у дубля).
-                $bestKey = $keep['api_key']; $bestAuth = $keep['auth_type']; $bestUid = $keep['cf_account_uid'];
-                foreach ($items as $it) {
-                    if (empty($bestKey) && !empty($it['api_key'])) { $bestKey = $it['api_key']; $bestAuth = $it['auth_type']; }
-                    if (empty($bestUid) && !empty($it['cf_account_uid'])) { $bestUid = $it['cf_account_uid']; }
-                }
-                $merges[] = ['keep' => (int)$keep['id'], 'remove' => $removeIds,
-                    'name' => $baseName($keep['email']),   // стандартный нейминг — без #N
-                    'api_key' => $bestKey, 'auth_type' => $bestAuth ?: 'token', 'uid' => $bestUid];
-                $report[] = ['keep' => $baseName($keep['email']), 'removed' => $removeEmails];
-            }
-            $mergedGroups = count($merges);
-
-            // 3) Все записи — одной транзакцией BEGIN IMMEDIATE с ретраем (быстро, без сети внутри).
-            $deleted = 0;
-            dbRetryOnLock(function () use ($pdo, $userId, $uidUpdates, $merges, &$deleted) {
-                $deleted = 0;
+            // 2) ВСЁ остальное — чтения, план слияния и записи — под ОДНИМ BEGIN IMMEDIATE.
+            //    Write-лок берём ПЕРВЫМ, поэтому нет гонки read→write (BUSY_SNAPSHOT, который
+            //    busy_timeout не ждёт): внутри транзакции чтения консистентны, а сам BEGIN
+            //    IMMEDIATE ждёт освобождения лока по busy_timeout. Сети внутри транзакции нет.
+            $mergedGroups = 0; $deleted = 0; $report = []; $total = 0;
+            dbRetryOnLock(function () use ($pdo, $userId, $uidUpdates, $baseName,
+                    &$mergedGroups, &$deleted, &$report, &$total) {
+                $mergedGroups = 0; $deleted = 0; $report = [];
                 $pdo->exec('BEGIN IMMEDIATE');
                 try {
+                    // Свежие чтения под write-локом.
+                    $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
+                        FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
+                    $total = count($creds);
+                    foreach ($creds as &$c) {   // применяем зарезолвленные uid в памяти
+                        if (empty($c['cf_account_uid']) && isset($uidUpdates[(int)$c['id']])) {
+                            $c['cf_account_uid'] = $uidUpdates[(int)$c['id']];
+                        }
+                    }
+                    unset($c);
+
+                    $masterTokset = [];
+                    foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
+                                ->fetchAll(PDO::FETCH_COLUMN) as $mt) { $masterTokset[$mt] = true; }
+                    $scopedCount = []; $domCount = [];
+                    foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_api_tokens WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
+                        $scopedCount[(int)$r['account_id']] = (int)$r['c'];
+                    }
+                    foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_accounts WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
+                        $domCount[(int)$r['account_id']] = (int)$r['c'];
+                    }
+                    // Балл «главности»: мастер-токен → кастом-токен → auth_type=token → ключ/uid → домены.
+                    $valueScore = function ($c) use ($masterTokset, $scopedCount, $domCount) {
+                        $id = (int)$c['id'];
+                        $hasMaster = !empty($c['api_key']) && isset($masterTokset[$c['api_key']]);
+                        $hasScoped = !empty($scopedCount[$id]);
+                        $isToken   = ($c['auth_type'] ?? '') === 'token';
+                        $hasKey    = !empty($c['api_key']);
+                        $hasUid    = !empty($c['cf_account_uid']);
+                        return ($hasMaster ? 1 : 0) * 100000 + ($hasScoped ? 1 : 0) * 10000
+                             + ($isToken ? 1 : 0) * 1000 + ($hasKey ? 1 : 0) * 100 + ($hasUid ? 1 : 0) * 10
+                             + min((int)($domCount[$id] ?? 0), 9);
+                    };
+
+                    // Группировка по нормализованному имени (одно имя = один CF-аккаунт). Защита:
+                    // если под одним именем РАЗНЫЕ ненулевые uid — это разные аккаунты, разводим по uid.
+                    $named = [];
+                    foreach ($creds as $c) { $named[strtolower($baseName($c['email']))][] = $c; }
+                    $groups = [];
+                    foreach ($named as $nm => $items) {
+                        $uids = array_values(array_unique(array_filter(array_map(
+                            function ($x) { return $x['cf_account_uid'] ?? ''; }, $items))));
+                        if (count($uids) > 1) {
+                            foreach ($items as $c) {
+                                $k = !empty($c['cf_account_uid']) ? ('uid:' . $c['cf_account_uid']) : ('name:' . $nm);
+                                $groups[$k][] = $c;
+                            }
+                        } else {
+                            foreach ($items as $c) { $groups['name:' . $nm][] = $c; }
+                        }
+                    }
+
+                    $merges = [];
+                    foreach ($groups as $items) {
+                        if (count($items) < 2) continue;
+                        usort($items, function ($a, $b) use ($valueScore) {
+                            $sa = $valueScore($a); $sb = $valueScore($b);
+                            if ($sa !== $sb) return $sb - $sa;
+                            $as = preg_match('/\s*#\d+$/', $a['email']) ? 1 : 0;
+                            $bs = preg_match('/\s*#\d+$/', $b['email']) ? 1 : 0;
+                            if ($as !== $bs) return $as - $bs;
+                            return (int)$a['id'] - (int)$b['id'];
+                        });
+                        $keep = $items[0];
+                        $removeIds = []; $removeEmails = [];
+                        for ($k = 1; $k < count($items); $k++) {
+                            $removeIds[] = (int)$items[$k]['id'];
+                            $removeEmails[] = $items[$k]['email'];
+                        }
+                        $bestKey = $keep['api_key']; $bestAuth = $keep['auth_type']; $bestUid = $keep['cf_account_uid'];
+                        foreach ($items as $it) {
+                            if (empty($bestKey) && !empty($it['api_key'])) { $bestKey = $it['api_key']; $bestAuth = $it['auth_type']; }
+                            if (empty($bestUid) && !empty($it['cf_account_uid'])) { $bestUid = $it['cf_account_uid']; }
+                        }
+                        $merges[] = ['keep' => (int)$keep['id'], 'remove' => $removeIds,
+                            'name' => $baseName($keep['email']),
+                            'api_key' => $bestKey, 'auth_type' => $bestAuth ?: 'token', 'uid' => $bestUid];
+                        $report[] = ['keep' => $baseName($keep['email']), 'removed' => $removeEmails];
+                    }
+                    $mergedGroups = count($merges);
+
+                    // Записи (в той же транзакции).
                     foreach ($uidUpdates as $cid => $uidVal) {
-                        $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ? WHERE id = ? AND user_id = ?")
+                        $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ?
+                            WHERE id = ? AND user_id = ? AND (cf_account_uid IS NULL OR cf_account_uid = '')")
                             ->execute([$uidVal, $cid, $userId]);
                     }
                     foreach ($merges as $m) {
@@ -608,8 +614,7 @@ try {
                                 ->execute([$rid, $userId]);
                             $deleted++;
                         }
-                        // На оставшийся аккаунт — лучший токен/тип/uid + стандартное имя (без #N).
-                        // Переименование ПОСЛЕ удаления дублей: имя группы освобождается, UNIQUE не нарушится.
+                        // Стандартное имя (без #N) — ПОСЛЕ удаления дублей, чтобы не нарушить UNIQUE.
                         $pdo->prepare("UPDATE cloudflare_credentials
                             SET api_key = COALESCE(NULLIF(?, ''), api_key),
                                 auth_type = ?,
@@ -623,11 +628,11 @@ try {
                     try { $pdo->exec('ROLLBACK'); } catch (Throwable $ignore) {}
                     throw $e;
                 }
-            }, 30); // больше попыток: операция разовая, но может конкурировать с фоновой записью/import
+            }, 30); // операция разовая, но может конкурировать с фоновой записью
 
             logActionSafe($pdo, $userId, 'Дедуп аккаунтов', "групп: $mergedGroups, удалено дублей: $deleted");
             echo json_encode(['success' => true, 'merged_groups' => $mergedGroups, 'deleted' => $deleted,
-                'total' => count($creds), 'report' => $report]);
+                'total' => $total, 'report' => $report]);
             break;
 
         case 'delete_master':
