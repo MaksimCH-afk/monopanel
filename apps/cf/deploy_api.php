@@ -34,7 +34,7 @@ register_shutdown_function(function () {
             http_response_code(500);
             header('Content-Type: application/json; charset=utf-8');
         }
-        echo json_encode(['success' => false, 'error' => 'Внутренняя ошибка: ' . $e['message']]);
+        cfDeployRespond(['success' => false, 'error' => 'Внутренняя ошибка: ' . $e['message']]);
     }
 });
 
@@ -43,17 +43,18 @@ function cfDeployRespond($data) {
     while (ob_get_level() > 0) { ob_end_clean(); }
     if (!headers_sent()) { header('Content-Type: application/json; charset=utf-8'); }
     echo json_encode($data);
+    exit;
 }
 
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'Не авторизован']);
+    cfDeployRespond(['success' => false, 'error' => 'Не авторизован']);
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(['success' => false, 'error' => 'Метод не поддерживается']);
+    cfDeployRespond(['success' => false, 'error' => 'Метод не поддерживается']);
     exit;
 }
 
@@ -189,7 +190,7 @@ try {
 
             // Отдаём сводку целиком; список файлов обрезаем для UI (полный не нужен).
             $preview = array_slice($report['files'], 0, 200);
-            echo json_encode([
+            cfDeployRespond([
                 'success'      => (bool)$report['valid'],
                 'error'        => $report['error'],
                 'report'       => [
@@ -223,7 +224,7 @@ try {
             $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
             $state = cfDeployCheckDomain($pdo, $credentials, $resolve['account_cf_id'], $domain, $scriptName, $proxies, $userId);
 
-            echo json_encode([
+            cfDeployRespond([
                 'success'     => true,
                 'domain'      => $domain,
                 'worker_name' => $scriptName,
@@ -247,7 +248,7 @@ try {
             // Не доверяем клиенту — валидируем архив заново перед деплоем.
             $report = cfDeployValidateArchive($file['tmp_name']);
             if (!$report['valid']) {
-                echo json_encode(['success' => false, 'error' => $report['error'],
+                cfDeployRespond(['success' => false, 'error' => $report['error'],
                     'report' => ['oversized' => $report['oversized']]]);
                 break;
             }
@@ -310,7 +311,7 @@ try {
                 logAction($pdo, $userId, 'Deploy Failed', "domain=$domain worker=$scriptName err=" . ($deploy['error'] ?? '?'));
             }
 
-            echo json_encode([
+            cfDeployRespond([
                 'success'         => (bool)$deploy['success'],
                 'error'           => $deploy['error'] ?? null,
                 'worker_name'     => $scriptName,
@@ -346,7 +347,7 @@ try {
                 if (count($resp['data']) < 50) break;
             }
             sort($zones);
-            echo json_encode(['success' => true, 'zones' => array_values(array_unique($zones)),
+            cfDeployRespond(['success' => true, 'zones' => array_values(array_unique($zones)),
                 'auth_source' => $credentials['source'] ?? 'legacy']);
             break;
 
@@ -357,7 +358,7 @@ try {
                 JOIN cloudflare_credentials c ON c.id = s.account_id
                 WHERE s.user_id = ? ORDER BY s.updated_at DESC");
             $stmt->execute([$userId]);
-            echo json_encode(['success' => true, 'sites' => $stmt->fetchAll()]);
+            cfDeployRespond(['success' => true, 'sites' => $stmt->fetchAll()]);
             break;
 
         case 'bind_domain':
@@ -398,7 +399,7 @@ try {
                 ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
 
             logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl=" . $status['ssl_status']);
-            echo json_encode(['success' => true, 'domain' => $domain,
+            cfDeployRespond(['success' => true, 'domain' => $domain,
                 'site_url' => 'https://' . $domain, 'ssl_status' => $status['ssl_status']]);
             break;
 
@@ -420,7 +421,7 @@ try {
                 ->execute([$userId, $accId, $domain]);
 
             logAction($pdo, $userId, 'Deploy Unbind', "domain=$domain");
-            echo json_encode(['success' => true, 'domain' => $domain]);
+            cfDeployRespond(['success' => true, 'domain' => $domain]);
             break;
 
         case 'binding_status':
@@ -442,7 +443,7 @@ try {
                     updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
                     ->execute([$status['ssl_status'], $userId, $accId, $domain]);
             }
-            echo json_encode(['success' => true, 'domain' => $domain,
+            cfDeployRespond(['success' => true, 'domain' => $domain,
                 'bound' => $status['bound'], 'bound_to' => $status['bound_to'], 'ssl_status' => $status['ssl_status']]);
             break;
 
@@ -459,7 +460,7 @@ try {
             $versions = $stmt->fetchAll();
             $meta = cfDeployLoadMeta($pdo, $site['id']);
 
-            echo json_encode([
+            cfDeployRespond([
                 'success'  => true,
                 'domain'   => $domain,
                 'has_source' => cfDeployHasSource($site['id']),
@@ -487,7 +488,7 @@ try {
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
             logAction($pdo, $userId, 'Deploy Subfolder', "domain=$domain prefix=$prefix share=$share ok=" . ($deploy['success'] ? 1 : 0));
-            echo json_encode(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
+            cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
                 'prefix' => $prefix, 'url' => 'https://' . $domain . '/' . $prefix . '/', 'steps' => $deploy['steps'] ?? []]);
             break;
 
@@ -509,7 +510,7 @@ try {
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
             logAction($pdo, $userId, 'Deploy Subfolder Removed', "domain=$domain prefix=$prefix");
-            echo json_encode(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null, 'steps' => $deploy['steps'] ?? []]);
+            cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null, 'steps' => $deploy['steps'] ?? []]);
             break;
 
         case 'save_meta':
@@ -548,7 +549,7 @@ try {
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
             logAction($pdo, $userId, 'Deploy Meta Saved', "domain=$domain locales=" . count($clean));
-            echo json_encode(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
+            cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
                 'meta' => $meta, 'steps' => $deploy['steps'] ?? []]);
             break;
 

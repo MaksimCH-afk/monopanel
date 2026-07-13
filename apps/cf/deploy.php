@@ -337,6 +337,17 @@ $pageScripts = <<<'JS'
         const el = document.querySelector('input[name="mode"]:checked');
         return el ? el.value : 'static-only';
     }
+    // Ответ эндпоинта всегда JSON. Если пришёл HTML (PHP-ошибка/редирект на логин),
+    // resp.json() падает с «Unexpected token '<'» — показываем понятную причину.
+    async function readJson(resp) {
+        const text = await resp.text();
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            const snippet = text.trim().slice(0, 160).replace(/\s+/g, ' ');
+            throw new Error('сервер вернул не JSON (HTTP ' + resp.status + '): ' + (snippet || '(пустой ответ)'));
+        }
+    }
     function ready() {
         return archiveValid && selectedFile && accountSelect.value && domainInput.value.trim();
     }
@@ -492,7 +503,7 @@ $pageScripts = <<<'JS'
 
         try {
             const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
-            const data = await resp.json();
+            const data = await readJson(resp);
             const r = data.report;
 
             // Файлы > 25 MiB — всплывающее окно (FR-1), даже если success=false.
@@ -529,7 +540,7 @@ $pageScripts = <<<'JS'
         checkDomainBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Проверяю…';
         try {
             const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
-            const data = await resp.json();
+            const data = await readJson(resp);
             if (!data.success) { showToast(data.error || 'Ошибка проверки домена', 'error'); return; }
             const s = data.state;
             const rows = [];
@@ -593,7 +604,7 @@ $pageScripts = <<<'JS'
 
         try {
             const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
-            const data = await resp.json();
+            const data = await readJson(resp);
 
             (data.steps || []).forEach(st => {
                 const li = document.createElement('li');
@@ -649,7 +660,7 @@ $pageScripts = <<<'JS'
         const fd = new FormData();
         Object.keys(params).forEach(k => fd.append(k, params[k]));
         const resp = await fetch('deploy_api.php', { method: 'POST', body: fd });
-        return resp.json();
+        return readJson(resp);
     }
 
     async function loadSites() {
