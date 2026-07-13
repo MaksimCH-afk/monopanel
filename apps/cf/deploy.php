@@ -15,6 +15,14 @@ $ts = $pdo->prepare("SELECT account_id, COUNT(*) AS c FROM cloudflare_api_tokens
 $ts->execute([$userId]);
 foreach ($ts->fetchAll() as $r) { $tokenCounts[(int)$r['account_id']] = (int)$r['c']; }
 
+// Домены, уже привязанные к аккаунтам — чтобы искать аккаунт не только по email,
+// но и по домену (cloudflare_accounts.domain → cloudflare_credentials.id).
+$accountDomains = [];
+$ds = $pdo->prepare("SELECT DISTINCT account_id, domain FROM cloudflare_accounts
+    WHERE user_id = ? AND domain IS NOT NULL AND domain <> '' ORDER BY domain");
+$ds->execute([$userId]);
+foreach ($ds->fetchAll() as $r) { $accountDomains[(int)$r['account_id']][] = $r['domain']; }
+
 include 'sidebar.php';
 ?>
 
@@ -71,20 +79,32 @@ include 'sidebar.php';
                     <div class="mb-3">
                         <label class="form-label">Аккаунт Cloudflare</label>
                         <input type="text" class="form-control" id="accountSearch" list="accountList"
-                               placeholder="начните вводить email аккаунта…" autocomplete="off">
+                               placeholder="начните вводить email или домен аккаунта…" autocomplete="off">
                         <datalist id="accountList">
                             <?php foreach ($accounts as $acc): ?>
-                                <?php $lbl = $acc['email'] . ($acc['status'] !== 'active' ? ' (' . $acc['status'] . ')' : ''); ?>
-                                <option data-id="<?php echo (int)$acc['id']; ?>"
-                                        data-hastoken="<?php echo !empty($tokenCounts[(int)$acc['id']]) ? '1' : '0'; ?>"
+                                <?php
+                                    $aid = (int)$acc['id'];
+                                    $lbl = $acc['email'] . ($acc['status'] !== 'active' ? ' (' . $acc['status'] . ')' : '');
+                                    $doms = $accountDomains[$aid] ?? [];
+                                ?>
+                                <option data-id="<?php echo $aid; ?>"
+                                        data-hastoken="<?php echo !empty($tokenCounts[$aid]) ? '1' : '0'; ?>"
+                                        data-domains="<?php echo htmlspecialchars(strtolower(implode(' ', $doms))); ?>"
                                         value="<?php echo htmlspecialchars($lbl); ?>"></option>
+                                <?php foreach ($doms as $dom): ?>
+                                    <?php /* Алиас: домен идёт первым, чтобы поиск по домену работал и в браузерах с prefix-фильтром (Safari). */ ?>
+                                    <option data-id="<?php echo $aid; ?>" data-alias="1"
+                                            data-label="<?php echo htmlspecialchars($lbl); ?>"
+                                            data-domain="<?php echo htmlspecialchars(strtolower($dom)); ?>"
+                                            value="<?php echo htmlspecialchars($dom . '  —  ' . $lbl); ?>"></option>
+                                <?php endforeach; ?>
                             <?php endforeach; ?>
                         </datalist>
                         <input type="hidden" id="accountSelect" value="">
                         <?php if (empty($accounts)): ?>
                             <div class="form-text text-warning">Нет аккаунтов Cloudflare — добавьте их в «Мастер-токен».</div>
                         <?php else: ?>
-                            <div class="form-text" id="accountHint">Начните вводить — список отфильтруется. Токен берётся из «Мастер-токен».</div>
+                            <div class="form-text" id="accountHint">Начните вводить email <em>или домен</em> — список отфильтруется. Токен берётся из «Мастер-токен».</div>
                         <?php endif; ?>
                     </div>
                     <div class="mb-2">
@@ -327,10 +347,22 @@ $pageScripts = <<<'JS'
     let archiveValid = false;
     let accountZones = [];   // домены выбранного аккаунта (для проверки наличия)
 
-    // Карта: подпись аккаунта -> { id, hasToken } (из datalist).
+    // Карта: подпись/домен аккаунта -> { id, hasToken, ... }.
+    // Помимо email-меток регистрируем алиасы «домен — email» и голые домены,
+    // чтобы аккаунт находился и по своему домену.
     const accountMap = {};
     document.querySelectorAll('#accountList option').forEach(o => {
-        accountMap[o.value] = { id: o.dataset.id, hasToken: o.dataset.hastoken === '1' };
+        if (o.dataset.alias === '1') {
+            const rec = { id: o.dataset.id, alias: true, label: o.dataset.label };
+            accountMap[o.value] = rec;                          // «домен — email» (выбор из списка)
+            if (o.dataset.domain) accountMap[o.dataset.domain] = rec; // голый домен (ввод вручную)
+        } else {
+            accountMap[o.value] = {
+                id: o.dataset.id,
+                hasToken: o.dataset.hastoken === '1',
+                domains: (o.dataset.domains || '').split(' ').filter(Boolean),
+            };
+        }
     });
 
     function currentMode() {
@@ -365,7 +397,12 @@ $pageScripts = <<<'JS'
     const accountHint = document.getElementById('accountHint');
     let loadedZonesAccountId = null;
     async function onAccountChosen() {
-        const entry = accountMap[accountSearch.value.trim()];
+        let entry = accountMap[accountSearch.value.trim()];
+        // Нашли по домену (алиас) — подставляем email-метку аккаунта и работаем с ней.
+        if (entry && entry.alias) {
+            accountSearch.value = entry.label;
+            entry = accountMap[entry.label];
+        }
         accountSelect.value = entry ? entry.id : '';
         refreshButtons();
         if (!entry) { if (accountHint) accountHint.textContent = 'Аккаунт не распознан — выберите из списка.'; return; }
