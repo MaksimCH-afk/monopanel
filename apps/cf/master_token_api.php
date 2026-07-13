@@ -768,9 +768,11 @@ try {
 } catch (Exception $e) {
     // Фиксируем сбой в разделе «Логи» (logAction сам повторит запись при блокировке БД),
     // чтобы ошибки вроде «database is locked» были видны в панели, а не только в тосте.
+    // Локация исключения — чтобы точно видеть, КАКОЙ запрос упал (а не только текст).
+    $loc = basename($e->getFile()) . ':' . $e->getLine();
     if (isset($pdo)) {
         $act = $action !== '' ? $action : 'master_token_api';
-        logActionSafe($pdo, $userId ?? 1, 'Ошибка перевыпуска/операции токена', "{$act}: " . $e->getMessage());
+        logActionSafe($pdo, $userId ?? 1, 'Ошибка перевыпуска/операции токена', "{$act} @ {$loc}: " . $e->getMessage());
     }
-    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    echo json_encode(['success' => false, 'error' => $e->getMessage() . ' @ ' . $loc]);
 }
