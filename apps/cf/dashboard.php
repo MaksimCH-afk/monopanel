@@ -1283,17 +1283,26 @@ function startProgressiveSync() {
 async function beginSync() {
     const scope = document.getElementById('syncGroupSelect').value;
 
-    // Если выбран конкретный аккаунт — сначала обнаружим и добавим НЕДОСТАЮЩИЕ зоны
-    // этого аккаунта (чтобы синк увидел новые домены, созданные в Cloudflare).
-    if (scope.indexOf('account:') === 0) {
+    // Перед синхронизацией обнаруживаем и добавляем НЕДОСТАЮЩИЕ зоны из Cloudflare:
+    // для scope «аккаунт» — по нему, для «Все/несинхронизированные» — по всем аккаунтам.
+    // Иначе новые домены из CF никогда не подтягивались («синк ок, но ничего не поменялось»).
+    let impAction = null, impExtra = {};
+    if (scope.indexOf('account:') === 0) { impAction = 'import_account'; impExtra.account_id = scope.slice(8); }
+    else if (scope === 'all' || scope === 'unsynced') { impAction = 'import_all'; }
+    if (impAction) {
         try {
             const impFd = new FormData();
-            impFd.append('action', 'import_account');
-            impFd.append('account_id', scope.slice(8));
+            impFd.append('action', impAction);
+            Object.keys(impExtra).forEach(k => impFd.append(k, impExtra[k]));
             const impRes = await fetch('sync_domains_api.php', { method: 'POST', body: impFd });
             const impData = await impRes.json();
             if (impData.success && impData.imported > 0) {
                 showToast('Найдено и добавлено новых доменов: ' + impData.imported, 'success');
+            } else if (impData.errors && impData.errors.length) {
+                // Не блокируем синк, но показываем ПОЧЕМУ ничего не импортировалось (напр. токен без Zone:Read).
+                showToast('Импорт зон: ' + impData.errors[0] + (impData.errors.length > 1 ? ' (и ещё ' + (impData.errors.length - 1) + ')' : ''), 'warning');
+            } else if (impData.error) {
+                showToast('Импорт зон: ' + impData.error, 'warning');
             }
         } catch (e) { /* не блокируем синк */ }
     }
