@@ -19,6 +19,7 @@ interface SiteRow {
   prev_position: number;
   daily_clicks: number[];
   updated_at: string | null;
+  computed?: boolean;
 }
 
 interface Job {
@@ -409,34 +410,46 @@ export default function MainDashboardPage() {
                     </div>
                     <div className="text-xs text-gray-400 truncate" title={s.account_email || ''}>{s.account_email || '—'}</div>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-xl font-bold text-blue-700 leading-none">{fmt(s.clicks)}</div>
-                    <div className="text-[11px] text-gray-400">кликов</div>
-                    <DeltaPct cur={s.clicks} prev={s.prev_clicks} />
-                  </div>
+                  {s.computed === false ? (
+                    <span className="flex-shrink-0 text-[11px] text-gray-400 border border-gray-200 rounded px-2 py-1">не посчитано</span>
+                  ) : (
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-xl font-bold text-blue-700 leading-none">{fmt(s.clicks)}</div>
+                      <div className="text-[11px] text-gray-400">кликов</div>
+                      <DeltaPct cur={s.clicks} prev={s.prev_clicks} />
+                    </div>
+                  )}
                 </div>
 
-                <div className="my-3">
-                  <Sparkline data={s.daily_clicks} />
-                </div>
+                {s.computed === false ? (
+                  <div className="my-3 h-12 flex items-center justify-center text-xs text-gray-400 text-center">
+                    Метрики ещё не посчитаны — нажмите «Синхронизировать» или «Обновить»
+                  </div>
+                ) : (
+                  <>
+                    <div className="my-3">
+                      <Sparkline data={s.daily_clicks} />
+                    </div>
 
-                <div className="grid grid-cols-3 gap-2 text-center border-t border-gray-100 pt-3">
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{fmt(s.impressions)}</div>
-                    <div className="text-[11px] text-gray-400">показы</div>
-                    <DeltaPct cur={s.impressions} prev={s.prev_impressions} />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{(s.ctr * 100).toFixed(2)}%</div>
-                    <div className="text-[11px] text-gray-400">CTR</div>
-                    <DeltaPct cur={s.ctr} prev={s.prev_ctr} />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{s.position.toFixed(1)}</div>
-                    <div className="text-[11px] text-gray-400">позиция</div>
-                    <DeltaPos cur={s.position} prev={s.prev_position} />
-                  </div>
-                </div>
+                    <div className="grid grid-cols-3 gap-2 text-center border-t border-gray-100 pt-3">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{fmt(s.impressions)}</div>
+                        <div className="text-[11px] text-gray-400">показы</div>
+                        <DeltaPct cur={s.impressions} prev={s.prev_impressions} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{(s.ctr * 100).toFixed(2)}%</div>
+                        <div className="text-[11px] text-gray-400">CTR</div>
+                        <DeltaPct cur={s.ctr} prev={s.prev_ctr} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{s.position.toFixed(1)}</div>
+                        <div className="text-[11px] text-gray-400">позиция</div>
+                        <DeltaPos cur={s.position} prev={s.prev_position} />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>

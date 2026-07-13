@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import HelpButton from '@/components/ui/HelpButton';
-import Link from 'next/link';
 import Chart from 'chart.js/auto';
 import { useData } from '@/contexts/DataContext';
 
@@ -57,6 +56,28 @@ export default function OverviewPage() {
   // Refs for chart canvases
   const overviewChartRefs = useRef<{[key: string]: HTMLCanvasElement | null}>({});
   const overviewChartInstances = useRef<{[key: string]: Chart}>({});
+
+  // Выбор сайтов для обзора прямо здесь (раньше был только в Настройках)
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerSel, setPickerSel] = useState<string[]>([]);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [savingSites, setSavingSites] = useState(false);
+
+  const openPicker = () => { setPickerSel(topSites); setPickerSearch(''); setShowPicker(true); };
+  const togglePick = (site: string) => setPickerSel((prev) =>
+    prev.includes(site) ? prev.filter((s) => s !== site) : (prev.length < 6 ? [...prev, site] : prev));
+  const savePicker = async () => {
+    setSavingSites(true);
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overviewSites: pickerSel }),
+      });
+      setTopSites(pickerSel);
+      setOverviewData([]); // сбросить старые данные — нажать «Обновить»
+      setShowPicker(false);
+    } catch { /* ignore */ } finally { setSavingSites(false); }
+  };
 
   // Date range options
   const dateRangeOptions = [
@@ -396,13 +417,19 @@ export default function OverviewPage() {
                   тренда по каждому. Удобно быстро сравнить проекты между собой.
                 </p>
                 <p>
-                  Какие сайты показывать (до 6) — выбирается в <strong>Настройках</strong> («сайты для обзора»).
+                  Какие сайты показывать (до 6) — выбираются кнопкой <strong>«Выбрать сайты»</strong> вверху.
                   Период и фильтр по устройствам задаются в параметрах обзора ниже.
                 </p>
               </HelpButton>
               <button
+                onClick={openPicker}
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
+              >
+                🗂 Выбрать сайты ({topSites.length}/6)
+              </button>
+              <button
                 onClick={handleRefreshData}
-                disabled={overviewLoading}
+                disabled={overviewLoading || topSites.length === 0}
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {overviewLoading ? 'Загрузка...' : '🔄 Обновить данные'}
@@ -487,15 +514,55 @@ export default function OverviewPage() {
               Сайты не выбраны
             </h3>
             <p className="text-yellow-800 mb-4">
-              Выберите сайты в настройках, чтобы увидеть данные обзора.
+              Выберите сайты (до 6), чтобы увидеть данные обзора.
             </p>
-            <Link 
-              href="/settings"
+            <button
+              onClick={openPicker}
               className="inline-flex items-center space-x-2 px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors font-medium"
             >
-              <span>Перейти в настройки</span>
-              <span>→</span>
-            </Link>
+              <span>🗂 Выбрать сайты</span>
+            </button>
+          </div>
+        )}
+
+        {/* Модалка выбора сайтов для обзора (до 6) */}
+        {showPicker && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowPicker(false)}>
+            <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900">Сайты для обзора (до 6) — выбрано {pickerSel.length}</h2>
+              </div>
+              <div className="p-4 border-b border-gray-100">
+                <input
+                  type="text"
+                  value={pickerSearch}
+                  onChange={(e) => setPickerSearch(e.target.value)}
+                  placeholder="Поиск по домену…"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex-1 overflow-y-auto px-2 py-1">
+                {sites
+                  .filter((s) => s.toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+                  .slice(0, 300)
+                  .map((site) => {
+                    const checked = pickerSel.includes(site);
+                    const disabled = !checked && pickerSel.length >= 6;
+                    return (
+                      <label key={site} className={`flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-50'}`}>
+                        <input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePick(site)} />
+                        <span className="truncate" title={site}>{site.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+                <button onClick={() => setShowPicker(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Отмена</button>
+                <button onClick={savePicker} disabled={savingSites} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                  {savingSites ? 'Сохранение…' : 'Сохранить'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
