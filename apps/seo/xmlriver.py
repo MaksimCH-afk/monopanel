@@ -46,10 +46,17 @@ def check_indexation(url, user, key, timeout=25):
             return {"status": "error", "count": 0,
                     "error": f"XML parse: {e}; body={resp.text[:200]}"}
 
-        # Ошибка от сервиса (например, неверный ключ/баланс)
+        # Ошибка от сервиса. Код 15 = «нет результатов по запросу» — это НЕ сбой,
+        # а признак, что страница не в индексе (см. коды ошибок XMLRIVER).
         for el in root.iter():
-            if el.tag.endswith('error') and (el.text or '').strip():
-                return {"status": "error", "count": 0, "error": el.text.strip()}
+            if el.tag.endswith('error'):
+                code = (el.get('code') or '').strip()
+                text = (el.text or '').strip()
+                if code == '15':
+                    return {"status": "not_indexed", "count": 0, "error": None}
+                if code or text:
+                    return {"status": "error", "count": 0,
+                            "error": f"[{code}] {text}".strip() if code else text}
 
         # Собираем URL из выдачи
         found_urls = [el.text for el in root.iter()
