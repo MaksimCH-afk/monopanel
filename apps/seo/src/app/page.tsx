@@ -109,6 +109,11 @@ export default function Dashboard() {
   } = useData();
 
   const [data, setData] = useState<GSCData | null>(null);
+  // Объединение доменов (для проектов, переехавших на другие домены): когда список
+  // непустой, отчёт собирается по всему пулу доменов сразу.
+  const [combinedSites, setCombinedSites] = useState<string[]>([]);
+  const [showCombine, setShowCombine] = useState(false);
+  const [combineSearch, setCombineSearch] = useState('');
   const [cachedQueriesData, setCachedQueriesData] = useState<CachedGSCData | null>(null);
   const [cachedPagesData, setCachedPagesData] = useState<CachedGSCData | null>(null);
   const [cachedCountryData, setCachedCountryData] = useState<CachedGSCData | null>(null);
@@ -385,7 +390,14 @@ export default function Dashboard() {
   // Check for cached data when switching tabs (from state or localStorage)
   useEffect(() => {
     if (!selectedSite) return;
-    
+
+    // В режиме объединения доменов кэш одиночного сайта не используем — при смене
+    // вкладки/параметров пересобираем объединённый отчёт.
+    if (combinedSites.length > 0) {
+      fetchData(activeTab);
+      return;
+    }
+
     // Immediately restore cached data when switching tabs
     if (activeTab === 'queries' && cachedQueriesData) {
       // Check if cached data matches current parameters
@@ -444,7 +456,7 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Error loading from localStorage:', error);
     }
-  }, [activeTab, cachedQueriesData, cachedPagesData, cachedCountryData, selectedSite, startDate, endDate, device]);
+  }, [activeTab, cachedQueriesData, cachedPagesData, cachedCountryData, selectedSite, startDate, endDate, device, combinedSites]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clear cache when parameters change
   useEffect(() => {
@@ -880,7 +892,11 @@ export default function Dashboard() {
     
     // Use the provided tab or fall back to current activeTab
     const tabToUse = targetTab || activeTab;
-    
+
+    // Объединение доменов: если пул непустой — тянем все домены и складываем.
+    const combinedMode = combinedSites.length > 0;
+    const sitesToQuery = combinedMode ? combinedSites : [selectedSite];
+
     // Check if we already have cached data for this tab and parameters
     const hasCachedData = (tabToUse === 'queries' && cachedQueriesData) || 
                          (tabToUse === 'pages' && cachedPagesData) ||
@@ -898,14 +914,14 @@ export default function Dashboard() {
     
     // If we have matching cached data, use it instead of fetching
     // Also check localStorage as a fallback
-    if (hasCachedData && dataMatches) {
+    if (!combinedMode && hasCachedData && dataMatches) {
       console.log(`DEBUG: Using cached ${tabToUse} data from state`);
       setData(cachedData);
       return;
     }
-    
-    // Check localStorage as well
-    try {
+
+    // Check localStorage as well (single-site only — для объединения кэш не используем)
+    if (!combinedMode) try {
       const cacheKey = tabToUse === 'queries' 
         ? `gsc_cached_queries_${selectedSite}_${startDate}_${endDate}_${device}`
         : tabToUse === 'pages'
@@ -946,44 +962,43 @@ export default function Dashboard() {
                                tabToUse === 'country' ? 'date,country' : 
                                'date,page';
       
-      const params = new URLSearchParams({
-        siteUrl: selectedSite,
-        startDate: startDate,
-        endDate: endDate,
-        dimensions: targetDimensions,
-        fetchAll: fetchAll.toString()
-      });
-
-      // Add device filter if not 'all'
-      if (device !== 'all') {
-        params.append('device', device);
-      }
-
-      // Add advanced filter parameters if they exist
-      if (advancedFilter.dimension && advancedFilter.value) {
-        params.append('filterDimension', advancedFilter.dimension);
-        params.append('filterType', advancedFilter.type);
-        params.append('filterValue', advancedFilter.value);
-      }
-
-      console.log(`DEBUG: API request URL: ${API_BASE}/api/data?${params.toString()}`);
-        
-      const response = await fetch(`${API_BASE}/api/data?${params}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `HTTP ${response.status}: ${errorText}`;
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error || errorMessage;
-        } catch (e) {
-          // If not JSON, use the text as is
+      const buildParams = (site: string) => {
+        const params = new URLSearchParams({
+          siteUrl: site,
+          startDate: startDate,
+          endDate: endDate,
+          dimensions: targetDimensions,
+          fetchAll: fetchAll.toString()
+        });
+        if (device !== 'all') params.append('device', device);
+        if (advancedFilter.dimension && advancedFilter.value) {
+          params.append('filterDimension', advancedFilter.dimension);
+          params.append('filterType', advancedFilter.type);
+          params.append('filterValue', advancedFilter.value);
         }
-        setError(errorMessage);
-        return;
+        return params;
+      };
+
+      // Тянем каждый домен пула и складываем строки — processRawData затем сведёт
+      // одинаковые запросы/страницы с разных доменов в один отчёт.
+      let combinedRows: any[] = [];
+      for (const site of sitesToQuery) {
+        const response = await fetch(`${API_BASE}/api/data?${buildParams(site)}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = `HTTP ${response.status}: ${errorText}`;
+          try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch (e) { /* text as is */ }
+          setError(combinedMode ? `${site}: ${errorMessage}` : errorMessage);
+          return;
+        }
+        const part = await response.json();
+        if (part.error) {
+          setError(combinedMode ? `${site}: ${part.error}` : part.error);
+          return;
+        }
+        combinedRows = combinedRows.concat(part.rows || []);
       }
-      
-      const result = await response.json();
+      const result: any = { rows: combinedRows };
       
       if (result.error) {
         setError(result.error);
@@ -1002,17 +1017,19 @@ export default function Dashboard() {
           device: device
         } as CachedGSCData;
         
-        if (tabToUse === 'queries') {
-          setCachedQueriesData(cachedData);
-        } else if (tabToUse === 'pages') {
-          setCachedPagesData(cachedData);
-        } else {
-          setCachedCountryData(cachedData);
+        if (!combinedMode) {
+          if (tabToUse === 'queries') {
+            setCachedQueriesData(cachedData);
+          } else if (tabToUse === 'pages') {
+            setCachedPagesData(cachedData);
+          } else {
+            setCachedCountryData(cachedData);
+          }
         }
-        
+
         // Store in shared context for persistence across page navigation
         setPerformanceData({
-          site: selectedSite,
+          site: combinedMode ? `Объединено: ${sitesToQuery.length} домен(ов)` : selectedSite,
           startDate: startDate,
           endDate: endDate,
           dimensions: targetDimensions,
@@ -1022,9 +1039,9 @@ export default function Dashboard() {
         });
         
         // Save to localStorage for persistence across page refreshes
-        // Only store essential data to avoid quota issues
-        try {
-          const cacheKey = tabToUse === 'queries' 
+        // Only store essential data to avoid quota issues (single-site only)
+        if (!combinedMode) try {
+          const cacheKey = tabToUse === 'queries'
             ? `gsc_cached_queries_${selectedSite}_${startDate}_${endDate}_${device}`
             : tabToUse === 'pages'
             ? `gsc_cached_pages_${selectedSite}_${startDate}_${endDate}_${device}`
@@ -1574,6 +1591,14 @@ export default function Dashboard() {
           )}
         </div>
         <div className="flex items-center space-x-3">
+          <button
+            type="button"
+            onClick={() => { setCombineSearch(''); setShowCombine(true); }}
+            className={`px-4 py-2 rounded border text-sm flex items-center gap-2 ${combinedSites.length > 0 ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+            title="Собрать несколько доменов в один отчёт (для переехавших проектов)"
+          >
+            🔗 {combinedSites.length > 0 ? `Объединено: ${combinedSites.length}` : 'Объединить домены'}
+          </button>
           <HelpButton title="Что такое «Показатели трафика»">
             <p>
               Это <strong>основной отчёт по одному сайту</strong> из Google Search Console: сколько было
@@ -1585,6 +1610,13 @@ export default function Dashboard() {
               <li>Нажмите <strong>«Загрузить данные»</strong>.</li>
               <li>Ниже появятся график динамики и таблицы по <strong>запросам</strong>, <strong>страницам</strong> и <strong>странам</strong>.</li>
             </ol>
+            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+              <p className="text-indigo-900">
+                <strong>🔗 Объединить домены:</strong> если проект переезжал с домена на домен, соберите все его
+                домены в один отчёт кнопкой «Объединить домены» вверху — клики, показы и запросы сложатся вместе,
+                одинаковые запросы с разных доменов объединятся. Выбор одного «Сайта» при этом игнорируется.
+              </p>
+            </div>
             <p className="text-gray-500 text-xs">
               На графике можно включить отметки апдейтов Google, а данные экспортировать в CSV. Google отдаёт
               статистику с задержкой ~3 дня.
@@ -1601,6 +1633,66 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      {/* Баннер активного объединения доменов */}
+      {combinedSites.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-indigo-900 mb-1">
+                Отчёт собирается по {combinedSites.length} доменам вместе (выбор «Сайт» ниже игнорируется):
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {combinedSites.map((s) => (
+                  <span key={s} className="inline-flex items-center gap-1 bg-white border border-indigo-200 rounded px-2 py-0.5 text-xs text-indigo-800">
+                    {s.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}
+                    <button type="button" onClick={() => setCombinedSites((prev) => prev.filter((x) => x !== s))} className="text-indigo-400 hover:text-indigo-700">×</button>
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs text-indigo-500 mt-2">Нажмите «Загрузить данные», чтобы обновить объединённый отчёт.</p>
+            </div>
+            <button type="button" onClick={() => setCombinedSites([])} className="flex-shrink-0 text-sm text-indigo-600 hover:text-indigo-800 underline">
+              Очистить
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка выбора доменов для объединения */}
+      {showCombine && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setShowCombine(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Объединить домены</h2>
+              <p className="text-xs text-gray-500 mt-1">Выберите домены одного проекта (например, старый и новый после переезда) — отчёт соберётся по ним вместе. Выбрано: {combinedSites.length}</p>
+            </div>
+            <div className="p-4 border-b border-gray-100">
+              <input type="text" value={combineSearch} onChange={(e) => setCombineSearch(e.target.value)} placeholder="Поиск по домену…"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-1">
+              {sites
+                .filter((s) => s.toLowerCase().includes(combineSearch.trim().toLowerCase()))
+                .slice(0, 300)
+                .map((site) => {
+                  const checked = combinedSites.includes(site);
+                  return (
+                    <label key={site} className="flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer hover:bg-gray-50">
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setCombinedSites((prev) => prev.includes(site) ? prev.filter((x) => x !== site) : [...prev, site])} />
+                      <span className="truncate" title={site}>{site.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '')}</span>
+                    </label>
+                  );
+                })}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-between gap-2">
+              <button onClick={() => setCombinedSites([])} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Сбросить</button>
+              <button onClick={() => setShowCombine(false)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Готово</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <DashboardControls
