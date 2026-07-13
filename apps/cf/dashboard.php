@@ -55,7 +55,12 @@ if ($group_id === 'none') {
 }
 
 if ($search) {
-    $filters[] = "ca.domain LIKE ?";
+    // Ищем и по домену, и по аккаунту (email кредентала показан в списке под доменом).
+    // Подзапрос вместо JOIN — чтобы фильтр одинаково работал и в COUNT (без join), и в списке.
+    $filters[] = "(ca.domain LIKE ? OR ca.account_id IN "
+        . "(SELECT id FROM cloudflare_credentials WHERE user_id = ? AND email LIKE ?))";
+    $params[] = "%$search%";
+    $params[] = $userId;
     $params[] = "%$search%";
 }
 
@@ -336,7 +341,7 @@ function getDomainStatusInfo($status, $httpCode = null) {
                     <?php endforeach; ?>
                 </select>
                 <input type="text" id="searchInput" class="form-control form-control-sm" style="width: 200px;"
-                       placeholder="Поиск..." value="<?php echo htmlspecialchars($search); ?>" onkeyup="searchDomains(event)">
+                       placeholder="Поиск по домену или аккаунту…" value="<?php echo htmlspecialchars($search); ?>" onkeyup="searchDomains(event)">
             </div>
         </div>
         
