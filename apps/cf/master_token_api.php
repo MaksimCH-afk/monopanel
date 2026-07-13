@@ -491,42 +491,27 @@ try {
             //      обёрнутой в ретрай.
             // 1) Резолв UID (сеть) — БЕЗ БД-транзакции: быстрое чтение кредеталов (автокоммит),
             //    затем сетевые вызовы только в память. Ничего не пишем и не держим снапшот.
-            $creds0 = dbRetryOnLock(function () use ($pdo, $userId) {
-                return $pdo->query("SELECT id, api_key, cf_account_uid
-                    FROM cloudflare_credentials WHERE user_id = $userId")->fetchAll();
-            });
-            $uidUpdates = [];
-            foreach ($creds0 as $c) {
-                if (empty($c['cf_account_uid']) && !empty($c['api_key'])) {
-                    $a = cfMasterApi($c['api_key'], 'GET', 'accounts?per_page=1');
-                    if (!empty($a['success']) && !empty($a['result'][0]['id'])) {
-                        $uidUpdates[(int)$c['id']] = $a['result'][0]['id'];
-                    }
-                }
-            }
-
             $baseName = function ($email) { return preg_replace('/\s*#\d+$/', '', trim((string)$email)); };
 
-            // 2) ВСЁ остальное — чтения, план слияния и записи — под ОДНИМ BEGIN IMMEDIATE.
-            //    Write-лок берём ПЕРВЫМ, поэтому нет гонки read→write (BUSY_SNAPSHOT, который
-            //    busy_timeout не ждёт): внутри транзакции чтения консистентны, а сам BEGIN
-            //    IMMEDIATE ждёт освобождения лока по busy_timeout. Сети внутри транзакции нет.
+            // Дедуп БЕЗ сети: группируем по нормализованному имени (одно имя = один CF-аккаунт),
+            // а uid-защиту берём из уже сохранённых в БД cf_account_uid. Раньше здесь шёл сетевой
+            // резолв uid по КАЖДОМУ аккаунту — это делало операцию долгой и сильно расширяло окно,
+            // в котором BEGIN IMMEDIATE конкурировал с фоновой записью → «database is locked».
+            //
+            // ВСЁ — чтения, план слияния и записи — под ОДНИМ BEGIN IMMEDIATE (write-лок первым,
+            // без гонки read→write). Операция теперь мгновенная, окно блокировки — минимальное.
             $mergedGroups = 0; $deleted = 0; $report = []; $total = 0;
-            dbRetryOnLock(function () use ($pdo, $userId, $uidUpdates, $baseName,
+            dbRetryOnLock(function () use ($pdo, $userId, $baseName,
                     &$mergedGroups, &$deleted, &$report, &$total) {
                 $mergedGroups = 0; $deleted = 0; $report = [];
+                // Ждём освобождения write-лока подольше (фоновый import/monitor может держать серию записей).
+                $pdo->exec('PRAGMA busy_timeout = 120000');
                 $pdo->exec('BEGIN IMMEDIATE');
                 try {
                     // Свежие чтения под write-локом.
                     $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
                         FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
                     $total = count($creds);
-                    foreach ($creds as &$c) {   // применяем зарезолвленные uid в памяти
-                        if (empty($c['cf_account_uid']) && isset($uidUpdates[(int)$c['id']])) {
-                            $c['cf_account_uid'] = $uidUpdates[(int)$c['id']];
-                        }
-                    }
-                    unset($c);
 
                     $masterTokset = [];
                     foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
@@ -599,11 +584,6 @@ try {
                     $mergedGroups = count($merges);
 
                     // Записи (в той же транзакции).
-                    foreach ($uidUpdates as $cid => $uidVal) {
-                        $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ?
-                            WHERE id = ? AND user_id = ? AND (cf_account_uid IS NULL OR cf_account_uid = '')")
-                            ->execute([$uidVal, $cid, $userId]);
-                    }
                     foreach ($merges as $m) {
                         foreach ($m['remove'] as $rid) {
                             $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ? WHERE user_id = ? AND account_id = ?")
