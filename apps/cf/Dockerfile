@@ -1,14 +1,16 @@
 FROM php:8.1-apache
 
-# Системные зависимости для расширений (sqlite, curl, intl для idn_to_ascii)
+# Системные зависимости для расширений (sqlite, curl, intl для idn_to_ascii,
+# zip для модуля «Деплой из ZIP» — ZipArchive)
 # Плюс curl CLI — для фонового обработчика очереди
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-dev \
         libcurl4-openssl-dev \
         libonig-dev \
         libicu-dev \
+        libzip-dev \
         curl \
-    && docker-php-ext-install -j"$(nproc)" pdo_sqlite curl mbstring intl \
+    && docker-php-ext-install -j"$(nproc)" pdo_sqlite curl mbstring intl zip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Включаем mod_rewrite и mod_headers (нужны для .htaccess)
