@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg git unzip supervisor \
         python3 python3-venv python3-pip python3-dev build-essential \
         tesseract-ocr libtesseract-dev \
-        sqlite3 libsqlite3-dev libcurl4-openssl-dev libonig-dev libicu-dev \
+        sqlite3 libsqlite3-dev libcurl4-openssl-dev libonig-dev libicu-dev libzip-dev \
         openssl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,9 +41,10 @@ RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /us
 
 # ----------------------------------------------------------------------------
 # 2. PHP-расширения для cf (Cloudflare Panel)
-#    pdo_sqlite (БД), curl (API CF), mbstring, intl (idn_to_ascii)
+#    pdo_sqlite (БД), curl (API CF), mbstring, intl (idn_to_ascii),
+#    zip (модуль «Деплой из ZIP» — ZipArchive)
 # ----------------------------------------------------------------------------
-RUN docker-php-ext-install -j"$(nproc)" pdo pdo_sqlite curl mbstring intl \
+RUN docker-php-ext-install -j"$(nproc)" pdo pdo_sqlite curl mbstring intl zip \
     && a2enmod rewrite headers
 
 # Apache (cf) слушает 3331 вместо исходного 1000; .htaccess разрешён (AllowOverride All)
