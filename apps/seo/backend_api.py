@@ -626,6 +626,22 @@ def dashboard_summary():
     if not rows and not job.get('running'):
         seo_dashboard.refresh_all(period)
         job = seo_dashboard.job_status()
+
+    # Дашборд — «обзор ПО ВСЕМ сайтам»: показываем каждый подтверждённый сайт, даже
+    # если метрики ещё не посчитаны (computed=false) — иначе новый/непросчитанный
+    # сайт «не находится» поиском, хотя он есть в аккаунте.
+    computed = {r["site_url"] for r in rows}
+    for r in rows:
+        r["computed"] = True
+    for site in gscm.all_site_urls():
+        if site not in computed:
+            rows.append({
+                "site_url": site,
+                "account_email": gscm.account_email_for_site(site),
+                "clicks": 0, "impressions": 0, "ctr": 0.0, "position": 0.0,
+                "prev_clicks": 0, "prev_impressions": 0, "prev_ctr": 0.0, "prev_position": 0.0,
+                "daily_clicks": [], "updated_at": None, "computed": False,
+            })
     return jsonify({"period": period, "sites": rows, "job": job})
 
 

@@ -820,96 +820,16 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {/* Overview Sites Selection */}
+            {/* Overview Sites Selection — перенесено на страницу «Обзор сайтов» */}
             <div className="space-y-2">
               <label className="flex items-center space-x-2 text-sm font-medium text-gray-700">
                 <FontAwesomeIcon icon={faFile} className="text-gray-500" />
-                <span>Выбор сайтов для обзора</span>
+                <span>Сайты для обзора</span>
               </label>
-              <p className="text-xs text-gray-500 mb-3">
-                Выберите до 6 сайтов для отображения на странице «Обзор сайтов» (выбрано {settings.overviewSites.length}/6)
+              <p className="text-xs text-gray-500">
+                Выбор сайтов для страницы «Обзор сайтов» теперь делается прямо на самой странице —
+                кнопка <strong>«Выбрать сайты»</strong> вверху раздела «Обзор сайтов».
               </p>
-              {availableSites.length === 0 ? (
-                <div className="border border-gray-300 rounded-lg p-4 bg-gray-50">
-                  <p className="text-sm text-gray-600">
-                    {settings.isAuthorized
-                      ? "Загрузка сайтов..."
-                      : "Сначала авторизуйте данные для доступа, чтобы увидеть доступные сайты."}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {/* Search/Filter Input */}
-                  <div className="mb-3">
-                    <input
-                      type="text"
-                      value={siteSearchFilter}
-                      onChange={(e) => setSiteSearchFilter(e.target.value)}
-                      placeholder="Поиск сайтов (например, a.com)..."
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-
-                  {/* Filtered Sites List */}
-                  <div className="border border-gray-300 rounded-lg p-4 max-h-64 overflow-y-auto">
-                    {availableSites
-                      .filter(site =>
-                        site.toLowerCase().includes(siteSearchFilter.toLowerCase())
-                      )
-                      .length === 0 ? (
-                        <p className="text-sm text-gray-500 text-center py-4">
-                          Не найдено сайтов по запросу «{siteSearchFilter}»
-                        </p>
-                      ) : (
-                        availableSites
-                          .filter(site =>
-                            site.toLowerCase().includes(siteSearchFilter.toLowerCase())
-                          )
-                          .map((site) => {
-                            const isSelected = settings.overviewSites.includes(site);
-                            const canSelect = isSelected || settings.overviewSites.length < 6;
-
-                            return (
-                              <label
-                                key={site}
-                                className={`flex items-center space-x-2 p-2 rounded hover:bg-gray-50 cursor-pointer ${
-                                  !canSelect ? 'opacity-50 cursor-not-allowed' : ''
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  disabled={!canSelect}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      if (settings.overviewSites.length < 6) {
-                                        setSettings({
-                                          ...settings,
-                                          overviewSites: [...settings.overviewSites, site]
-                                        });
-                                      }
-                                    } else {
-                                      setSettings({
-                                        ...settings,
-                                        overviewSites: settings.overviewSites.filter(s => s !== site)
-                                      });
-                                    }
-                                  }}
-                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                />
-                                <span className="text-sm text-gray-700">{site}</span>
-                              </label>
-                            );
-                          })
-                      )}
-                  </div>
-                  {settings.overviewSites.length === 6 && (
-                    <p className="text-xs text-yellow-600 mt-2">
-                      Выбрано максимум 6 сайтов. Снимите отметку с одного, чтобы выбрать другой.
-                    </p>
-                  )}
-                </>
-              )}
             </div>
 
             {/* Action Buttons */}
