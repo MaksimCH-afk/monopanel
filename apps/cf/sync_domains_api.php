@@ -35,6 +35,25 @@ switch ($action) {
         if (!empty($imp['count'])) logAction($pdo, $userId, 'Синк: добавлены новые домены аккаунта', $c['email'] . ', добавлено: ' . $imp['count']);
         echo json_encode(['success' => !empty($imp['ok']), 'imported' => $imp['count'] ?? 0, 'error' => $imp['error'] ?? null]);
         break;
+    case 'import_all':
+        // Обнаружить и добавить недостающие зоны ВСЕХ аккаунтов (перед общей синхронизацией
+        // «Все домены»). Раньше импорт шёл только для конкретного аккаунта — поэтому «Все домены»
+        // не подтягивали новые зоны из Cloudflare («синк написал ок, но ничего не поменялось»).
+        $accs = $pdo->prepare("SELECT id, email, api_key FROM cloudflare_credentials
+            WHERE user_id = ? AND api_key IS NOT NULL AND api_key <> '' ORDER BY id");
+        $accs->execute([$userId]);
+        $accList = $accs->fetchAll();
+        $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
+        $total = 0; $errors = [];
+        foreach ($accList as $c) {
+            $imp = cfImportZonesForCredential($pdo, $userId, $c['id'], $c['email'], $c['api_key'], $grp ?: null);
+            if (!empty($imp['count'])) $total += (int)$imp['count'];
+            elseif (!empty($imp['error'])) $errors[] = $c['email'] . ': ' . $imp['error'];
+        }
+        if ($total) logAction($pdo, $userId, 'Синк: добавлены новые домены (все аккаунты)', 'добавлено: ' . $total);
+        echo json_encode(['success' => true, 'imported' => $total,
+            'accounts' => count($accList), 'errors' => $errors]);
+        break;
     case 'sync_domain':
         syncDomain($pdo, $userId);
         break;
