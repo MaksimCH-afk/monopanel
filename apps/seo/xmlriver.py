@@ -11,6 +11,7 @@
 
 import logging
 import os
+import re
 import xml.etree.ElementTree as ET
 
 import requests as http_requests
@@ -18,6 +19,36 @@ import requests as http_requests
 log = logging.getLogger('seo.xmlriver')
 
 XMLRIVER_BASE = os.environ.get('XMLRIVER_BASE', 'https://xmlriver.com/search/xml')
+# Базовый адрес сервисных методов (get_balance, get_cost и т.п.)
+XMLRIVER_API_BASE = os.environ.get('XMLRIVER_API_BASE', 'https://xmlriver.com/api')
+
+
+def get_balance(user, key, timeout=15):
+    """
+    Текущий баланс аккаунта XMLRIVER (сумма основного и бонусного счетов).
+    GET xmlriver.com/api/get_balance/?user=..&key=.. — возвращает строку с числом
+    или сообщение об ошибке. Возвращает dict:
+    {ok: bool, balance: float|None, raw: str, error: str|None}.
+    """
+    if not user or not key:
+        return {"ok": False, "balance": None, "raw": "", "error": "XMLRIVER не настроен (user ID / key)"}
+    try:
+        resp = http_requests.get(f"{XMLRIVER_API_BASE}/get_balance/",
+                                 params={"user": user, "key": key}, timeout=timeout)
+        text = (resp.text or "").strip()
+        if resp.status_code != 200:
+            return {"ok": False, "balance": None, "raw": text, "error": f"HTTP {resp.status_code}: {text[:200]}"}
+        if not text:
+            return {"ok": False, "balance": None, "raw": "", "error": "Пустой ответ от XMLRIVER"}
+        # Ответ — строка с балансом (число) ИЛИ сообщение об ошибке.
+        looks_error = any(w in text.lower() for w in ("error", "ошибк", "invalid", "ключ", "не заре"))
+        m = re.search(r"-?\d+(?:[.,]\d+)?", text)
+        if m and not looks_error:
+            return {"ok": True, "balance": float(m.group().replace(",", ".")), "raw": text, "error": None}
+        return {"ok": False, "balance": None, "raw": text, "error": text[:200]}
+    except Exception as e:  # noqa: BLE001
+        log.warning("XMLRIVER get_balance failed: %s", e)
+        return {"ok": False, "balance": None, "raw": "", "error": str(e)}
 
 
 def check_indexation(url, user, key, timeout=25):

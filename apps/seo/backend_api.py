@@ -44,6 +44,7 @@ import indexation as seo_indexation
 import scheduler as seo_scheduler
 import siteverify as seo_siteverify
 import twoindex
+import xmlriver
 
 app = Flask(__name__)
 
@@ -999,6 +1000,17 @@ def index_xmlriver():
         return jsonify({"error": "XMLRIVER не настроен (user/key в Настройках)"}), 400
     started = seo_indexation.start_xmlriver(data.get('siteUrl'), data.get('ids'), user, key)
     return jsonify({"started": started, "job": seo_indexation.job_status()})
+
+
+@app.route('/api/index/xmlriver-balance', methods=['GET'])
+def xmlriver_balance():
+    """Текущий баланс аккаунта XMLRIVER (для вывода на вкладке «Индексация»)."""
+    config = load_config()
+    user = config.get('xmlriverUser', '')
+    key = config.get('xmlriverKey', '')
+    if not user or not key:
+        return jsonify({"ok": False, "error": "XMLRIVER не настроен (user ID / key в Настройках)"})
+    return jsonify(xmlriver.get_balance(user, key))
 
 
 @app.route('/api/index/submit', methods=['POST'])
