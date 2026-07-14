@@ -996,21 +996,26 @@ def index_add_urls():
     if not site_url:
         return jsonify({"error": "siteUrl обязателен"}), 400
 
-    items = re.split(r'[\s,]+', raw) if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
+    # Разбор в любом формате: по строкам/пробелам/запятым/точкам с запятой/табам.
+    items = re.split(r'[\s,;]+', raw) if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
     urls, seen = [], set()
     skipped = 0
     for u in items:
-        u = (u or '').strip()
+        u = (u or '').strip().strip('<>"\'«»')
         if not u:
             continue
-        if not u.startswith('http'):
+        # Голый домен без схемы (felice-bet-casino.at) → добавляем https://
+        if not re.match(r'^https?://', u, re.I):
+            u = 'https://' + u.lstrip('/')
+        # Простая валидация: хост с точкой и без пробелов.
+        if not re.match(r'^https?://[^\s/]+\.[^\s/]+', u, re.I):
             skipped += 1
             continue
         if u not in seen:
             seen.add(u)
             urls.append(u)
     if not urls:
-        return jsonify({"error": "Не найдено ни одного URL (нужны http(s)-ссылки, по одной в строке)"}), 400
+        return jsonify({"error": "Не найдено ни одного адреса. Вставьте домены или ссылки, по одному в строке."}), 400
 
     added = 0
     with seo_db.session_scope() as s:

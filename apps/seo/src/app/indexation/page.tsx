@@ -206,8 +206,10 @@ export default function IndexationPage() {
                   конкретные 100 ссылок).
                 </li>
                 <li>
-                  <strong>«Статус в Google»</strong> — по каждой странице спрашивает у Google, в индексе ли она.
-                  Результат появится в колонках «Google (покрытие)» и «Индекс».
+                  <strong>«Статус в Google»</strong> — по каждой странице спрашивает у Google (через официальный
+                  URL Inspection API), в индексе ли она; результат появится в колонках «Google (покрытие)» и «Индекс».
+                  Работает <strong>только для страниц выбранного сайта-свойства</strong> (для ссылок с других доменов
+                  вернёт «error» — для них используйте «XMLRIVER»). У Google есть суточный лимит (~2000 URL).
                 </li>
                 <li>
                   <strong>«XMLRIVER»</strong> — альтернативная проверка индексации в Google через сторонний
@@ -226,8 +228,9 @@ export default function IndexationPage() {
             <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
               <p className="text-blue-900">
                 <strong>Про галочки:</strong> отметьте нужные строки — действие применится только к ним.
-                Если ничего не отмечено — действие идёт по <strong>всем</strong> страницам сайта.
-                Поиск по URL сверху помогает быстро найти нужные страницы.
+                Если ничего не отмечено — действие идёт по <strong>всем</strong> строкам в списке.
+                <br /><strong>«Поиск по URL»</strong> — это просто фильтр таблицы: он прячет строки, не содержащие
+                введённый текст (по сайту/Google ничего не запрашивает), удобно найти нужные страницы в длинном списке.
               </p>
             </div>
             <p className="text-gray-500 text-xs">
@@ -262,12 +265,17 @@ export default function IndexationPage() {
         {/* Добавить свои URL вручную */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
           <label htmlFor="manual-urls" className="block text-sm font-medium text-gray-800 mb-1">
-            Вставить свои URL (по одному в строке)
+            Вставить свои URL (по одному в строке; можно без https:// — добавим сами)
           </label>
           <p className="text-xs text-gray-500 mb-2">
-            Ссылки добавятся в список ниже для выбранного сайта <strong>{selectedSite ? selectedSite.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '') : '—'}</strong>.
-            Затем выделите нужные строки (или ничего — тогда действие применится ко всем) и нажмите
-            «Статус в Google», «XMLRIVER» или «На индекс (2index)».
+            Ссылки добавятся в список ниже под выбранным сайтом <strong>{selectedSite ? selectedSite.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '') : '—'}</strong>.
+            Затем выделите нужные строки (или ничего — тогда действие применится ко всем) и запускайте операцию.
+          </p>
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded p-2 mb-2">
+            <strong>Важно про чужие домены:</strong> «XMLRIVER» и «На индекс (2index)» работают для <strong>любых</strong> URL.
+            А «Статус в Google» — только для страниц <strong>того же свойства</strong>, что выбрано в «Сайт»
+            (это ограничение Google API); для ссылок с других доменов он вернёт «error». Для проверки чужих
+            доменов используйте «XMLRIVER».
           </p>
           <textarea
             id="manual-urls"
