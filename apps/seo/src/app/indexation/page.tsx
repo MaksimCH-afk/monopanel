@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch, faWallet, faRotate } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch, faWallet, faRotate, faPlus } from '@fortawesome/free-solid-svg-icons';
 import SiteSelect from '@/components/ui/SiteSelect';
 import HelpButton from '@/components/ui/HelpButton';
 
@@ -44,6 +44,10 @@ export default function IndexationPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   // Баланс XMLRIVER
   const [balance, setBalance] = useState<{ loading: boolean; ok?: boolean; value?: number | null; raw?: string; error?: string }>({ loading: true });
+  // Ручная вставка URL
+  const [manualUrls, setManualUrls] = useState('');
+  const [addingUrls, setAddingUrls] = useState(false);
+  const [addMsg, setAddMsg] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadBalance = useCallback(async () => {
@@ -103,6 +107,31 @@ export default function IndexationPage() {
   };
 
   const crawl = () => post('crawl', { siteUrl: selectedSite, sitemapUrl: sitemapUrl.trim() || undefined });
+
+  // Ручная вставка списка URL в таблицу (для проверки/отправки без sitemap)
+  const addUrls = async () => {
+    if (!selectedSite || !manualUrls.trim()) return;
+    setAddingUrls(true);
+    setAddMsg(null);
+    try {
+      const r = await fetch(`${API_BASE}/api/index/add-urls`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl: selectedSite, urls: manualUrls }),
+      });
+      const d = await r.json();
+      if (d.error) { setAddMsg(d.error); return; }
+      setAddMsg(`Добавлено: ${d.added}` +
+        (d.duplicates ? `, уже были: ${d.duplicates}` : '') +
+        (d.skipped ? `, пропущено (не http): ${d.skipped}` : ''));
+      setManualUrls('');
+      load();
+    } catch {
+      setAddMsg('Не удалось добавить URL');
+    } finally {
+      setAddingUrls(false);
+    }
+  };
+
   const idsForAction = () => (selected.size ? Array.from(selected) : undefined);
   const runAction = (path: string) => post(path, { siteUrl: selectedSite, ids: idsForAction() });
 
@@ -171,9 +200,10 @@ export default function IndexationPage() {
               <ol className="list-decimal list-inside space-y-1.5">
                 <li><strong>Выберите сайт</strong> в списке вверху.</li>
                 <li>
-                  Нажмите <strong>«Обойти sitemap»</strong> — программа откроет карту сайта
-                  (файл <code>sitemap.xml</code> со списком всех страниц) и соберёт страницы в таблицу.
-                  Если карта лежит по нестандартному адресу — впишите его в поле рядом.
+                  Заполните список страниц одним из двух способов: <strong>«Обойти sitemap»</strong> (программа
+                  откроет карту сайта <code>sitemap.xml</code> и соберёт все страницы) <strong>или вставьте свои
+                  URL</strong> в поле «Вставить свои URL» (по одному в строке — удобно, когда нужно проверить/отправить
+                  конкретные 100 ссылок).
                 </li>
                 <li>
                   <strong>«Статус в Google»</strong> — по каждой странице спрашивает у Google, в индексе ли она.
@@ -226,6 +256,38 @@ export default function IndexationPage() {
               <FontAwesomeIcon icon={faSitemap} /> Обойти sitemap
             </button>
           </div>
+          <p className="text-xs text-gray-400 mt-2">Список страниц можно заполнить двумя способами: обойти sitemap выше — или вставить свои URL ниже.</p>
+        </div>
+
+        {/* Добавить свои URL вручную */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+          <label htmlFor="manual-urls" className="block text-sm font-medium text-gray-800 mb-1">
+            Вставить свои URL (по одному в строке)
+          </label>
+          <p className="text-xs text-gray-500 mb-2">
+            Ссылки добавятся в список ниже для выбранного сайта <strong>{selectedSite ? selectedSite.replace(/^https?:\/\//, '').replace(/^sc-domain:/, '') : '—'}</strong>.
+            Затем выделите нужные строки (или ничего — тогда действие применится ко всем) и нажмите
+            «Статус в Google», «XMLRIVER» или «На индекс (2index)».
+          </p>
+          <textarea
+            id="manual-urls"
+            value={manualUrls}
+            onChange={(e) => setManualUrls(e.target.value)}
+            rows={5}
+            placeholder={'https://site.com/page-1\nhttps://site.com/page-2\nhttps://site.com/page-3'}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              onClick={addUrls}
+              disabled={addingUrls || !selectedSite || !manualUrls.trim()}
+              className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50 flex items-center gap-2"
+            >
+              <FontAwesomeIcon icon={addingUrls ? faSpinner : faPlus} className={addingUrls ? 'animate-spin' : ''} />
+              Добавить в список
+            </button>
+            {addMsg && <span className="text-sm text-gray-600">{addMsg}</span>}
+          </div>
         </div>
 
         {/* Прогресс */}
@@ -273,7 +335,7 @@ export default function IndexationPage() {
           {loading && pages.length === 0 ? (
             <div className="p-8 text-center text-gray-500"><FontAwesomeIcon icon={faSpinner} className="animate-spin text-2xl text-blue-600" /></div>
           ) : filtered.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">Страниц нет. Нажмите «Обойти sitemap».</div>
+            <div className="p-8 text-center text-gray-500">Страниц нет. Нажмите «Обойти sitemap» или вставьте свои URL выше.</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">

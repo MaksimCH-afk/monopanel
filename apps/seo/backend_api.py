@@ -981,6 +981,48 @@ def index_crawl():
     return jsonify({"started": started, "job": seo_indexation.job_status()})
 
 
+@app.route('/api/index/add-urls', methods=['POST'])
+def index_add_urls():
+    """
+    Добавить свои URL в список вручную (вставка списка) — вместо/в дополнение к
+    «Обойти sitemap». Дальше по ним работают проверка (Google/XMLRIVER) и отправка
+    (2index). {siteUrl, urls: [...] | "строка со ссылками"}.
+    """
+    import re
+    from db import IndexPage
+    data = request.get_json(silent=True) or {}
+    site_url = (data.get('siteUrl') or '').strip()
+    raw = data.get('urls')
+    if not site_url:
+        return jsonify({"error": "siteUrl обязателен"}), 400
+
+    items = re.split(r'[\s,]+', raw) if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
+    urls, seen = [], set()
+    skipped = 0
+    for u in items:
+        u = (u or '').strip()
+        if not u:
+            continue
+        if not u.startswith('http'):
+            skipped += 1
+            continue
+        if u not in seen:
+            seen.add(u)
+            urls.append(u)
+    if not urls:
+        return jsonify({"error": "Не найдено ни одного URL (нужны http(s)-ссылки, по одной в строке)"}), 400
+
+    added = 0
+    with seo_db.session_scope() as s:
+        existing = {p.url for p in s.query(IndexPage.url).filter_by(site_url=site_url).all()}
+        for u in urls:
+            if u not in existing:
+                s.add(IndexPage(site_url=site_url, url=u))
+                added += 1
+    return jsonify({"success": True, "added": added, "received": len(urls),
+                    "duplicates": len(urls) - added, "skipped": skipped})
+
+
 @app.route('/api/index/inspect', methods=['POST'])
 def index_inspect():
     """Статус индексации из Google (URL Inspection) для выбранных/всех страниц."""
