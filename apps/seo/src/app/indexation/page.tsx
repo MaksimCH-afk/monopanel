@@ -359,9 +359,9 @@ export default function IndexationPage() {
                 {filtered.map(p => (
                   <tr key={p.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} /></td>
-                    <td className="px-3 py-2 max-w-md truncate">
+                    <td className="px-3 py-2 max-w-xl truncate">
                       <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline" title={p.url}>
-                        {p.url.replace(/^https?:\/\/[^/]+/, '') || '/'}
+                        {p.url.replace(/^https?:\/\//, '')}
                       </a>
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-600 max-w-[220px] truncate" title={p.coverage_state || ''}>
