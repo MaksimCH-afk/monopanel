@@ -41,8 +41,12 @@ def submit_urls(urls, key, timeout=40):
             data = {"body": resp.text[:300]}
 
         if resp.status_code not in (200, 201):
+            body = (data.get("body") if isinstance(data, dict) else str(data)) or ""
+            # Показываем точный адрес и ответ 2index — чтобы сразу видеть,
+            # правильный ли endpoint (напр. 404 = неверный путь API).
             return {"ok": False, "accepted": 0,
-                    "error": f"HTTP {resp.status_code}", "raw": data}
+                    "error": f"HTTP {resp.status_code} от {endpoint} — {str(body)[:200]}",
+                    "raw": data}
         return {"ok": True, "accepted": len(urls), "error": None, "raw": data}
     except Exception as e:  # noqa: BLE001
         log.warning("2index submit failed: %s", e)
