@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch, faWallet, faRotate } from '@fortawesome/free-solid-svg-icons';
 import SiteSelect from '@/components/ui/SiteSelect';
 import HelpButton from '@/components/ui/HelpButton';
 
@@ -42,7 +42,20 @@ export default function IndexationPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Баланс XMLRIVER
+  const [balance, setBalance] = useState<{ loading: boolean; ok?: boolean; value?: number | null; raw?: string; error?: string }>({ loading: true });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadBalance = useCallback(async () => {
+    setBalance({ loading: true });
+    try {
+      const r = await fetch(`${API_BASE}/api/index/xmlriver-balance`);
+      const d = await r.json();
+      setBalance({ loading: false, ok: !!d.ok, value: d.balance ?? null, raw: d.raw, error: d.error });
+    } catch {
+      setBalance({ loading: false, ok: false, error: 'Не удалось получить баланс' });
+    }
+  }, []);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/sites`).then(r => r.json()).then(d => {
@@ -50,6 +63,7 @@ export default function IndexationPage() {
       setSites(s);
       if (s.length && !selectedSite) setSelectedSite(s[0]);
     }).catch(() => {});
+    loadBalance();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
@@ -72,12 +86,12 @@ export default function IndexationPage() {
           const r = await fetch(`${API_BASE}/api/index/status`);
           const st: Job = await r.json();
           setJob(st);
-          if (!st.running) { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } load(); }
+          if (!st.running) { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } load(); loadBalance(); }
         } catch { /* ignore */ }
       }, 2000);
     }
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
-  }, [job?.running, load]);
+  }, [job?.running, load, loadBalance]);
 
   const post = async (path: string, body: any) => {
     const r = await fetch(`${API_BASE}/api/index/${path}`, {
@@ -126,6 +140,20 @@ export default function IndexationPage() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Индексация</h1>
             <p className="text-gray-600 mt-1">Обход sitemap, статус индексации (Google/XMLRIVER), массовая отправка на индекс</p>
+            <div className="mt-2 inline-flex items-center gap-2 text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+              <FontAwesomeIcon icon={faWallet} className="text-green-600" />
+              <span className="text-gray-500">Баланс XMLRIVER:</span>
+              {balance.loading ? (
+                <FontAwesomeIcon icon={faSpinner} className="animate-spin text-gray-400" />
+              ) : balance.ok ? (
+                <span className="font-semibold text-gray-900">{balance.value != null ? balance.value.toLocaleString('ru-RU') : balance.raw} ₽</span>
+              ) : (
+                <span className="text-red-500 text-xs" title={balance.error}>{balance.error || 'нет данных'}</span>
+              )}
+              <button type="button" onClick={loadBalance} className="text-gray-400 hover:text-gray-700" title="Обновить баланс">
+                <FontAwesomeIcon icon={faRotate} className={balance.loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
           <HelpButton title="Что такое «Индексация»">
             <p>
@@ -152,8 +180,9 @@ export default function IndexationPage() {
                   Результат появится в колонках «Google (покрытие)» и «Индекс».
                 </li>
                 <li>
-                  <strong>«XMLRIVER»</strong> — альтернативная проверка индексации через сторонний сервис
-                  (нужен ключ XMLRIVER в Настройках).
+                  <strong>«XMLRIVER»</strong> — альтернативная проверка индексации в Google через сторонний
+                  сервис XMLRIVER (нужны user ID и key в Настройках). Каждая проверка тратит баланс XMLRIVER —
+                  его текущее значение показано вверху раздела (обновляется кнопкой ↻ и после проверки).
                 </li>
                 <li>
                   <strong>«На индекс (2index)»</strong> — отправляет страницы на переобход/индексацию через
