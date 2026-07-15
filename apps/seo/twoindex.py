@@ -105,13 +105,20 @@ def submit_urls(urls, token, project_name=None, timeout=40):
         return {"ok": False, "accepted": 0, "error": "нет URL", "raw": None}
 
     endpoint = f"{TWOINDEX_BASE}{TWOINDEX_SEND_PATH}"
-    # google=1 — обязательна хотя бы одна поисковая система (google/yandex/bing).
-    payload = {"links": list(urls), "google": 1}
+    # API принимает form-urlencoded (как http_build_query в PHP-примере), НЕ JSON.
+    # links — текст «по ссылке в строке»; google=1 — обязательна хотя бы одна ПС.
+    payload = {
+        "links": "\n".join(urls),
+        "google": 1,
+        "yandex": 0,
+        "bing": 0,
+        "google_access_granted": 0,
+    }
     if project_name:
         payload["project_name"] = project_name
     try:
         log.info("2index submit %s url(s) -> %s (project=%s)", len(urls), endpoint, project_name)
-        resp = http_requests.post(endpoint, json=payload, headers=_headers(token), timeout=timeout)
+        resp = http_requests.post(endpoint, data=payload, headers=_headers(token), timeout=timeout)
         log.debug("2index status=%s body[:500]=%s", resp.status_code, resp.text[:500])
         try:
             data = resp.json()
