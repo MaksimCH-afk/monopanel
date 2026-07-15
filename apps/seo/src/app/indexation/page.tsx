@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch, faWallet, faRotate, faPlus } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faTrash, faCheckCircle, faPaperPlane, faSitemap, faSearch, faWallet, faRotate, faPlus, faCopy } from '@fortawesome/free-solid-svg-icons';
 import SiteSelect from '@/components/ui/SiteSelect';
 import HelpButton from '@/components/ui/HelpButton';
 
@@ -42,6 +42,7 @@ export default function IndexationPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [copied, setCopied] = useState(false);
   // Баланс XMLRIVER
   const [balance, setBalance] = useState<{ loading: boolean; ok?: boolean; value?: number | null; raw?: string; error?: string }>({ loading: true });
   // Аккаунт 2index (проверка токена + лимиты)
@@ -159,6 +160,26 @@ export default function IndexationPage() {
     setSelected(new Set()); load();
   };
 
+  // Копировать домены выбранных строк (или всех отфильтрованных, если ничего не
+  // выбрано) в буфер обмена — по одному в строке, без http(s)://, как в столбце.
+  const copyDomains = async () => {
+    const rows = selected.size ? filtered.filter(p => selected.has(p.id)) : filtered;
+    const text = rows.map(p => p.url.replace(/^https?:\/\//, '')).join('\n');
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback для http/старых браузеров, где clipboard API недоступен.
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch { /* noop */ }
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   const filtered = useMemo(
     () => pages.filter(p => p.url.toLowerCase().includes(search.toLowerCase())),
     [pages, search]
@@ -250,6 +271,10 @@ export default function IndexationPage() {
                 <li>
                   <strong>«На индекс (2index)»</strong> — отправляет страницы на переобход/индексацию через
                   сервис 2index (нужен ключ 2index в Настройках). Это и есть «попросить Google заглянуть заново».
+                </li>
+                <li>
+                  <strong>«Копировать»</strong> — копирует домены выбранных строк (или всех, если ничего не выбрано)
+                  в буфер обмена, по одному в строке — удобно вставить в таблицу или другой сервис.
                 </li>
                 <li>
                   <strong>«Удалить»</strong> — убирает выбранные строки из этого списка (на сам сайт и на Google не влияет).
@@ -361,6 +386,12 @@ export default function IndexationPage() {
           <button onClick={() => runAction('submit')} disabled={job?.running}
             className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm flex items-center gap-2">
             <FontAwesomeIcon icon={faPaperPlane} /> На индекс (2index)
+          </button>
+          <button onClick={copyDomains} disabled={!filtered.length}
+            title="Скопировать домены выбранных строк (или всех, если ничего не выбрано) в буфер обмена"
+            className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm flex items-center gap-2">
+            <FontAwesomeIcon icon={copied ? faCheckCircle : faCopy} className={copied ? 'text-green-600' : ''} />
+            {copied ? 'Скопировано' : `Копировать${selected.size ? ` (${selected.size})` : ''}`}
           </button>
           <button onClick={deleteSelected} disabled={!selected.size}
             className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 text-sm flex items-center gap-2">
