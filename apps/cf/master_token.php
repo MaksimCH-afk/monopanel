@@ -277,14 +277,46 @@ function importEmpty() {
     })
     .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут' : 'Ошибка соединения') + '</span>'); });
 }
+// Шаг 1 — превью: показать план (кого оставить, во что переименовать, кого удалить)
+// без изменений в БД. Применение — отдельной кнопкой (applyDedup).
 function dedupAccounts() {
-    if (!confirm('Объединить дубли аккаунтов? Домены и токены перецепятся на один кредентал, лишние удалятся. Это безопасно и необратимо.')) return;
-    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Ищу и объединяю дубли…</div>');
+    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Проверяю аккаунты на дубли…</div>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000, data: { action: 'dedup_preview' } })
+    .done(function(r) {
+        if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
+        if (!r.groups || !r.groups.length) {
+            $('#addDomainsOut').html('<div class="alert alert-success small mb-0"><i class="fas fa-circle-check me-1"></i>Дублей не найдено (аккаунтов: ' + r.total + ').</div>');
+            return;
+        }
+        let removedTotal = 0;
+        let html = '<div class="alert alert-warning small mb-2"><i class="fas fa-triangle-exclamation me-1"></i>Найдено групп-дублей: <b>' + r.merged_groups + '</b> (всего аккаунтов: ' + r.total + '). Проверьте план и подтвердите. Домены и scoped-токены удаляемых переедут к главному; Cloudflare не затрагивается.</div>';
+        r.groups.forEach(function(g) {
+            removedTotal += (g.removed || []).length;
+            const keepName = g.renamed
+                ? ('<span class="text-decoration-line-through text-muted">' + $('<div>').text(g.keep_email).html() + '</span> → <b>' + $('<div>').text(g.new_name).html() + '</b>')
+                : ('<b>' + $('<div>').text(g.keep_email).html() + '</b>');
+            html += '<div class="border rounded p-2 mb-2">';
+            html += '<div class="small text-success"><i class="fas fa-star me-1"></i>Главный: ' + keepName + ' <span class="text-muted">· доменов: ' + g.keep_domains + '</span></div>';
+            (g.removed || []).forEach(function(x) {
+                html += '<div class="small text-danger"><i class="fas fa-trash me-1"></i>Удалить: ' + $('<div>').text(x.email).html() + ' <span class="text-muted">· доменов: ' + x.domains + ' → к главному</span></div>';
+            });
+            html += '</div>';
+        });
+        html += '<button class="btn btn-danger btn-sm" onclick="applyDedup(this)"><i class="fas fa-object-group me-1"></i>Применить — убрать ' + removedTotal + ' дубл.</button>'
+              + ' <button class="btn btn-outline-secondary btn-sm" onclick="$(\'#addDomainsOut\').html(\'\')">Отмена</button>';
+        $('#addDomainsOut').html(html);
+    })
+    .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут' : 'Ошибка соединения') + '</span>'); });
+}
+// Шаг 2 — применение: сервер пересчитывает план под write-локом и выполняет слияние.
+function applyDedup(btn) {
+    if (!confirm('Убрать дубли аккаунтов? Домены и scoped-токены перецепятся на главный кредентал, лишние удалятся. Cloudflare не затрагивается. Действие необратимо.')) return;
+    $(btn).prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Применяю…');
     $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000, data: { action: 'dedup_accounts' } })
     .done(function(r) {
         if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
         if (!r.deleted) { $('#addDomainsOut').html('<span class="text-muted small">Дублей не найдено (аккаунтов: ' + r.total + ').</span>'); return; }
-        let html = '<div class="small text-success mb-1">Объединено групп: ' + r.merged_groups + ', удалено дублей: ' + r.deleted + '</div><ul class="mb-0 ps-3 small">';
+        let html = '<div class="alert alert-success small mb-1"><i class="fas fa-circle-check me-1"></i>Готово. Объединено групп: <b>' + r.merged_groups + '</b>, удалено дублей: <b>' + r.deleted + '</b></div><ul class="mb-0 ps-3 small">';
         (r.report || []).forEach(function(x) {
             html += '<li>Оставлен <b>' + $('<div>').text(x.keep).html() + '</b>, убраны: ' + $('<div>').text((x.removed || []).join(', ')).html() + '</li>';
         });

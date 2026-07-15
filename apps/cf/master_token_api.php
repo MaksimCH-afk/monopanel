@@ -138,6 +138,99 @@ function mtCreateToken($master, $name, $selected) {
     return ['ok' => true, 'token' => $res['result']['value'] ?? null, 'id' => $res['result']['id'] ?? null, 'missing' => $missing];
 }
 
+/**
+ * Считает план слияния дублей аккаунтов БЕЗ записи в БД: группирует кредентала
+ * по нормализованному имени (« #N» отбрасывается), разводя по разным cf_account_uid,
+ * и выбирает «главного» по баллу (мастер-токен → scoped-токен → auth_type=token →
+ * ключ/uid → домены). Один источник правды для превью (dedup_preview, только чтение)
+ * и применения (dedup_accounts, внутри BEGIN IMMEDIATE).
+ * Возвращает ['merges'=>[...], 'total'=>int, 'dom_count'=>[account_id=>N]].
+ */
+function mtDedupComputeMerges($pdo, $userId) {
+    $userId = (int)$userId;
+    $baseName = function ($email) { return preg_replace('/\s*#\d+$/', '', trim((string)$email)); };
+
+    $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
+        FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
+    $total = count($creds);
+
+    $masterTokset = [];
+    foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
+                ->fetchAll(PDO::FETCH_COLUMN) as $mt) { $masterTokset[$mt] = true; }
+    $scopedCount = []; $domCount = [];
+    foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_api_tokens WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
+        $scopedCount[(int)$r['account_id']] = (int)$r['c'];
+    }
+    foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_accounts WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
+        $domCount[(int)$r['account_id']] = (int)$r['c'];
+    }
+    // Балл «главности»: мастер-токен → кастом-токен → auth_type=token → ключ/uid → домены.
+    $valueScore = function ($c) use ($masterTokset, $scopedCount, $domCount) {
+        $id = (int)$c['id'];
+        $hasMaster = !empty($c['api_key']) && isset($masterTokset[$c['api_key']]);
+        $hasScoped = !empty($scopedCount[$id]);
+        $isToken   = ($c['auth_type'] ?? '') === 'token';
+        $hasKey    = !empty($c['api_key']);
+        $hasUid    = !empty($c['cf_account_uid']);
+        return ($hasMaster ? 1 : 0) * 100000 + ($hasScoped ? 1 : 0) * 10000
+             + ($isToken ? 1 : 0) * 1000 + ($hasKey ? 1 : 0) * 100 + ($hasUid ? 1 : 0) * 10
+             + min((int)($domCount[$id] ?? 0), 9);
+    };
+
+    // Группировка по нормализованному имени (одно имя = один CF-аккаунт). Защита:
+    // если под одним именем РАЗНЫЕ ненулевые uid — это разные аккаунты, разводим по uid.
+    $named = [];
+    foreach ($creds as $c) { $named[strtolower($baseName($c['email']))][] = $c; }
+    $groups = [];
+    foreach ($named as $nm => $items) {
+        $uids = array_values(array_unique(array_filter(array_map(
+            function ($x) { return $x['cf_account_uid'] ?? ''; }, $items))));
+        if (count($uids) > 1) {
+            foreach ($items as $c) {
+                $k = !empty($c['cf_account_uid']) ? ('uid:' . $c['cf_account_uid']) : ('name:' . $nm);
+                $groups[$k][] = $c;
+            }
+        } else {
+            foreach ($items as $c) { $groups['name:' . $nm][] = $c; }
+        }
+    }
+
+    $merges = [];
+    foreach ($groups as $items) {
+        if (count($items) < 2) continue;
+        usort($items, function ($a, $b) use ($valueScore) {
+            $sa = $valueScore($a); $sb = $valueScore($b);
+            if ($sa !== $sb) return $sb - $sa;
+            $as = preg_match('/\s*#\d+$/', $a['email']) ? 1 : 0;
+            $bs = preg_match('/\s*#\d+$/', $b['email']) ? 1 : 0;
+            if ($as !== $bs) return $as - $bs;
+            return (int)$a['id'] - (int)$b['id'];
+        });
+        $keep = $items[0];
+        $removeIds = []; $removeEmails = [];
+        for ($k = 1; $k < count($items); $k++) {
+            $removeIds[]    = (int)$items[$k]['id'];
+            $removeEmails[] = $items[$k]['email'];
+        }
+        $bestKey = $keep['api_key']; $bestAuth = $keep['auth_type']; $bestUid = $keep['cf_account_uid'];
+        foreach ($items as $it) {
+            if (empty($bestKey) && !empty($it['api_key'])) { $bestKey = $it['api_key']; $bestAuth = $it['auth_type']; }
+            if (empty($bestUid) && !empty($it['cf_account_uid'])) { $bestUid = $it['cf_account_uid']; }
+        }
+        $merges[] = [
+            'keep'          => (int)$keep['id'],
+            'keep_email'    => $keep['email'],
+            'remove'        => $removeIds,
+            'remove_emails' => $removeEmails,
+            'name'          => $baseName($keep['email']),
+            'api_key'       => $bestKey,
+            'auth_type'     => $bestAuth ?: 'token',
+            'uid'           => $bestUid,
+        ];
+    }
+    return ['merges' => $merges, 'total' => $total, 'dom_count' => $domCount];
+}
+
 try {
     switch ($action) {
         case 'list_permissions':
@@ -482,104 +575,55 @@ try {
             echo json_encode(['success' => true, 'label' => $email, 'imported' => $imp['count'] ?? 0]);
             break;
 
-        case 'dedup_accounts':
-            // Чистка дублей: один CF-аккаунт мог попасть в панель несколько раз (Account, #2, #3).
-            // Чтобы не ловить "database is locked" (BUSY_SNAPSHOT при read→write вперемешку с
-            // фоновыми cf-queue/cf-monitor), делаем так:
-            //   1) все сетевые вызовы (резолв UID) — БЕЗ записи в БД;
-            //   2) ВСЕ записи — одной короткой транзакцией BEGIN IMMEDIATE (берём write-лок сразу),
-            //      обёрнутой в ретрай.
-            // 1) Резолв UID (сеть) — БЕЗ БД-транзакции: быстрое чтение кредеталов (автокоммит),
-            //    затем сетевые вызовы только в память. Ничего не пишем и не держим снапшот.
-            $baseName = function ($email) { return preg_replace('/\s*#\d+$/', '', trim((string)$email)); };
+        case 'dedup_preview':
+            // Превью дедупа: тот же план, что применит dedup_accounts, но БЕЗ записи в БД.
+            // Показываем, какой аккаунт останется главным, во что переименуется и кого удалим.
+            $prev = mtDedupComputeMerges($pdo, $userId);
+            $dom  = $prev['dom_count'];
+            $groups = [];
+            foreach ($prev['merges'] as $m) {
+                $removed = [];
+                foreach ($m['remove'] as $i => $rid) {
+                    $removed[] = ['id' => $rid, 'email' => $m['remove_emails'][$i], 'domains' => $dom[$rid] ?? 0];
+                }
+                $groups[] = [
+                    'keep_id'      => $m['keep'],
+                    'keep_email'   => $m['keep_email'],
+                    'new_name'     => $m['name'],
+                    'renamed'      => ($m['name'] !== $m['keep_email']),
+                    'keep_domains' => $dom[$m['keep']] ?? 0,
+                    'removed'      => $removed,
+                ];
+            }
+            echo json_encode([
+                'success'       => true,
+                'total'         => $prev['total'],
+                'merged_groups' => count($groups),
+                'groups'        => $groups,
+            ]);
+            break;
 
-            // Дедуп БЕЗ сети: группируем по нормализованному имени (одно имя = один CF-аккаунт),
-            // а uid-защиту берём из уже сохранённых в БД cf_account_uid. Раньше здесь шёл сетевой
-            // резолв uid по КАЖДОМУ аккаунту — это делало операцию долгой и сильно расширяло окно,
-            // в котором BEGIN IMMEDIATE конкурировал с фоновой записью → «database is locked».
-            //
-            // ВСЁ — чтения, план слияния и записи — под ОДНИМ BEGIN IMMEDIATE (write-лок первым,
-            // без гонки read→write). Операция теперь мгновенная, окно блокировки — минимальное.
+        case 'dedup_accounts':
+            // Применение дедупа: один CF-аккаунт мог попасть в панель несколько раз (Account, #2, #3).
+            // Дедуп БЕЗ сети: план слияния считает общий helper mtDedupComputeMerges
+            // (группировка по нормализованному имени + разводка по cf_account_uid). ВСЁ —
+            // чтения плана и записи — под ОДНИМ BEGIN IMMEDIATE (write-лок первым, без гонки
+            // read→write), чтобы не ловить «database is locked» с фоновыми cf-queue/cf-monitor.
             $mergedGroups = 0; $deleted = 0; $report = []; $total = 0;
-            dbRetryOnLock(function () use ($pdo, $userId, $baseName,
+            dbRetryOnLock(function () use ($pdo, $userId,
                     &$mergedGroups, &$deleted, &$report, &$total) {
                 $mergedGroups = 0; $deleted = 0; $report = [];
                 // Ждём освобождения write-лока подольше (фоновый import/monitor может держать серию записей).
                 $pdo->exec('PRAGMA busy_timeout = 120000');
                 $pdo->exec('BEGIN IMMEDIATE');
                 try {
-                    // Свежие чтения под write-локом.
-                    $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, auth_type
-                        FROM cloudflare_credentials WHERE user_id = $userId ORDER BY id")->fetchAll();
-                    $total = count($creds);
-
-                    $masterTokset = [];
-                    foreach ($pdo->query("SELECT token FROM master_tokens WHERE token IS NOT NULL AND token <> ''")
-                                ->fetchAll(PDO::FETCH_COLUMN) as $mt) { $masterTokset[$mt] = true; }
-                    $scopedCount = []; $domCount = [];
-                    foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_api_tokens WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
-                        $scopedCount[(int)$r['account_id']] = (int)$r['c'];
-                    }
-                    foreach ($pdo->query("SELECT account_id, COUNT(*) c FROM cloudflare_accounts WHERE user_id = $userId GROUP BY account_id")->fetchAll() as $r) {
-                        $domCount[(int)$r['account_id']] = (int)$r['c'];
-                    }
-                    // Балл «главности»: мастер-токен → кастом-токен → auth_type=token → ключ/uid → домены.
-                    $valueScore = function ($c) use ($masterTokset, $scopedCount, $domCount) {
-                        $id = (int)$c['id'];
-                        $hasMaster = !empty($c['api_key']) && isset($masterTokset[$c['api_key']]);
-                        $hasScoped = !empty($scopedCount[$id]);
-                        $isToken   = ($c['auth_type'] ?? '') === 'token';
-                        $hasKey    = !empty($c['api_key']);
-                        $hasUid    = !empty($c['cf_account_uid']);
-                        return ($hasMaster ? 1 : 0) * 100000 + ($hasScoped ? 1 : 0) * 10000
-                             + ($isToken ? 1 : 0) * 1000 + ($hasKey ? 1 : 0) * 100 + ($hasUid ? 1 : 0) * 10
-                             + min((int)($domCount[$id] ?? 0), 9);
-                    };
-
-                    // Группировка по нормализованному имени (одно имя = один CF-аккаунт). Защита:
-                    // если под одним именем РАЗНЫЕ ненулевые uid — это разные аккаунты, разводим по uid.
-                    $named = [];
-                    foreach ($creds as $c) { $named[strtolower($baseName($c['email']))][] = $c; }
-                    $groups = [];
-                    foreach ($named as $nm => $items) {
-                        $uids = array_values(array_unique(array_filter(array_map(
-                            function ($x) { return $x['cf_account_uid'] ?? ''; }, $items))));
-                        if (count($uids) > 1) {
-                            foreach ($items as $c) {
-                                $k = !empty($c['cf_account_uid']) ? ('uid:' . $c['cf_account_uid']) : ('name:' . $nm);
-                                $groups[$k][] = $c;
-                            }
-                        } else {
-                            foreach ($items as $c) { $groups['name:' . $nm][] = $c; }
-                        }
-                    }
-
-                    $merges = [];
-                    foreach ($groups as $items) {
-                        if (count($items) < 2) continue;
-                        usort($items, function ($a, $b) use ($valueScore) {
-                            $sa = $valueScore($a); $sb = $valueScore($b);
-                            if ($sa !== $sb) return $sb - $sa;
-                            $as = preg_match('/\s*#\d+$/', $a['email']) ? 1 : 0;
-                            $bs = preg_match('/\s*#\d+$/', $b['email']) ? 1 : 0;
-                            if ($as !== $bs) return $as - $bs;
-                            return (int)$a['id'] - (int)$b['id'];
-                        });
-                        $keep = $items[0];
-                        $removeIds = []; $removeEmails = [];
-                        for ($k = 1; $k < count($items); $k++) {
-                            $removeIds[] = (int)$items[$k]['id'];
-                            $removeEmails[] = $items[$k]['email'];
-                        }
-                        $bestKey = $keep['api_key']; $bestAuth = $keep['auth_type']; $bestUid = $keep['cf_account_uid'];
-                        foreach ($items as $it) {
-                            if (empty($bestKey) && !empty($it['api_key'])) { $bestKey = $it['api_key']; $bestAuth = $it['auth_type']; }
-                            if (empty($bestUid) && !empty($it['cf_account_uid'])) { $bestUid = $it['cf_account_uid']; }
-                        }
-                        $merges[] = ['keep' => (int)$keep['id'], 'remove' => $removeIds,
-                            'name' => $baseName($keep['email']),
-                            'api_key' => $bestKey, 'auth_type' => $bestAuth ?: 'token', 'uid' => $bestUid];
-                        $report[] = ['keep' => $baseName($keep['email']), 'removed' => $removeEmails];
+                    // Свежий план под write-локом — теми же чтениями, что и превью.
+                    $res    = mtDedupComputeMerges($pdo, $userId);
+                    $merges = $res['merges'];
+                    $total  = $res['total'];
+                    $report = [];
+                    foreach ($merges as $m) {
+                        $report[] = ['keep' => $m['name'], 'removed' => $m['remove_emails']];
                     }
                     $mergedGroups = count($merges);
 
