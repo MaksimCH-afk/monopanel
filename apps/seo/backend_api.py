@@ -1060,6 +1060,15 @@ def xmlriver_balance():
     return jsonify(xmlriver.get_balance(user, key))
 
 
+@app.route('/api/index/twoindex-account', methods=['GET'])
+def twoindex_account():
+    """Аккаунт 2index (баланс/лимиты) — проверка токена и вывод на вкладке."""
+    token = load_config().get('twoindexKey', '')
+    if not token:
+        return jsonify({"ok": False, "error": "2index не настроен (ключ в Настройках)"})
+    return jsonify(twoindex.get_account(token))
+
+
 @app.route('/api/index/submit', methods=['POST'])
 def index_submit():
     """Отправить выбранные/все страницы на индекс через 2index."""
