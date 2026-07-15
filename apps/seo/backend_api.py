@@ -1060,6 +1060,15 @@ def xmlriver_balance():
     return jsonify(xmlriver.get_balance(user, key))
 
 
+@app.route('/api/index/twoindex-account', methods=['GET'])
+def twoindex_account():
+    """Аккаунт 2index (баланс/лимиты) — проверка токена и вывод на вкладке."""
+    token = load_config().get('twoindexKey', '')
+    if not token:
+        return jsonify({"ok": False, "error": "2index не настроен (ключ в Настройках)"})
+    return jsonify(twoindex.get_account(token))
+
+
 @app.route('/api/index/submit', methods=['POST'])
 def index_submit():
     """Отправить выбранные/все страницы на индекс через 2index."""
@@ -1905,7 +1914,11 @@ def index_submit_url():
     if not key:
         return jsonify({"error": "2index не настроен (укажите ключ в Настройках)"}), 400
 
-    res = twoindex.submit_urls([url], key)
+    try:
+        project_name = url.split('://', 1)[-1].split('/', 1)[0] or None
+    except Exception:  # noqa: BLE001
+        project_name = None
+    res = twoindex.submit_urls([url], key, project_name=project_name)
     if not res.get('ok'):
         return jsonify({"error": res.get('error') or "2index отклонил запрос", "raw": res.get('raw')}), 400
     return jsonify({"success": True, "accepted": res.get('accepted', 0)})

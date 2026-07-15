@@ -44,6 +44,8 @@ export default function IndexationPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   // Баланс XMLRIVER
   const [balance, setBalance] = useState<{ loading: boolean; ok?: boolean; value?: number | null; raw?: string; error?: string }>({ loading: true });
+  // Аккаунт 2index (проверка токена + лимиты)
+  const [twoindex, setTwoindex] = useState<{ loading: boolean; ok?: boolean; links?: number | null; balance?: number | null; error?: string }>({ loading: true });
   // Ручная вставка URL
   const [manualUrls, setManualUrls] = useState('');
   const [addingUrls, setAddingUrls] = useState(false);
@@ -61,6 +63,17 @@ export default function IndexationPage() {
     }
   }, []);
 
+  const loadTwoindex = useCallback(async () => {
+    setTwoindex({ loading: true });
+    try {
+      const r = await fetch(`${API_BASE}/api/index/twoindex-account`);
+      const d = await r.json();
+      setTwoindex({ loading: false, ok: !!d.ok, links: d.available_links ?? null, balance: d.balance ?? null, error: d.error });
+    } catch {
+      setTwoindex({ loading: false, ok: false, error: 'Не удалось получить данные 2index' });
+    }
+  }, []);
+
   useEffect(() => {
     fetch(`${API_BASE}/api/sites`).then(r => r.json()).then(d => {
       const s = Array.isArray(d.sites) ? d.sites : [];
@@ -68,6 +81,7 @@ export default function IndexationPage() {
       if (s.length && !selectedSite) setSelectedSite(s[0]);
     }).catch(() => {});
     loadBalance();
+    loadTwoindex();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
@@ -181,6 +195,23 @@ export default function IndexationPage() {
               )}
               <button type="button" onClick={loadBalance} className="text-gray-400 hover:text-gray-700" title="Обновить баланс">
                 <FontAwesomeIcon icon={faRotate} className={balance.loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+            <div className="mt-2 ml-0 sm:ml-2 inline-flex items-center gap-2 text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+              <FontAwesomeIcon icon={faPaperPlane} className="text-green-600" />
+              <span className="text-gray-500">2index:</span>
+              {twoindex.loading ? (
+                <FontAwesomeIcon icon={faSpinner} className="animate-spin text-gray-400" />
+              ) : twoindex.ok ? (
+                <span className="font-semibold text-gray-900">
+                  {twoindex.links != null ? `${twoindex.links.toLocaleString('ru-RU')} ссылок` : ''}
+                  {twoindex.balance != null ? ` · $${twoindex.balance}` : ''}
+                </span>
+              ) : (
+                <span className="text-red-500 text-xs" title={twoindex.error}>{twoindex.error || 'нет данных'}</span>
+              )}
+              <button type="button" onClick={loadTwoindex} className="text-gray-400 hover:text-gray-700" title="Проверить 2index">
+                <FontAwesomeIcon icon={faRotate} className={twoindex.loading ? 'animate-spin' : ''} />
               </button>
             </div>
           </div>
