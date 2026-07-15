@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
+import { useData } from '@/contexts/DataContext';
 import HelpButton from '@/components/ui/HelpButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faRefresh, faSpinner, faArrowUp, faArrowDown, faMinus, faRotate, faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons';
@@ -118,6 +119,12 @@ export default function MainDashboardPage() {
   const [visibleCount, setVisibleCount] = useState(24);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Общий (на всё приложение) список сайтов для выпадающих списков. После
+  // синхронизации его надо принудительно перечитать, иначе новые домены не
+  // появятся в выпадающих списках других страниц без перезагрузки.
+  const { refreshSites } = useData();
+  const refreshSitesRef = useRef(refreshSites);
+  refreshSitesRef.current = refreshSites;
   // Вкладка «Не подтверждённые»
   const [showUnverified, setShowUnverified] = useState(false);
   const [unverified, setUnverified] = useState<{ site_url: string; account_email: string | null }[]>([]);
@@ -149,6 +156,9 @@ export default function MainDashboardPage() {
             if (!st.running) {
               if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
               loadSummary(period);
+              // Синхронизация могла подтянуть новые домены — обновим общий
+              // список сайтов, чтобы они сразу были в выпадающих списках.
+              refreshSitesRef.current();
             }
           } catch { /* ignore */ }
         }, 2000);
