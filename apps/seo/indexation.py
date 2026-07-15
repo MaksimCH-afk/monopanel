@@ -256,10 +256,19 @@ def _run_xmlriver(items, user, key):
     _finish_job()
 
 
-def _run_submit(items, key):
+def _submit_project_name(site_url):
+    """Имя проекта в 2index = хост сайта (для группировки ссылок по сайту)."""
+    try:
+        base = _site_base(site_url)
+        return base.split('://', 1)[-1].split('/', 1)[0] or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _run_submit(items, key, project_name=None):
     try:
         urls = [url for (_pid, _s, url) in items]
-        res = twoindex.submit_urls(urls, key)
+        res = twoindex.submit_urls(urls, key, project_name=project_name)
         if res["ok"]:
             ids = [pid for (pid, _s, _u) in items]
             with session_scope() as s:
@@ -294,5 +303,6 @@ def start_submit(site_url, ids, key):
     items = _selected(site_url, ids)
     if not _start_job("submit", len(items)):
         return False
-    threading.Thread(target=_run_submit, args=(items, key), daemon=True).start()
+    threading.Thread(target=_run_submit, args=(items, key, _submit_project_name(site_url)),
+                     daemon=True).start()
     return True

@@ -1914,7 +1914,11 @@ def index_submit_url():
     if not key:
         return jsonify({"error": "2index не настроен (укажите ключ в Настройках)"}), 400
 
-    res = twoindex.submit_urls([url], key)
+    try:
+        project_name = url.split('://', 1)[-1].split('/', 1)[0] or None
+    except Exception:  # noqa: BLE001
+        project_name = None
+    res = twoindex.submit_urls([url], key, project_name=project_name)
     if not res.get('ok'):
         return jsonify({"error": res.get('error') or "2index отклонил запрос", "raw": res.get('raw')}), 400
     return jsonify({"success": True, "accepted": res.get('accepted', 0)})

@@ -6,11 +6,8 @@
 - авторизация: заголовок Authorization: Bearer <API_TOKEN> (НЕ параметр key!);
 - при 403 от хостинга помогает user-agent — шлём браузерный UA;
 - у каждого ответа есть поле success (bool) и errors (сообщения об ошибках);
-- модель проектная: GET /account, GET/POST /project, GET /geo-targets.
-
-ВНИМАНИЕ: точный endpoint «отправить ссылки на индексацию» настраивается через
-env (TWOINDEX_SEND_PATH / поля), т.к. в доступной части документации секции
-отправки ссылок не было. Auth/база/аккаунт/проекты — по реальной доке.
+- модель проектная: GET /account, GET/POST /project, GET /geo-targets;
+- отправка ссылок: POST /link/add_simple (links + хотя бы одна ПС google/yandex/bing).
 """
 
 import logging
@@ -88,28 +85,32 @@ def list_projects(token, timeout=20):
         return {"ok": False, "projects": [], "error": str(e)}
 
 
-# Endpoint отправки ссылок настраивается через env, т.к. в доступной части доки
-# секции «отправка ссылок» не было. По умолчанию — предполагаемый v1-путь.
-TWOINDEX_SEND_PATH = os.environ.get('TWOINDEX_SEND_PATH', '/link')
-TWOINDEX_LINKS_FIELD = os.environ.get('TWOINDEX_LINKS_FIELD', 'links')
+# Эндпоинт «добавить ссылки по имени проекта» (реальная дока):
+# POST /api/v1/link/add_simple — project_name (необяз., по умолчанию "default"),
+# links (обяз., массив или текст по ссылке в строке), google/yandex/bing (хотя бы
+# один обязателен). Проект создаётся автоматически, отдельно управлять не нужно.
+TWOINDEX_SEND_PATH = os.environ.get('TWOINDEX_SEND_PATH', '/link/add_simple')
 
 
-def submit_urls(urls, token, project_id=None, timeout=40):
+def submit_urls(urls, token, project_name=None, timeout=40):
     """
     Отправить список URL на индексацию через 2index (Bearer-токен).
+    POST /link/add_simple с {links: [...], google: 1, project_name?: ...}.
     Возвращает dict: {ok, accepted, error, raw}.
     """
     if not token:
         return {"ok": False, "accepted": 0, "error": "2index не настроен (нет токена)", "raw": None}
+    urls = [u for u in (urls or []) if u]
     if not urls:
         return {"ok": False, "accepted": 0, "error": "нет URL", "raw": None}
 
     endpoint = f"{TWOINDEX_BASE}{TWOINDEX_SEND_PATH}"
-    payload = {TWOINDEX_LINKS_FIELD: list(urls)}
-    if project_id:
-        payload["project_id"] = project_id
+    # google=1 — обязательна хотя бы одна поисковая система (google/yandex/bing).
+    payload = {"links": list(urls), "google": 1}
+    if project_name:
+        payload["project_name"] = project_name
     try:
-        log.info("2index submit %s url(s) -> %s (project=%s)", len(urls), endpoint, project_id)
+        log.info("2index submit %s url(s) -> %s (project=%s)", len(urls), endpoint, project_name)
         resp = http_requests.post(endpoint, json=payload, headers=_headers(token), timeout=timeout)
         log.debug("2index status=%s body[:500]=%s", resp.status_code, resp.text[:500])
         try:
