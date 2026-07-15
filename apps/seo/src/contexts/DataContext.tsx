@@ -135,6 +135,7 @@ interface DataContextType {
   
   // Utility functions
   fetchSites: () => Promise<void>;
+  refreshSites: () => Promise<void>;
   clearPerformanceData: () => void;
   clearOverviewData: () => void;
   clearAllData: () => void;
@@ -249,7 +250,27 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
       setSitesLoading(false);
     }
   };
-  
+
+  // Принудительно перечитать список сайтов с бэкенда (в обход кэша fetchSites).
+  // Нужно после синхронизации GSC: fetchSites не перезапрашивает, если сайты уже
+  // загружены, поэтому новые домены не появлялись в выпадающих списках до
+  // полной перезагрузки страницы. Сохраняем текущий выбор, если он ещё есть.
+  const refreshSites = async () => {
+    setSitesLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/sites`);
+      const result = await response.json();
+      if (Array.isArray(result.sites)) {
+        setSites(result.sites);
+        setSelectedSite(prev => (prev && result.sites.includes(prev)) ? prev : (result.sites[0] || ''));
+      }
+    } catch (error) {
+      console.error('Error refreshing sites:', error);
+    } finally {
+      setSitesLoading(false);
+    }
+  };
+
   // Clear functions
   const clearPerformanceData = () => {
     setPerformanceData(null);
@@ -345,6 +366,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
     
     // Utility functions
     fetchSites,
+    refreshSites,
     clearPerformanceData,
     clearOverviewData,
     clearAllData,
