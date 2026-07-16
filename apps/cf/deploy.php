@@ -78,33 +78,36 @@ include 'sidebar.php';
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Аккаунт Cloudflare</label>
-                        <input type="text" class="form-control" id="accountSearch" list="accountList"
-                               placeholder="начните вводить email или домен аккаунта…" autocomplete="off">
-                        <datalist id="accountList">
-                            <?php foreach ($accounts as $acc): ?>
-                                <?php
-                                    $aid = (int)$acc['id'];
-                                    $lbl = $acc['email'] . ($acc['status'] !== 'active' ? ' (' . $acc['status'] . ')' : '');
-                                    $doms = $accountDomains[$aid] ?? [];
-                                ?>
-                                <option data-id="<?php echo $aid; ?>"
-                                        data-hastoken="<?php echo !empty($tokenCounts[$aid]) ? '1' : '0'; ?>"
-                                        data-domains="<?php echo htmlspecialchars(strtolower(implode(' ', $doms))); ?>"
-                                        value="<?php echo htmlspecialchars($lbl); ?>"></option>
-                                <?php foreach ($doms as $dom): ?>
-                                    <?php /* Алиас: домен идёт первым, чтобы поиск по домену работал и в браузерах с prefix-фильтром (Safari). */ ?>
-                                    <option data-id="<?php echo $aid; ?>" data-alias="1"
-                                            data-label="<?php echo htmlspecialchars($lbl); ?>"
-                                            data-domain="<?php echo htmlspecialchars(strtolower($dom)); ?>"
-                                            value="<?php echo htmlspecialchars($dom . '  —  ' . $lbl); ?>"></option>
-                                <?php endforeach; ?>
-                            <?php endforeach; ?>
-                        </datalist>
+                        <?php
+                            // Данные для тайпхеда: каждый аккаунт — одной записью. Поиск идёт по
+                            // логину (email без хвоста «'s Account») ИЛИ по любому его домену.
+                            $accountData = array_map(function ($acc) use ($tokenCounts, $accountDomains) {
+                                $aid   = (int)$acc['id'];
+                                $login = preg_replace('/[\'\x{2019}]s Account$/u', '', (string)$acc['email']);
+                                if ($login === '') $login = (string)$acc['email'];
+                                return [
+                                    'id'       => $aid,
+                                    'login'    => $login,
+                                    'label'    => (string)$acc['email'],
+                                    'status'   => $acc['status'],
+                                    'hasToken' => !empty($tokenCounts[$aid]),
+                                    'domains'  => array_values(array_map('strtolower', $accountDomains[$aid] ?? [])),
+                                ];
+                            }, $accounts);
+                        ?>
+                        <div class="position-relative">
+                            <input type="text" class="form-control" id="accountSearch" role="combobox"
+                                   aria-autocomplete="list" aria-expanded="false" autocomplete="off"
+                                   placeholder="начните вводить логин или домен аккаунта…">
+                            <div id="accountDropdown" class="list-group position-absolute w-100 shadow"
+                                 style="z-index:1050; max-height:280px; overflow-y:auto; display:none;"></div>
+                        </div>
                         <input type="hidden" id="accountSelect" value="">
+                        <script>window.CF_ACCOUNTS = <?php echo json_encode($accountData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;</script>
                         <?php if (empty($accounts)): ?>
                             <div class="form-text text-warning">Нет аккаунтов Cloudflare — добавьте их в «Мастер-токен».</div>
                         <?php else: ?>
-                            <div class="form-text" id="accountHint">Начните вводить email <em>или домен</em> — список отфильтруется. Токен берётся из «Мастер-токен».</div>
+                            <div class="form-text" id="accountHint">Начните вводить логин <em>или домен</em> — найдём аккаунт. Токен берётся из «Мастер-токен».</div>
                         <?php endif; ?>
                     </div>
                     <div class="mb-2">
@@ -347,23 +350,11 @@ $pageScripts = <<<'JS'
     let archiveValid = false;
     let accountZones = [];   // домены выбранного аккаунта (для проверки наличия)
 
-    // Карта: подпись/домен аккаунта -> { id, hasToken, ... }.
-    // Помимо email-меток регистрируем алиасы «домен — email» и голые домены,
-    // чтобы аккаунт находился и по своему домену.
-    const accountMap = {};
-    document.querySelectorAll('#accountList option').forEach(o => {
-        if (o.dataset.alias === '1') {
-            const rec = { id: o.dataset.id, alias: true, label: o.dataset.label };
-            accountMap[o.value] = rec;                          // «домен — email» (выбор из списка)
-            if (o.dataset.domain) accountMap[o.dataset.domain] = rec; // голый домен (ввод вручную)
-        } else {
-            accountMap[o.value] = {
-                id: o.dataset.id,
-                hasToken: o.dataset.hastoken === '1',
-                domains: (o.dataset.domains || '').split(' ').filter(Boolean),
-            };
-        }
-    });
+    // Аккаунты для тайпхеда (эмитятся из PHP как window.CF_ACCOUNTS). Каждый аккаунт —
+    // ОДНА запись; ищем по логину ИЛИ по любому домену аккаунта.
+    const ACCOUNTS = (window.CF_ACCOUNTS || []);
+    const byId = {};
+    ACCOUNTS.forEach(a => { byId[String(a.id)] = a; });
 
     function currentMode() {
         const el = document.querySelector('input[name="mode"]:checked');
@@ -393,20 +384,62 @@ $pageScripts = <<<'JS'
             document.getElementById('workerFirstWarn').classList.toggle('d-none', currentMode() !== 'worker-first');
         }));
 
-    // --- Выбор аккаунта (поиск по email) ---
+    // --- Выбор аккаунта: кастомный тайпхед (поиск по логину ИЛИ домену) ---
     const accountHint = document.getElementById('accountHint');
+    const accountDropdown = document.getElementById('accountDropdown');
     let loadedZonesAccountId = null;
-    async function onAccountChosen() {
-        let entry = accountMap[accountSearch.value.trim()];
-        // Нашли по домену (алиас) — подставляем email-метку аккаунта и работаем с ней.
-        if (entry && entry.alias) {
-            accountSearch.value = entry.label;
-            entry = accountMap[entry.label];
-        }
-        accountSelect.value = entry ? entry.id : '';
+    let LAST_ITEMS = [];   // текущий отфильтрованный список (для клавиатуры)
+    let activeIdx = -1;    // подсвеченная строка
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
+
+    // Совпадения: {acc, matchedDomain|null}. matchedDomain != null → нашли ТОЛЬКО по домену.
+    function matchAccounts(q) {
+        q = (q || '').trim().toLowerCase();
+        const out = [];
+        ACCOUNTS.forEach(a => {
+            const loginHit = !q || a.login.toLowerCase().indexOf(q) !== -1;
+            let matchedDomain = null;
+            if (q) { for (let i = 0; i < a.domains.length; i++) { if (a.domains[i].indexOf(q) !== -1) { matchedDomain = a.domains[i]; break; } } }
+            if (loginHit || matchedDomain) out.push({ acc: a, matchedDomain: loginHit ? null : matchedDomain });
+        });
+        return out;
+    }
+
+    function renderDropdown(items) {
+        if (!items.length) { accountDropdown.style.display = 'none'; accountDropdown.innerHTML = ''; accountSearch.setAttribute('aria-expanded', 'false'); return; }
+        let html = '';
+        items.slice(0, 50).forEach((it, i) => {
+            const a = it.acc;
+            const sub = it.matchedDomain
+                ? ('<i class="fas fa-globe me-1"></i><span class="text-primary">' + esc(it.matchedDomain) + '</span>')
+                : ('<span class="text-muted">доменов: ' + a.domains.length + '</span>');
+            const noTok = a.hasToken ? '' : ' <span class="badge bg-warning text-dark">нет токена</span>';
+            const inact = (a.status && a.status !== 'active') ? ' <span class="badge bg-secondary">' + esc(a.status) + '</span>' : '';
+            html += '<button type="button" class="list-group-item list-group-item-action py-2 acc-opt" data-id="' + a.id + '" data-idx="' + i + '">'
+                  + '<div class="fw-semibold text-truncate">' + esc(a.login) + noTok + inact + '</div>'
+                  + '<div class="small text-truncate">' + sub + '</div>'
+                  + '</button>';
+        });
+        accountDropdown.innerHTML = html;
+        accountDropdown.style.display = 'block';
+        accountSearch.setAttribute('aria-expanded', 'true');
+    }
+
+    function openFor(q) { LAST_ITEMS = matchAccounts(q); activeIdx = -1; renderDropdown(LAST_ITEMS); }
+
+    function selectAccount(acc) {
+        accountSearch.value = acc.login;
+        accountSelect.value = acc.id;
+        accountDropdown.style.display = 'none';
+        accountSearch.setAttribute('aria-expanded', 'false');
         refreshButtons();
-        if (!entry) { if (accountHint) accountHint.textContent = 'Аккаунт не распознан — выберите из списка.'; return; }
-        if (entry.id === loadedZonesAccountId) { updateDomainHint(); return; } // уже загружено
+        loadAccountZones(acc);
+    }
+
+    // Подтянуть домены выбранного аккаунта (FR-5 проверка наличия домена).
+    async function loadAccountZones(entry) {
+        if (String(entry.id) === String(loadedZonesAccountId)) { updateDomainHint(); return; }
         loadedZonesAccountId = entry.id;
         domainList.innerHTML = '';
         accountZones = [];
@@ -416,15 +449,12 @@ $pageScripts = <<<'JS'
         } else if (accountHint) {
             accountHint.innerHTML = '<span class="text-muted">Подтягиваю домены аккаунта…</span>';
         }
-        // Подтянуть домены аккаунта (FR-5 проверка наличия домена).
         try {
             const data = await apiPost({ action: 'account_zones', account_id: entry.id });
             if (data.success) {
                 accountZones = data.zones || [];
                 domainList.innerHTML = '';
-                accountZones.forEach(z => {
-                    const o = document.createElement('option'); o.value = z; domainList.appendChild(o);
-                });
+                accountZones.forEach(z => { const o = document.createElement('option'); o.value = z; domainList.appendChild(o); });
                 if (accountHint) accountHint.innerHTML = '<span class="text-muted">Доменов в аккаунте: '
                     + accountZones.length + '. Выберите из списка или введите вручную.</span>';
             } else if (accountHint) {
@@ -433,8 +463,39 @@ $pageScripts = <<<'JS'
         } catch (e) { if (accountHint) accountHint.innerHTML = '<span class="text-danger">Ошибка сети: ' + e.message + '</span>'; }
         updateDomainHint();
     }
-    accountSearch.addEventListener('change', onAccountChosen);
-    accountSearch.addEventListener('input', () => { if (accountMap[accountSearch.value.trim()]) onAccountChosen(); else { accountSelect.value=''; refreshButtons(); } });
+
+    accountSearch.addEventListener('input', () => {
+        accountSelect.value = '';   // до явного выбора аккаунт не считается выбранным
+        refreshButtons();
+        openFor(accountSearch.value);
+    });
+    accountSearch.addEventListener('focus', () => openFor(accountSearch.value));
+    accountSearch.addEventListener('keydown', (e) => {
+        if (accountDropdown.style.display === 'none') return;
+        const opts = Array.prototype.slice.call(accountDropdown.querySelectorAll('.acc-opt'));
+        if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, opts.length - 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); }
+        else if (e.key === 'Enter') {
+            if (activeIdx >= 0 && LAST_ITEMS[activeIdx]) { e.preventDefault(); selectAccount(LAST_ITEMS[activeIdx].acc); }
+            else if (LAST_ITEMS.length === 1) { e.preventDefault(); selectAccount(LAST_ITEMS[0].acc); }
+            return;
+        }
+        else if (e.key === 'Escape') { accountDropdown.style.display = 'none'; return; }
+        else return;
+        opts.forEach((o, i) => o.classList.toggle('active', i === activeIdx));
+        if (opts[activeIdx]) opts[activeIdx].scrollIntoView({ block: 'nearest' });
+    });
+    // mousedown (не click) — чтобы выбор срабатывал до blur поля.
+    accountDropdown.addEventListener('mousedown', (e) => {
+        const btn = e.target.closest('.acc-opt');
+        if (!btn) return;
+        e.preventDefault();
+        const acc = byId[btn.dataset.id];
+        if (acc) selectAccount(acc);
+    });
+    document.addEventListener('click', (e) => {
+        if (e.target !== accountSearch && !accountDropdown.contains(e.target)) accountDropdown.style.display = 'none';
+    });
 
     // --- Проверка наличия домена в аккаунте ---
     const domainHint = document.getElementById('domainHint');
