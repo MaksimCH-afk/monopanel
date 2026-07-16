@@ -191,22 +191,27 @@ function mtDedupComputeMerges($pdo, $userId) {
              + min((int)($domCount[$id] ?? 0), 9);
     };
 
-    // Группировка по нормализованному имени (одно имя = один CF-аккаунт). Защита:
-    // если под одним именем РАЗНЫЕ ненулевые uid — это разные аккаунты, разводим по uid.
-    $named = [];
-    foreach ($creds as $c) { $named[strtolower($baseName($c['email']))][] = $c; }
+    // Группировка по РЕАЛЬНОМУ аккаунту: приоритет cf_account_uid (шаг 3 «моста»).
+    // Кредентала с одним uid сливаются даже при разных именах. Кредентала без uid
+    // (токен не резолвится) группируются по имени и подклеиваются к uid-группе с тем
+    // же именем, если такая ровно одна (сохраняет прежнюю склейку по имени).
     $groups = [];
-    foreach ($named as $nm => $items) {
-        $uids = array_values(array_unique(array_filter(array_map(
-            function ($x) { return $x['cf_account_uid'] ?? ''; }, $items))));
-        if (count($uids) > 1) {
-            foreach ($items as $c) {
-                $k = !empty($c['cf_account_uid']) ? ('uid:' . $c['cf_account_uid']) : ('name:' . $nm);
-                $groups[$k][] = $c;
-            }
-        } else {
-            foreach ($items as $c) { $groups['name:' . $nm][] = $c; }
-        }
+    $nameToUid = [];   // baseName(lower) => uidKey | false (имя у разных uid — неоднозначно)
+    foreach ($creds as $c) {
+        $uid = trim((string)($c['cf_account_uid'] ?? ''));
+        if ($uid === '') continue;
+        $key = 'uid:' . $uid;
+        $groups[$key][] = $c;
+        $bn = strtolower($baseName($c['email']));
+        if (!array_key_exists($bn, $nameToUid)) $nameToUid[$bn] = $key;
+        elseif ($nameToUid[$bn] !== $key)       $nameToUid[$bn] = false;
+    }
+    foreach ($creds as $c) {
+        $uid = trim((string)($c['cf_account_uid'] ?? ''));
+        if ($uid !== '') continue;
+        $bn = strtolower($baseName($c['email']));
+        if (isset($nameToUid[$bn]) && $nameToUid[$bn] !== false) $groups[$nameToUid[$bn]][] = $c;
+        else                                                     $groups['name:' . $bn][] = $c;
     }
 
     $merges = [];
