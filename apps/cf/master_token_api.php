@@ -509,37 +509,58 @@ try {
             // Импорт/обновление зон по ВСЕМ токен-аккаунтам панели: подтягивает недостающие
             // домены из Cloudflare (INSERT OR IGNORE — существующие не трогаются). Так в панель
             // попадают зоны, созданные в CF после добавления аккаунта (напр. новые домены).
-            $creds = $pdo->query("SELECT cc.id, cc.email, cc.api_key FROM cloudflare_credentials cc
-                WHERE cc.user_id = $userId AND COALESCE(cc.auth_type,'') = 'token'")->fetchAll();
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
             $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
-            $report = []; $renamed = 0;
-            foreach ($creds as $c) {
+
+            // 1) Импорт/обновление зон — только по токен-аккаунтам (mtImportZones ждёт токен).
+            $tokenCreds = $pdo->query("SELECT id, email, api_key FROM cloudflare_credentials
+                WHERE user_id = $userId AND COALESCE(auth_type,'') = 'token'")->fetchAll();
+            $report = [];
+            foreach ($tokenCreds as $c) {
                 $imp = mtImportZones($pdo, $userId, $c['id'], $c['email'], $c['api_key'], $grp ?: null);
-                $row = ['account' => $c['email'], 'ok' => !empty($imp['ok']), 'count' => $imp['count'] ?? 0, 'error' => $imp['error'] ?? null];
-                // Бэкфилл имени: заглушки «token-XXXX»/«master#NN» → реальное имя аккаунта Cloudflare.
-                if (mtIsPlaceholderName($c['email'])) {
-                    $real = mtResolveAccountName($pdo, $c['api_key'], $proxies);
-                    if ($real !== '' && $real !== $c['email']) {
-                        $target = $real; $k = 2;
-                        while (true) {
-                            $chk = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ? AND id <> ?");
-                            $chk->execute([$userId, $target, $c['id']]);
-                            if (!$chk->fetchColumn()) break;
-                            $target = $real . ' #' . $k; $k++;
-                        }
-                        try {
-                            dbRetryOnLock(function () use ($pdo, $target, $c, $userId) {
-                                $pdo->prepare("UPDATE cloudflare_credentials SET email = ? WHERE id = ? AND user_id = ?")->execute([$target, $c['id'], $userId]);
-                            });
-                            $row['renamed_to'] = $target; $renamed++;
-                        } catch (Exception $e) { /* коллизия — оставляем как есть */ }
-                    }
-                }
-                $report[] = $row;
+                $report[] = ['account' => $c['email'], 'ok' => !empty($imp['ok']), 'count' => $imp['count'] ?? 0, 'error' => $imp['error'] ?? null];
             }
-            logAction($pdo, $userId, 'Импорт доменов/имён (все аккаунты)', 'аккаунтов: ' . count($creds) . ', переименовано: ' . $renamed);
-            echo json_encode(['success' => true, 'report' => $report, 'renamed' => $renamed]);
+
+            // 2) Бэкфилл идентичности (шаг 2 «моста») по ВСЕМ кредеталам: cf_account_uid + реальное
+            // имя вместо заглушки. Один резолв на кредентал (accounts → фолбэк на зоны). Сеть — вне
+            // транзакции; запись — короткая, в dbRetryOnLock.
+            $allCreds = $pdo->query("SELECT id, email, api_key, cf_account_uid, COALESCE(auth_type,'global') AS auth_type
+                FROM cloudflare_credentials WHERE user_id = $userId")->fetchAll();
+            $renamed = 0; $uidFilled = 0;
+            foreach ($allCreds as $c) {
+                $needUid  = empty($c['cf_account_uid']);
+                $needName = mtIsPlaceholderName($c['email']);
+                if (!$needUid && !$needName) continue;
+                $r = cfResolveAccount($pdo, $c['email'], $c['api_key'], $proxies, null, $c['auth_type']);
+                if (!$r) continue;
+                if ($needUid && !empty($r['uid'])) {
+                    dbRetryOnLock(function () use ($pdo, $r, $c, $userId) {
+                        $pdo->prepare("UPDATE cloudflare_credentials SET cf_account_uid = ?
+                            WHERE id = ? AND user_id = ? AND (cf_account_uid IS NULL OR cf_account_uid = '')")
+                            ->execute([$r['uid'], $c['id'], $userId]);
+                    });
+                    $uidFilled++;
+                }
+                if ($needName && !empty($r['name']) && $r['name'] !== $c['email']) {
+                    $target = $r['name']; $k = 2;
+                    while (true) {
+                        $chk = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ? AND id <> ?");
+                        $chk->execute([$userId, $target, $c['id']]);
+                        if (!$chk->fetchColumn()) break;
+                        $target = $r['name'] . ' #' . $k; $k++;
+                    }
+                    try {
+                        dbRetryOnLock(function () use ($pdo, $target, $c, $userId) {
+                            $pdo->prepare("UPDATE cloudflare_credentials SET email = ? WHERE id = ? AND user_id = ?")->execute([$target, $c['id'], $userId]);
+                        });
+                        $renamed++;
+                    } catch (Exception $e) { /* коллизия — оставляем как есть */ }
+                }
+            }
+
+            logActionSafe($pdo, $userId, 'Импорт доменов + бэкфилл идентичности',
+                'токен-аккаунтов: ' . count($tokenCreds) . ', uid проставлено: ' . $uidFilled . ', переименовано: ' . $renamed);
+            echo json_encode(['success' => true, 'report' => $report, 'renamed' => $renamed, 'uid_filled' => $uidFilled]);
             break;
 
         case 'save_as_account':
