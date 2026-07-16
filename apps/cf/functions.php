@@ -419,6 +419,38 @@ function cfFetchAllZones($pdo, $email, $apiKey, $proxies = [], $userId = null, $
     return ['success' => true, 'zones' => $zones, 'error' => null];
 }
 
+/**
+ * Единый резолвер идентичности аккаунта Cloudflare по токену/ключу («мост», шаг 1).
+ * Сперва GET /accounts (нужно право Account Settings:Read), затем — из первой зоны
+ * (zone.account.{id,name} доступны даже БЕЗ этого права). Работает и для API-токенов
+ * (auth_type='token'/'bearer'), и для Global API Key (auth_type='global').
+ *
+ * @return array|null ['uid'=>string, 'name'=>string] или null, если ни один способ не сработал
+ */
+function cfResolveAccount($pdo, $email, $apiKey, $proxies = [], $userId = null, $authType = null) {
+    $pick = function ($obj, $key) {
+        return is_object($obj) ? ($obj->$key ?? '') : (is_array($obj) ? ($obj[$key] ?? '') : '');
+    };
+    // 1) /accounts
+    $acc = cloudflareApiRequestDetailed($pdo, $email, $apiKey, 'accounts?per_page=1', 'GET', [], $proxies, $userId, $authType);
+    if (!empty($acc['success']) && !empty($acc['data'])) {
+        $a0  = is_array($acc['data']) ? reset($acc['data']) : $acc['data'];
+        $uid = $pick($a0, 'id');
+        if ($uid !== '') return ['uid' => $uid, 'name' => $pick($a0, 'name')];
+    }
+    // 2) fallback: аккаунт из первой зоны
+    $z = cloudflareApiRequestDetailed($pdo, $email, $apiKey, 'zones?per_page=1', 'GET', [], $proxies, $userId, $authType);
+    if (!empty($z['success']) && !empty($z['data'])) {
+        $z0     = is_array($z['data']) ? reset($z['data']) : $z['data'];
+        $accObj = $pick($z0, 'account');
+        if ($accObj) {
+            $uid = $pick($accObj, 'id');
+            if ($uid !== '') return ['uid' => $uid, 'name' => $pick($accObj, 'name')];
+        }
+    }
+    return null;
+}
+
 /* =====================================================================
  * WAF Custom Rules через современный Rulesets API
  * (фаза http_request_firewall_custom). Заменяет устаревший firewall/rules,

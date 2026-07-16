@@ -266,14 +266,14 @@ function importEmpty() {
     $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000, data: { action: 'import_empty' } })
     .done(function(r) {
         if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
-        if (!r.report.length) { $('#addDomainsOut').html('<span class="text-muted small">Пустых токен-аккаунтов нет.</span>'); return; }
         let html = '';
-        if (r.renamed) html += '<div class="small text-info mb-1"><i class="fas fa-pen me-1"></i>Обновлены имена аккаунтов: ' + r.renamed + ' (заглушки «token-…» → реальное имя).</div>';
+        if (r.renamed || r.uid_filled) html += '<div class="small text-info mb-1"><i class="fas fa-id-card me-1"></i>Идентичность: uid проставлено ' + (r.uid_filled || 0) + ', имён обновлено ' + (r.renamed || 0) + ' (заглушки «token-…» → реальное имя).</div>';
+        if (r.relinked || r.orphan) html += '<div class="small text-info mb-1"><i class="fas fa-link me-1"></i>Привязка доменов: переклеено ' + (r.relinked || 0) + (r.orphan ? ', без владельца ' + r.orphan : '') + '.</div>';
+        if (!r.report.length) { $('#addDomainsOut').html(html || '<span class="text-muted small">Токен-аккаунтов нет.</span>'); showToast('Готово', 'success'); return; }
         html += '<ul class="mb-0 ps-3 small">';
         r.report.forEach(function(x) {
-            const rn = x.renamed_to ? (' <span class="text-info">→ ' + $('<div>').text(x.renamed_to).html() + '</span>') : '';
-            if (x.ok) html += '<li class="text-success">' + $('<div>').text(x.account).html() + ' — импортировано: ' + x.count + rn + '</li>';
-            else html += '<li class="text-danger">' + $('<div>').text(x.account).html() + ' — ' + $('<div>').text(x.error || 'ошибка').html() + rn + '</li>';
+            if (x.ok) html += '<li class="text-success">' + $('<div>').text(x.account).html() + ' — импортировано: ' + x.count + '</li>';
+            else html += '<li class="text-danger">' + $('<div>').text(x.account).html() + ' — ' + $('<div>').text(x.error || 'ошибка').html() + '</li>';
         });
         html += '</ul>';
         $('#addDomainsOut').html(html);
