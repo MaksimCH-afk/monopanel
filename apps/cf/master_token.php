@@ -268,6 +268,7 @@ function importEmpty() {
         if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
         let html = '';
         if (r.renamed || r.uid_filled) html += '<div class="small text-info mb-1"><i class="fas fa-id-card me-1"></i>Идентичность: uid проставлено ' + (r.uid_filled || 0) + ', имён обновлено ' + (r.renamed || 0) + ' (заглушки «token-…» → реальное имя).</div>';
+        if (r.relinked || r.orphan) html += '<div class="small text-info mb-1"><i class="fas fa-link me-1"></i>Привязка доменов: переклеено ' + (r.relinked || 0) + (r.orphan ? ', без владельца ' + r.orphan : '') + '.</div>';
         if (!r.report.length) { $('#addDomainsOut').html(html || '<span class="text-muted small">Токен-аккаунтов нет.</span>'); showToast('Готово', 'success'); return; }
         html += '<ul class="mb-0 ps-3 small">';
         r.report.forEach(function(x) {
