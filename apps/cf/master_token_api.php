@@ -312,6 +312,70 @@ function mtRelinkDomains($pdo, $userId, $proxies = []) {
             'dead_creds' => count($deadCreds), 'report' => $report];
 }
 
+/** Уникальный email кредентала: добавляет « #N» при коллизии (исключая $excludeId). */
+function cfUniqueEmail($pdo, $userId, $base, $excludeId = 0) {
+    $base = $base !== '' ? $base : ('token-' . substr((string)mt_rand(10000000, 99999999), 0, 8));
+    $email = $base; $i = 2;
+    while (true) {
+        $q = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ? AND id <> ?");
+        $q->execute([(int)$userId, $email, (int)$excludeId]);
+        if (!$q->fetchColumn()) return $email;
+        $email = $base . ' #' . $i; $i++;
+    }
+}
+
+/**
+ * Единая точка привязки токена к каноническому аккаунту панели («мост», шаг 6).
+ * Резолвит аккаунт (uid+name), находит существующий кредентал по uid (затем по токену),
+ * обновляет его токен/uid/имя-заглушку — либо создаёт новый. Дубли по аккаунту не плодятся.
+ * Зоны НЕ импортирует (это решает вызывающий). Возвращает ['id','email','uid','created'].
+ */
+function cfUpsertAccountByToken($pdo, $userId, $token, $authType = 'token', $proxies = [], $label = '') {
+    $userId = (int)$userId;
+    $r = cfResolveAccount($pdo, '', $token, $proxies, null, $authType);
+    $uid  = $r ? (string)($r['uid'] ?? '')  : '';
+    $name = $r ? (string)($r['name'] ?? '') : '';
+
+    // Существующий кредентал того же аккаунта: сперва по uid, затем по точному токену.
+    $existing = null;
+    if ($uid !== '') {
+        $q = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND cf_account_uid = ? LIMIT 1");
+        $q->execute([$userId, $uid]);
+        $existing = $q->fetch() ?: null;
+    }
+    if (!$existing) {
+        $q = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND api_key = ? LIMIT 1");
+        $q->execute([$userId, $token]);
+        $existing = $q->fetch() ?: null;
+    }
+
+    if ($existing) {
+        dbRetryOnLock(function () use ($pdo, $existing, $token, $authType, $uid) {
+            $pdo->prepare("UPDATE cloudflare_credentials SET api_key = ?, auth_type = ?,
+                cf_account_uid = COALESCE(NULLIF(?, ''), cf_account_uid) WHERE id = ?")
+                ->execute([$token, $authType, $uid, $existing['id']]);
+        });
+        // Заглушку имени лечим на реальное имя (уникально), реальное имя не трогаем.
+        if ($name !== '' && $name !== $existing['email'] && mtIsPlaceholderName($existing['email'])) {
+            $target = cfUniqueEmail($pdo, $userId, $name, (int)$existing['id']);
+            try {
+                dbRetryOnLock(function () use ($pdo, $target, $existing) {
+                    $pdo->prepare("UPDATE cloudflare_credentials SET email = ? WHERE id = ?")->execute([$target, $existing['id']]);
+                });
+                $existing['email'] = $target;
+            } catch (Exception $e) { /* коллизия — оставляем */ }
+        }
+        return ['id' => (int)$existing['id'], 'email' => $existing['email'], 'uid' => $uid, 'created' => false];
+    }
+
+    $email = cfUniqueEmail($pdo, $userId, $label ?: ($name ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $token), -8))), 0);
+    dbRetryOnLock(function () use ($pdo, $userId, $email, $token, $authType, $uid) {
+        $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type, cf_account_uid) VALUES (?, ?, ?, ?, ?)")
+            ->execute([$userId, $email, $token, $authType, $uid !== '' ? $uid : null]);
+    });
+    return ['id' => (int)$pdo->lastInsertId(), 'email' => $email, 'uid' => $uid, 'created' => true];
+}
+
 try {
     switch ($action) {
         case 'list_permissions':
@@ -394,28 +458,14 @@ try {
             $savedAs = null;
             if ($newToken) {
                 try {
-                    $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
-                    $ex->execute([$userId, $newToken]);
-                    if (!$ex->fetchColumn()) {
-                        $an = mtResolveAccountName($pdo, $newToken);
-                        $em = $an ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $newToken), -8));
-                        $b = $em; $k = 2;
-                        while (true) {
-                            $c = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ?");
-                            $c->execute([$userId, $em]);
-                            if (!$c->fetchColumn()) break;
-                            $em = $b . ' #' . $k; $k++;
-                        }
-                        dbRetryOnLock(function () use ($pdo, $userId, $em, $newToken) {
-                            $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $em, $newToken]);
-                        });
-                        $credId = (int)$pdo->lastInsertId();
-                        $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
-                        $imp = mtImportZones($pdo, $userId, $credId, $em, $newToken, $grp ?: null);
-                        $importedCount = $imp['count'] ?? 0;
-                        logAction($pdo, $userId, 'Аккаунт добавлен в панель', "авто после создания токена: {$em}, импортировано доменов: {$importedCount}");
-                        $savedAs = $em . ' (импортировано доменов: ' . $importedCount . ')';
-                    }
+                    // Каноническая привязка (upsert по uid) — не плодит дубль, если аккаунт уже в панели.
+                    $up  = cfUpsertAccountByToken($pdo, $userId, $newToken, 'token');
+                    $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
+                    $imp = mtImportZones($pdo, $userId, $up['id'], $up['email'], $newToken, $grp ?: null);
+                    $importedCount = $imp['count'] ?? 0;
+                    logAction($pdo, $userId, 'Аккаунт добавлен/обновлён в панели',
+                        ($up['created'] ? 'авто после создания токена: ' : 'обновление аккаунта: ') . "{$up['email']}, доменов: {$importedCount}");
+                    $savedAs = $up['email'] . ' (импортировано доменов: ' . $importedCount . ')';
                 } catch (Exception $e) { /* не критично */ }
             }
 
@@ -547,24 +597,9 @@ try {
                 break;
             }
             // upsert креденшла (как save_as_account) и ПЕРЕПРИВЯЗКА
-            $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
-            $ex->execute([$userId, $tok]);
-            $credId = (int)($ex->fetchColumn() ?: 0);
-            if (!$credId) {
-                $nm = mtResolveAccountName($pdo, $tok);
-                $email = $nm ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $tok), -8));
-                $base = $email; $i = 2;
-                while (true) {
-                    $c = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ?");
-                    $c->execute([$userId, $email]);
-                    if (!$c->fetchColumn()) break;
-                    $email = $base . ' #' . $i; $i++;
-                }
-                dbRetryOnLock(function () use ($pdo, $userId, $email, $tok) {
-                    $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $tok]);
-                });
-                $credId = (int)$pdo->lastInsertId();
-            }
+            // Каноническая привязка токена к аккаунту (upsert по uid) — единая точка «моста».
+            $up = cfUpsertAccountByToken($pdo, $userId, $tok, 'token');
+            $credId = $up['id'];
             dbRetryOnLock(function () use ($pdo, $credId, $zoneId, $domainId, $userId) {
                 $pdo->prepare("UPDATE cloudflare_accounts SET account_id = ?, zone_id = ? WHERE id = ? AND user_id = ?")->execute([$credId, $zoneId, $domainId, $userId]);
             });
@@ -644,58 +679,19 @@ try {
             $label = trim($_POST['label'] ?? '');
             if ($tok === '') throw new Exception('Нет токена для сохранения');
 
-            // Имя и UID аккаунта — через единый резолвер (accounts → фолбэк на зоны),
-            // чтобы аккаунт не сохранялся с заглушкой «token-XXXX» даже без Account Settings:Read.
-            $resolved = cfResolveAccount($pdo, '', $tok, [], null, 'token');
-            $name = $resolved ? (string)($resolved['name'] ?? '') : '';
-            $uid  = $resolved ? (string)($resolved['uid'] ?? '') : '';
+            // Каноническая привязка токена к аккаунту (upsert по uid) — единая точка «моста».
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
-
-            // Существующий кредентал того же аккаунта: сначала по UID, затем по точному токену.
-            $existing = null;
-            if ($uid !== '') {
-                $q = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND cf_account_uid = ? LIMIT 1");
-                $q->execute([$userId, $uid]);
-                $existing = $q->fetch() ?: null;
-            }
-            if (!$existing) {
-                $q = $pdo->prepare("SELECT id, email FROM cloudflare_credentials WHERE user_id = ? AND api_key = ? LIMIT 1");
-                $q->execute([$userId, $tok]);
-                $existing = $q->fetch() ?: null;
-            }
-
-            if ($existing) {
-                // Обновляем токен и UID существующего аккаунта, досинхронизируем домены — без дубля.
-                dbRetryOnLock(function () use ($pdo, $existing, $tok, $uid) {
-                    $pdo->prepare("UPDATE cloudflare_credentials SET api_key = ?, auth_type = 'token',
-                        cf_account_uid = COALESCE(NULLIF(?, ''), cf_account_uid) WHERE id = ?")
-                        ->execute([$tok, $uid, $existing['id']]);
-                });
-                $imp = mtImportZones($pdo, $userId, (int)$existing['id'], $existing['email'], $tok, $grp ?: null);
+            $up  = cfUpsertAccountByToken($pdo, $userId, $tok, 'token', [], $label);
+            $imp = mtImportZones($pdo, $userId, $up['id'], $up['email'], $tok, $grp ?: null);
+            if (!$up['created']) {
                 logAction($pdo, $userId, 'Аккаунт уже в панели — обновление токена и доменов',
-                    "{$existing['email']}: доменов: " . ($imp['count'] ?? 0));
+                    "{$up['email']}: доменов: " . ($imp['count'] ?? 0));
                 echo json_encode(['success' => true, 'already' => true,
                     'imported' => $imp['count'] ?? 0, 'import_error' => $imp['error'] ?? null]);
-                break;
+            } else {
+                logAction($pdo, $userId, 'Аккаунт добавлен в панель', "через мастер-токен: {$up['email']}, доменов: " . ($imp['count'] ?? 0));
+                echo json_encode(['success' => true, 'label' => $up['email'], 'imported' => $imp['count'] ?? 0]);
             }
-
-            // Новый аккаунт.
-            $email = $label ?: ($name ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $tok), -8)));
-            $base = $email; $i = 2;
-            while (true) {
-                $c = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ?");
-                $c->execute([$userId, $email]);
-                if (!$c->fetchColumn()) break;
-                $email = $base . ' #' . $i; $i++;
-            }
-            dbRetryOnLock(function () use ($pdo, $userId, $email, $tok, $uid) {
-                $pdo->prepare("INSERT INTO cloudflare_credentials (user_id, email, api_key, auth_type, cf_account_uid) VALUES (?, ?, ?, 'token', ?)")
-                    ->execute([$userId, $email, $tok, $uid !== '' ? $uid : null]);
-            });
-            $credId = (int)$pdo->lastInsertId();
-            $imp = mtImportZones($pdo, $userId, $credId, $email, $tok, $grp ?: null);
-            logAction($pdo, $userId, 'Аккаунт добавлен в панель', "через мастер-токен: {$email}, доменов: " . ($imp['count'] ?? 0));
-            echo json_encode(['success' => true, 'label' => $email, 'imported' => $imp['count'] ?? 0]);
             break;
 
         case 'dedup_preview':
@@ -822,12 +818,10 @@ try {
             $accountId = $acc['result'][0]['id'];
             $accountName = $acc['result'][0]['name'] ?? '';
 
-            // Кредентал в панели под рабочий токен (чтобы домены были управляемы)
-            $email = 'master#' . $mid . ($accountName ? ' ' . $accountName : '');
-            dbRetryOnLock(function () use ($pdo, $userId, $email, $work) {
-                $pdo->prepare("INSERT OR IGNORE INTO cloudflare_credentials (user_id, email, api_key, auth_type) VALUES (?, ?, ?, 'token')")->execute([$userId, $email, $work]);
-            });
-            $credId = $pdo->query("SELECT id FROM cloudflare_credentials WHERE user_id = $userId AND email = " . $pdo->quote($email))->fetchColumn();
+            // Кредентал в панели под рабочий токен — канонической привязкой (upsert по uid),
+            // чтобы не плодить отдельный «master#N»-дубль того же CF-аккаунта.
+            $up = cfUpsertAccountByToken($pdo, $userId, $work, 'token', [], $accountName ? ('master#' . $mid . ' ' . $accountName) : '');
+            $credId = $up['id'];
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
 
             $results = [];
