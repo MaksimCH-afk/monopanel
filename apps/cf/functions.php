@@ -451,6 +451,77 @@ function cfResolveAccount($pdo, $email, $apiKey, $proxies = [], $userId = null, 
     return null;
 }
 
+/**
+ * [мост, шаг 8] Синхронизирует нормализованные cf_account/cf_token из канонических данных
+ * (cloudflare_credentials + cloudflare_api_tokens). Только БД, без сети; идемпотентно
+ * (INSERT OR IGNORE + UPDATE). Аддитивно: существующие потребители не затрагиваются.
+ * Возвращает ['accounts'=>N, 'tokens'=>M].
+ */
+function cfSyncCanonicalTables($pdo, $userId) {
+    $userId = (int)$userId;
+    $accById = function ($uid) use ($pdo, $userId) {
+        $q = $pdo->prepare("SELECT id FROM cf_account WHERE user_id = ? AND cf_uid = ?");
+        $q->execute([$userId, $uid]);
+        return (int)($q->fetchColumn() ?: 0);
+    };
+    $accounts = 0; $tokens = 0;
+
+    // 1) Аккаунты + основной токен из cloudflare_credentials (только с известным uid).
+    $creds = $pdo->query("SELECT id, email, api_key, cf_account_uid, COALESCE(auth_type,'global') AS auth_type
+        FROM cloudflare_credentials WHERE user_id = $userId
+        AND cf_account_uid IS NOT NULL AND cf_account_uid <> ''")->fetchAll();
+    foreach ($creds as $c) {
+        $uid = (string)$c['cf_account_uid'];
+        dbRetryOnLock(function () use ($pdo, $userId, $uid, $c) {
+            $pdo->prepare("INSERT OR IGNORE INTO cf_account (user_id, cf_uid, name, credential_id) VALUES (?, ?, ?, ?)")
+                ->execute([$userId, $uid, $c['email'], (int)$c['id']]);
+            $pdo->prepare("UPDATE cf_account SET name = ?, credential_id = ?, updated_at = datetime('now')
+                WHERE user_id = ? AND cf_uid = ?")->execute([$c['email'], (int)$c['id'], $userId, $uid]);
+        });
+        $accId = $accById($uid);
+        $accounts++;
+        if ($accId && trim((string)$c['api_key']) !== '') {
+            $kind = ($c['auth_type'] === 'token') ? 'child' : 'global';
+            dbRetryOnLock(function () use ($pdo, $userId, $accId, $kind, $c) {
+                $pdo->prepare("INSERT OR IGNORE INTO cf_token (user_id, cf_account_id, kind, value, source) VALUES (?, ?, ?, ?, 'credential')")
+                    ->execute([$userId, $accId, $kind, $c['api_key']]);
+                $pdo->prepare("UPDATE cf_token SET cf_account_id = ?, kind = ?, source = 'credential', updated_at = datetime('now')
+                    WHERE user_id = ? AND value = ?")->execute([$accId, $kind, $userId, $c['api_key']]);
+            });
+            $tokens++;
+        }
+    }
+
+    // 2) Scoped-токены из cloudflare_api_tokens → к тому же cf_account (через uid кредентала).
+    $scoped = $pdo->query("SELECT t.token AS token, cc.cf_account_uid AS uid
+        FROM cloudflare_api_tokens t JOIN cloudflare_credentials cc ON cc.id = t.account_id
+        WHERE t.user_id = $userId AND cc.cf_account_uid IS NOT NULL AND cc.cf_account_uid <> '' AND COALESCE(t.token,'') <> ''")->fetchAll();
+    foreach ($scoped as $s) {
+        $accId = $accById((string)$s['uid']);
+        if (!$accId) continue;
+        dbRetryOnLock(function () use ($pdo, $userId, $accId, $s) {
+            $pdo->prepare("INSERT OR IGNORE INTO cf_token (user_id, cf_account_id, kind, value, source) VALUES (?, ?, 'child', ?, 'api_tokens')")
+                ->execute([$userId, $accId, $s['token']]);
+            $pdo->prepare("UPDATE cf_token SET cf_account_id = ?, source = 'api_tokens', updated_at = datetime('now')
+                WHERE user_id = ? AND value = ?")->execute([$accId, $userId, $s['token']]);
+        });
+        $tokens++;
+    }
+
+    return ['accounts' => $accounts, 'tokens' => $tokens];
+}
+
+/**
+ * [мост, шаг 8] Чтение канонических аккаунтов из нормализованной модели (для будущих
+ * потребителей). Возвращает строки cf_account + число токенов на аккаунт.
+ */
+function cfGetCanonicalAccounts($pdo, $userId) {
+    $userId = (int)$userId;
+    return $pdo->query("SELECT a.id, a.cf_uid, a.name, a.credential_id,
+        (SELECT COUNT(*) FROM cf_token t WHERE t.cf_account_id = a.id) AS token_count
+        FROM cf_account a WHERE a.user_id = $userId ORDER BY a.name")->fetchAll();
+}
+
 /* =====================================================================
  * WAF Custom Rules через современный Rulesets API
  * (фаза http_request_firewall_custom). Заменяет устаревший firewall/rules,
