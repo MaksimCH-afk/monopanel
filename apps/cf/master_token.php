@@ -98,6 +98,7 @@ include 'sidebar.php';
             <button class="btn btn-primary" onclick="addDomains()"><i class="fas fa-plus me-1"></i>Создать домены</button>
             <button class="btn btn-outline-secondary ms-1" onclick="importEmpty()"><i class="fas fa-download me-1"></i>Импортировать/обновить домены (все аккаунты)</button>
             <button class="btn btn-outline-warning ms-1" onclick="dedupAccounts()"><i class="fas fa-object-group me-1"></i>Убрать дубли аккаунтов</button>
+            <button class="btn btn-outline-info ms-1" onclick="relinkDomains()" title="Переклеить каждый домен на аккаунт, чей токен реально владеет зоной в Cloudflare"><i class="fas fa-link me-1"></i>Проверить и переклеить домены</button>
             <div id="addDomainsOut" class="mt-2"></div>
         </div>
     </div>
@@ -279,6 +280,27 @@ function importEmpty() {
         showToast('Импорт завершён', 'success');
     })
     .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут' : 'Ошибка соединения') + '</span>'); });
+}
+function relinkDomains() {
+    if (!confirm('Проверить все домены и переклеить каждый на аккаунт, чей токен реально владеет зоной в Cloudflare? Меняется только привязка в панели (account_id/zone_id), Cloudflare не затрагивается.')) return;
+    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Опрашиваю токены и сверяю зоны (это может занять время)…</div>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 300000, data: { action: 'relink_domains' } })
+    .done(function(r) {
+        if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
+        let html = '<div class="alert alert-success small mb-2"><i class="fas fa-circle-check me-1"></i>Готово. Переклеено: <b>' + r.relinked + '</b>, уже верно: <b>' + r.ok + '</b>, без владельца: <b>' + r.orphan + '</b>'
+                 + (r.dead_creds ? ', мёртвых токенов: <b>' + r.dead_creds + '</b>' : '') + '.</div>';
+        if (r.orphan) html += '<div class="small text-warning mb-2"><i class="fas fa-triangle-exclamation me-1"></i>«Без владельца» — зону не отдал ни один токен панели. Добавьте токен нужного аккаунта в «Мастер-токен» и повторите.</div>';
+        if (r.report && r.report.length) {
+            html += '<div class="small mb-1">Переклеены:</div><ul class="mb-0 ps-3 small">';
+            r.report.forEach(function(x) {
+                html += '<li>' + $('<div>').text(x.domain).html() + ': <span class="text-muted">' + $('<div>').text(x.from).html() + '</span> → <b>' + $('<div>').text(x.to).html() + '</b></li>';
+            });
+            html += '</ul>';
+        }
+        $('#addDomainsOut').html(html);
+        showToast('Переклейка завершена', 'success');
+    })
+    .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут (много аккаунтов — попробуйте ещё раз)' : 'Ошибка соединения') + '</span>'); });
 }
 // Шаг 1 — превью: показать план (кого оставить, во что переименовать, кого удалить)
 // без изменений в БД. Применение — отдельной кнопкой (applyDedup).
