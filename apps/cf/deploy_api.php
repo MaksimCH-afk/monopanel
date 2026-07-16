@@ -101,7 +101,7 @@ function cfDeployUploadErrorText($code) {
  * @return array ['email'=>..,'api_key'=>..,'auth_type'=>'bearer'|null,'source'=>'token'|'legacy']
  */
 function cfDeployLoadCredentials($pdo, $userId, $accountId) {
-    $stmt = $pdo->prepare("SELECT id, email, api_key, status FROM cloudflare_credentials WHERE id = ? AND user_id = ?");
+    $stmt = $pdo->prepare("SELECT id, email, api_key, status, COALESCE(auth_type,'global') AS auth_type FROM cloudflare_credentials WHERE id = ? AND user_id = ?");
     $stmt->execute([$accountId, $userId]);
     $row = $stmt->fetch();
     if (!$row) {
@@ -113,6 +113,13 @@ function cfDeployLoadCredentials($pdo, $userId, $accountId) {
     if (!empty($tokens) && !empty($tokens[0]['token'])) {
         return ['email' => $row['email'], 'api_key' => trim($tokens[0]['token']),
                 'auth_type' => 'bearer', 'source' => 'token'];
+    }
+
+    // Сам кредентал — это API-токен (создан через «Мастер-токен»): используем его как Bearer.
+    // Раньше такие аккаунты попадали в ветку 'legacy' и помечались как «без токена».
+    if (($row['auth_type'] ?? '') === 'token' && trim((string)$row['api_key']) !== '') {
+        return ['email' => $row['email'], 'api_key' => trim($row['api_key']),
+                'auth_type' => 'bearer', 'source' => 'credential-token'];
     }
 
     return ['email' => $row['email'], 'api_key' => $row['api_key'], 'auth_type' => null, 'source' => 'legacy'];
