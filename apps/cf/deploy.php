@@ -442,30 +442,47 @@ $pageScripts = <<<'JS'
         loadAccountZones(acc);
     }
 
-    // Подтянуть домены выбранного аккаунта (FR-5 проверка наличия домена).
+    // Заполнить datalist «Домен сайта».
+    function fillDomainList(zones) {
+        domainList.innerHTML = '';
+        zones.forEach(z => { const o = document.createElement('option'); o.value = z; domainList.appendChild(o); });
+    }
+    function updateAccountHint(entry, zones) {
+        if (!accountHint) return;
+        if (!entry.hasToken) {
+            accountHint.innerHTML = '<span class="text-warning"><i class="fas fa-triangle-exclamation me-1"></i>'
+                + 'У аккаунта нет scoped-токена — создайте его в «Мастер-токен» (право Workers Scripts:Edit).</span>';
+        } else if (!zones.length) {
+            accountHint.innerHTML = '<span class="text-muted">В аккаунте нет доменов — введите домен вручную.</span>';
+        } else {
+            accountHint.innerHTML = '<span class="text-muted">Доменов в аккаунте: ' + zones.length + '. Выберите из списка или введите вручную.</span>';
+        }
+    }
+
+    // Домены выбранного аккаунта (FR-5). Источник правды — домены из панели (БД): они уже
+    // показаны в списке аккаунтов и корректны. Живой запрос к Cloudflare лишь ДОПОЛНЯЕТ список
+    // (union) — он не должен обнулять выпадающий список, если у токена нет прав/зона не видна.
     async function loadAccountZones(entry) {
         if (String(entry.id) === String(loadedZonesAccountId)) { updateDomainHint(); return; }
         loadedZonesAccountId = entry.id;
-        domainList.innerHTML = '';
-        accountZones = [];
-        if (!entry.hasToken && accountHint) {
-            accountHint.innerHTML = '<span class="text-warning"><i class="fas fa-triangle-exclamation me-1"></i>'
-                + 'У аккаунта нет scoped-токена — создайте его в «Мастер-токен» (право Workers Scripts:Edit).</span>';
-        } else if (accountHint) {
-            accountHint.innerHTML = '<span class="text-muted">Подтягиваю домены аккаунта…</span>';
-        }
+        // 1) Базовый список — из БД панели (entry.domains).
+        accountZones = (entry.domains || []).slice().sort();
+        fillDomainList(accountZones);
+        updateAccountHint(entry, accountZones);
+        updateDomainHint();
+        // 2) Дополняем живыми зонами из Cloudflare (union), не теряя домены из БД.
         try {
             const data = await apiPost({ action: 'account_zones', account_id: entry.id });
-            if (data.success) {
-                accountZones = data.zones || [];
-                domainList.innerHTML = '';
-                accountZones.forEach(z => { const o = document.createElement('option'); o.value = z; domainList.appendChild(o); });
-                if (accountHint) accountHint.innerHTML = '<span class="text-muted">Доменов в аккаунте: '
-                    + accountZones.length + '. Выберите из списка или введите вручную.</span>';
-            } else if (accountHint) {
-                accountHint.innerHTML = '<span class="text-danger">' + (data.error || 'Не удалось получить домены аккаунта') + '</span>';
+            if (String(entry.id) !== String(loadedZonesAccountId)) return; // аккаунт уже сменили
+            if (data.success && Array.isArray(data.zones) && data.zones.length) {
+                const set = {};
+                accountZones.forEach(z => { set[z.toLowerCase()] = z; });
+                data.zones.forEach(z => { if (z) set[z.toLowerCase()] = z; });
+                accountZones = Object.keys(set).map(k => set[k]).sort();
+                fillDomainList(accountZones);
+                updateAccountHint(entry, accountZones);
             }
-        } catch (e) { if (accountHint) accountHint.innerHTML = '<span class="text-danger">Ошибка сети: ' + e.message + '</span>'; }
+        } catch (e) { /* оффлайн / нет прав — остаёмся на доменах из БД */ }
         updateDomainHint();
     }
 
