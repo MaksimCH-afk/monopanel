@@ -83,17 +83,12 @@ function cfMasterApi($token, $method, $path, $body = null) {
 function cfErr($r) { return $r['errors'][0]['message'] ?? 'неизвестная ошибка'; }
 
 /**
- * Реальное имя аккаунта Cloudflare по токену. Сперва /accounts (нужно право
- * Account Settings:Read), затем — из первой зоны (zone.account.name доступно даже
- * без этого права). Возвращает '' если имя получить не удалось. Именно из-за
- * отсутствия этого фолбэка аккаунты сохранялись с заглушкой «token-XXXX».
+ * Реальное имя аккаунта Cloudflare по токену — тонкая обёртка над единым резолвером
+ * cfResolveAccount (functions.php). Возвращает '' если имя получить не удалось.
  */
-function mtResolveAccountName($token) {
-    $acc = cfMasterApi($token, 'GET', 'accounts?per_page=1');
-    if (!empty($acc['success']) && !empty($acc['result'][0]['name'])) return $acc['result'][0]['name'];
-    $z = cfMasterApi($token, 'GET', 'zones?per_page=1');
-    if (!empty($z['success']) && !empty($z['result'][0]['account']['name'])) return $z['result'][0]['account']['name'];
-    return '';
+function mtResolveAccountName($pdo, $token, $proxies = []) {
+    $r = cfResolveAccount($pdo, '', $token, $proxies, null, 'token');
+    return $r ? (string)($r['name'] ?? '') : '';
 }
 
 /** Является ли имя аккаунта заглушкой (token-XXXX / master#NN…), а не реальным именем CF. */
@@ -335,7 +330,7 @@ try {
                     $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
                     $ex->execute([$userId, $newToken]);
                     if (!$ex->fetchColumn()) {
-                        $an = mtResolveAccountName($newToken);
+                        $an = mtResolveAccountName($pdo, $newToken);
                         $em = $an ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $newToken), -8));
                         $b = $em; $k = 2;
                         while (true) {
@@ -489,7 +484,7 @@ try {
             $ex->execute([$userId, $tok]);
             $credId = (int)($ex->fetchColumn() ?: 0);
             if (!$credId) {
-                $nm = mtResolveAccountName($tok);
+                $nm = mtResolveAccountName($pdo, $tok);
                 $email = $nm ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $tok), -8));
                 $base = $email; $i = 2;
                 while (true) {
@@ -517,13 +512,14 @@ try {
             $creds = $pdo->query("SELECT cc.id, cc.email, cc.api_key FROM cloudflare_credentials cc
                 WHERE cc.user_id = $userId AND COALESCE(cc.auth_type,'') = 'token'")->fetchAll();
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
+            $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
             $report = []; $renamed = 0;
             foreach ($creds as $c) {
                 $imp = mtImportZones($pdo, $userId, $c['id'], $c['email'], $c['api_key'], $grp ?: null);
                 $row = ['account' => $c['email'], 'ok' => !empty($imp['ok']), 'count' => $imp['count'] ?? 0, 'error' => $imp['error'] ?? null];
                 // Бэкфилл имени: заглушки «token-XXXX»/«master#NN» → реальное имя аккаунта Cloudflare.
                 if (mtIsPlaceholderName($c['email'])) {
-                    $real = mtResolveAccountName($c['api_key']);
+                    $real = mtResolveAccountName($pdo, $c['api_key'], $proxies);
                     if ($real !== '' && $real !== $c['email']) {
                         $target = $real; $k = 2;
                         while (true) {
@@ -554,22 +550,11 @@ try {
             $label = trim($_POST['label'] ?? '');
             if ($tok === '') throw new Exception('Нет токена для сохранения');
 
-            // Имя и UID аккаунта из CF. /accounts требует Account Settings:Read; если его нет —
-            // берём имя/uid из первой зоны (zone.account.{name,id} доступны без этого права),
-            // чтобы аккаунт не сохранялся с заглушкой «token-XXXX».
-            $name = ''; $uid = '';
-            $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');
-            if (!empty($acc['success']) && !empty($acc['result'][0])) {
-                $name = $acc['result'][0]['name'] ?? '';
-                $uid  = $acc['result'][0]['id'] ?? '';
-            }
-            if ($name === '' || $uid === '') {
-                $z = cfMasterApi($tok, 'GET', 'zones?per_page=1');
-                if (!empty($z['success']) && !empty($z['result'][0]['account'])) {
-                    if ($name === '') $name = $z['result'][0]['account']['name'] ?? '';
-                    if ($uid  === '') $uid  = $z['result'][0]['account']['id'] ?? '';
-                }
-            }
+            // Имя и UID аккаунта — через единый резолвер (accounts → фолбэк на зоны),
+            // чтобы аккаунт не сохранялся с заглушкой «token-XXXX» даже без Account Settings:Read.
+            $resolved = cfResolveAccount($pdo, '', $tok, [], null, 'token');
+            $name = $resolved ? (string)($resolved['name'] ?? '') : '';
+            $uid  = $resolved ? (string)($resolved['uid'] ?? '') : '';
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
 
             // Существующий кредентал того же аккаунта: сначала по UID, затем по точному токену.
