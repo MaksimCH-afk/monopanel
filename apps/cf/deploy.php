@@ -5,7 +5,7 @@ require_once 'header.php';
 $userId = $_SESSION['user_id'];
 
 // Аккаунты Cloudflare = cloudflare_credentials (email + токен). Ручной выбор (FR-4).
-$stmt = $pdo->prepare("SELECT id, email, status, COALESCE(auth_type,'global') AS auth_type, api_key FROM cloudflare_credentials WHERE user_id = ? ORDER BY email");
+$stmt = $pdo->prepare("SELECT id, email, status, COALESCE(auth_type,'global') AS auth_type, api_key, cf_account_uid FROM cloudflare_credentials WHERE user_id = ? ORDER BY email");
 $stmt->execute([$userId]);
 $accounts = $stmt->fetchAll();
 
@@ -79,26 +79,48 @@ include 'sidebar.php';
                     <div class="mb-3">
                         <label class="form-label">Аккаунт Cloudflare</label>
                         <?php
-                            // Данные для тайпхеда: каждый аккаунт — одной записью. Поиск идёт по
-                            // логину (email без хвоста «'s Account») ИЛИ по любому его домену.
-                            $accountData = array_map(function ($acc) use ($tokenCounts, $accountDomains) {
-                                $aid   = (int)$acc['id'];
-                                $login = preg_replace('/[\'\x{2019}]s Account$/u', '', (string)$acc['email']);
-                                if ($login === '') $login = (string)$acc['email'];
-                                return [
-                                    'id'       => $aid,
-                                    'login'    => $login,
-                                    'label'    => (string)$acc['email'],
-                                    'status'   => $acc['status'],
-                                    // Токен есть, если у аккаунта зарегистрирован scoped-токен
-                                    // (cloudflare_api_tokens) ЛИБО сам кредентал — это API-токен
-                                    // (auth_type='token', выпущен через «Мастер-токен»). Иначе для
-                                    // token-аккаунтов из мастера ошибочно показывалось «нет токена».
-                                    'hasToken' => !empty($tokenCounts[$aid])
-                                                  || (($acc['auth_type'] ?? '') === 'token' && trim((string)$acc['api_key']) !== ''),
-                                    'domains'  => array_values(array_map('strtolower', $accountDomains[$aid] ?? [])),
-                                ];
-                            }, $accounts);
+                            // Данные для тайпхеда: одна запись на РЕАЛЬНЫЙ аккаунт (коллапс по
+                            // cf_account_uid — «мост», шаг 7). Даже если в БД ещё остались дубли,
+                            // деплой показывает один аккаунт: представитель — предпочтительно
+                            // token-кредентал с токеном, затем с большим числом доменов, затем меньший
+                            // id; домены объединяются. Поиск — по логину ИЛИ любому домену.
+                            $mkLogin = function ($email) {
+                                $l = preg_replace('/\s*#\d+$/u', '', (string)$email);        // суффикс коллизии « #N»
+                                $l = preg_replace('/[\'\x{2019}]s Account$/u', '', (string)$l); // хвост «'s Account»
+                                return trim($l) !== '' ? trim($l) : (string)$email;
+                            };
+                            $byKey = [];
+                            foreach ($accounts as $acc) {
+                                $aid     = (int)$acc['id'];
+                                $uid     = trim((string)($acc['cf_account_uid'] ?? ''));
+                                $key     = $uid !== '' ? 'uid:' . $uid : 'id:' . $aid;
+                                $isToken = (($acc['auth_type'] ?? '') === 'token') && trim((string)$acc['api_key']) !== '';
+                                $hasTok  = !empty($tokenCounts[$aid]) || $isToken;
+                                $doms    = array_map('strtolower', $accountDomains[$aid] ?? []);
+                                if (!isset($byKey[$key])) {
+                                    $byKey[$key] = [
+                                        'id' => $aid, 'login' => $mkLogin($acc['email']), 'label' => (string)$acc['email'],
+                                        'status' => $acc['status'], 'hasToken' => $hasTok, 'domains' => $doms,
+                                        '_isToken' => $isToken, '_domCount' => count($doms),
+                                    ];
+                                    continue;
+                                }
+                                $g = $byKey[$key];
+                                $g['domains']  = array_values(array_unique(array_merge($g['domains'], $doms)));
+                                $g['hasToken'] = $g['hasToken'] || $hasTok;
+                                $better = ($isToken && !$g['_isToken'])
+                                    || ($isToken === $g['_isToken'] && count($doms) > $g['_domCount'])
+                                    || ($isToken === $g['_isToken'] && count($doms) === $g['_domCount'] && $aid < $g['id']);
+                                if ($better) {
+                                    $g['id'] = $aid; $g['login'] = $mkLogin($acc['email']); $g['label'] = (string)$acc['email'];
+                                    $g['status'] = $acc['status']; $g['_isToken'] = $isToken; $g['_domCount'] = count($doms);
+                                }
+                                $byKey[$key] = $g;
+                            }
+                            $accountData = array_values(array_map(function ($g) {
+                                unset($g['_isToken'], $g['_domCount']);
+                                return $g;
+                            }, $byKey));
                         ?>
                         <div class="position-relative">
                             <input type="text" class="form-control" id="accountSearch" role="combobox"
