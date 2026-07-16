@@ -365,6 +365,16 @@ try {
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_bulk_operations_user ON cloudflare_bulk_operations(user_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_worker_scripts_user ON cloudflare_worker_scripts(user_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_worker_routes_domain ON cloudflare_worker_routes(domain_id)");
+
+    // [мост, шаг 4] Один кредентал на реальный CF-аккаунт. Частичный UNIQUE — только по
+    // НЕпустому uid (в SQLite '' = '' ломает уникальность, а несколько NULL — нет). Создаётся
+    // мягко: если в данных ещё остались дубли по uid, индекс не создастся (сначала «Убрать
+    // дубли аккаунтов»), а на следующем запуске — создастся сам. Не роняем инициализацию БД.
+    try {
+        $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cred_account_uid
+            ON cloudflare_credentials(user_id, cf_account_uid)
+            WHERE cf_account_uid IS NOT NULL AND cf_account_uid <> ''");
+    } catch (Exception $e) { /* остались дубли по uid — индекс создастся после дедупа */ }
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_sites_user ON cf_deploy_sites(user_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_versions_site ON cf_deploy_versions(site_id)");
 
