@@ -418,6 +418,34 @@ try {
     // working_token — рабочий child-токен (15 прав) для операций с доменами (создание зон).
     try { $pdo->exec("ALTER TABLE master_tokens ADD COLUMN working_token TEXT"); } catch (Exception $e) {}
 
+    // [мост, шаг 8] Нормализованная модель: канонический аккаунт (ключ — реальный CF uid)
+    // и его токены. Пока АДДИТИВНО: заполняется синхронизацией cfSyncCanonicalTables() из
+    // cloudflare_credentials/cloudflare_api_tokens; существующие потребители не трогаются,
+    // миграция чтения — отдельным этапом. credential_id — мост на канонический кредентал.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cf_account (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        cf_uid TEXT NOT NULL,
+        name TEXT,
+        credential_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, cf_uid)
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cf_token (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        cf_account_id INTEGER NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'child',
+        value TEXT NOT NULL,
+        status TEXT DEFAULT 'active',
+        source TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, value)
+    )");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cf_token_account ON cf_token(cf_account_id)");
+
     // Серверы (имя + IP) для выпадающего списка «IP сервера» при добавлении домена.
     $pdo->exec("CREATE TABLE IF NOT EXISTS servers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, ip TEXT UNIQUE)");
     if ((int)$pdo->query("SELECT COUNT(*) FROM servers")->fetchColumn() === 0) {

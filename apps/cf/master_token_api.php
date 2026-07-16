@@ -664,11 +664,15 @@ try {
             // обновить» становится единой самолечащей операцией — без отдельной кнопки.
             $relink = mtRelinkDomains($pdo, $userId, $proxies);
 
-            logActionSafe($pdo, $userId, 'Импорт + бэкфилл идентичности + переклейка',
+            // 4) Синхронизация нормализованной модели cf_account/cf_token (шаг 8, аддитивно, без сети).
+            $sync = function_exists('cfSyncCanonicalTables') ? cfSyncCanonicalTables($pdo, $userId) : ['accounts' => 0, 'tokens' => 0];
+
+            logActionSafe($pdo, $userId, 'Импорт + бэкфилл + переклейка + синхронизация',
                 'токен-аккаунтов: ' . count($tokenCreds) . ', uid: ' . $uidFilled . ', переим.: ' . $renamed
-                . ', переклеено: ' . $relink['relinked'] . ', без владельца: ' . $relink['orphan']);
+                . ', переклеено: ' . $relink['relinked'] . ', cf_account: ' . $sync['accounts'] . ', cf_token: ' . $sync['tokens']);
             echo json_encode(['success' => true, 'report' => $report, 'renamed' => $renamed, 'uid_filled' => $uidFilled,
-                'relinked' => $relink['relinked'], 'orphan' => $relink['orphan'], 'dead_creds' => $relink['dead_creds']]);
+                'relinked' => $relink['relinked'], 'orphan' => $relink['orphan'], 'dead_creds' => $relink['dead_creds'],
+                'canonical_accounts' => $sync['accounts'], 'canonical_tokens' => $sync['tokens']]);
             break;
 
         case 'save_as_account':
