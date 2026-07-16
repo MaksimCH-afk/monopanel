@@ -5,7 +5,7 @@ require_once 'header.php';
 $userId = $_SESSION['user_id'];
 
 // Аккаунты Cloudflare = cloudflare_credentials (email + токен). Ручной выбор (FR-4).
-$stmt = $pdo->prepare("SELECT id, email, status FROM cloudflare_credentials WHERE user_id = ? ORDER BY email");
+$stmt = $pdo->prepare("SELECT id, email, status, COALESCE(auth_type,'global') AS auth_type, api_key FROM cloudflare_credentials WHERE user_id = ? ORDER BY email");
 $stmt->execute([$userId]);
 $accounts = $stmt->fetchAll();
 
@@ -90,7 +90,12 @@ include 'sidebar.php';
                                     'login'    => $login,
                                     'label'    => (string)$acc['email'],
                                     'status'   => $acc['status'],
-                                    'hasToken' => !empty($tokenCounts[$aid]),
+                                    // Токен есть, если у аккаунта зарегистрирован scoped-токен
+                                    // (cloudflare_api_tokens) ЛИБО сам кредентал — это API-токен
+                                    // (auth_type='token', выпущен через «Мастер-токен»). Иначе для
+                                    // token-аккаунтов из мастера ошибочно показывалось «нет токена».
+                                    'hasToken' => !empty($tokenCounts[$aid])
+                                                  || (($acc['auth_type'] ?? '') === 'token' && trim((string)$acc['api_key']) !== ''),
                                     'domains'  => array_values(array_map('strtolower', $accountDomains[$aid] ?? [])),
                                 ];
                             }, $accounts);
@@ -545,7 +550,7 @@ $pageScripts = <<<'JS'
         if (f) setFile(f);
     });
 
-    function renderReport(r) {
+    function renderReport(r, valid) {
         document.getElementById('statFiles').textContent = r.total_files;
         document.getElementById('statSize').textContent = fmtSize(r.total_size);
         document.getElementById('statPages').textContent = r.pages_count;
@@ -558,6 +563,15 @@ $pageScripts = <<<'JS'
 
         const warn = document.getElementById('reportWarnings');
         warn.innerHTML = '';
+        // Явное подтверждение, что архив валиден: предупреждения ниже — необязательные,
+        // публикацию не блокируют (частая путаница: оранжевые warning принимают за ошибку).
+        if (valid) {
+            const ok = document.createElement('div');
+            ok.className = 'alert alert-success py-2 mb-2 small';
+            ok.innerHTML = '<i class="fas fa-circle-check me-2"></i>Архив валиден: index.html найден — можно публиковать. '
+                + 'Замечания ниже (если есть) — необязательные и не мешают публикации.';
+            warn.appendChild(ok);
+        }
         (r.warnings || []).forEach(w => {
             const d = document.createElement('div');
             d.className = 'alert alert-warning py-2 mb-2 small';
@@ -609,11 +623,11 @@ $pageScripts = <<<'JS'
                 showOversized(r.oversized);
             }
             if (data.success) {
-                renderReport(r);
+                renderReport(r, true);
                 archiveValid = true;
                 showToast('Архив прошёл проверку', 'success');
             } else {
-                if (r) renderReport(r);
+                if (r) renderReport(r, false);
                 archiveValid = false;
                 showToast(data.error || 'Архив не прошёл проверку', 'error');
             }

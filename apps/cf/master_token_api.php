@@ -82,6 +82,25 @@ function cfMasterApi($token, $method, $path, $body = null) {
 }
 function cfErr($r) { return $r['errors'][0]['message'] ?? 'неизвестная ошибка'; }
 
+/**
+ * Реальное имя аккаунта Cloudflare по токену. Сперва /accounts (нужно право
+ * Account Settings:Read), затем — из первой зоны (zone.account.name доступно даже
+ * без этого права). Возвращает '' если имя получить не удалось. Именно из-за
+ * отсутствия этого фолбэка аккаунты сохранялись с заглушкой «token-XXXX».
+ */
+function mtResolveAccountName($token) {
+    $acc = cfMasterApi($token, 'GET', 'accounts?per_page=1');
+    if (!empty($acc['success']) && !empty($acc['result'][0]['name'])) return $acc['result'][0]['name'];
+    $z = cfMasterApi($token, 'GET', 'zones?per_page=1');
+    if (!empty($z['success']) && !empty($z['result'][0]['account']['name'])) return $z['result'][0]['account']['name'];
+    return '';
+}
+
+/** Является ли имя аккаунта заглушкой (token-XXXX / master#NN…), а не реальным именем CF. */
+function mtIsPlaceholderName($email) {
+    return (bool)preg_match('/^\s*(token-[A-Za-z0-9]+|master#\d+)/u', (string)$email);
+}
+
 /** Возвращает значение мастер-токена: из сохранённого (master_id) или введённого (master_token). */
 function resolveMasterToken($pdo) {
     $mid = trim($_POST['master_id'] ?? '');
@@ -316,9 +335,7 @@ try {
                     $ex = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key = ?");
                     $ex->execute([$userId, $newToken]);
                     if (!$ex->fetchColumn()) {
-                        $an = '';
-                        $acc2 = cfMasterApi($newToken, 'GET', 'accounts?per_page=1');
-                        if (!empty($acc2['success']) && !empty($acc2['result'][0]['name'])) $an = $acc2['result'][0]['name'];
+                        $an = mtResolveAccountName($newToken);
                         $em = $an ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $newToken), -8));
                         $b = $em; $k = 2;
                         while (true) {
@@ -472,9 +489,7 @@ try {
             $ex->execute([$userId, $tok]);
             $credId = (int)($ex->fetchColumn() ?: 0);
             if (!$credId) {
-                $nm = '';
-                $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');
-                if (!empty($acc['success']) && !empty($acc['result'][0]['name'])) $nm = $acc['result'][0]['name'];
+                $nm = mtResolveAccountName($tok);
                 $email = $nm ?: ('token-' . substr(preg_replace('/[^A-Za-z0-9]/', '', $tok), -8));
                 $base = $email; $i = 2;
                 while (true) {
@@ -502,13 +517,33 @@ try {
             $creds = $pdo->query("SELECT cc.id, cc.email, cc.api_key FROM cloudflare_credentials cc
                 WHERE cc.user_id = $userId AND COALESCE(cc.auth_type,'') = 'token'")->fetchAll();
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
-            $report = [];
+            $report = []; $renamed = 0;
             foreach ($creds as $c) {
                 $imp = mtImportZones($pdo, $userId, $c['id'], $c['email'], $c['api_key'], $grp ?: null);
-                $report[] = ['account' => $c['email'], 'ok' => !empty($imp['ok']), 'count' => $imp['count'] ?? 0, 'error' => $imp['error'] ?? null];
+                $row = ['account' => $c['email'], 'ok' => !empty($imp['ok']), 'count' => $imp['count'] ?? 0, 'error' => $imp['error'] ?? null];
+                // Бэкфилл имени: заглушки «token-XXXX»/«master#NN» → реальное имя аккаунта Cloudflare.
+                if (mtIsPlaceholderName($c['email'])) {
+                    $real = mtResolveAccountName($c['api_key']);
+                    if ($real !== '' && $real !== $c['email']) {
+                        $target = $real; $k = 2;
+                        while (true) {
+                            $chk = $pdo->prepare("SELECT 1 FROM cloudflare_credentials WHERE user_id = ? AND email = ? AND id <> ?");
+                            $chk->execute([$userId, $target, $c['id']]);
+                            if (!$chk->fetchColumn()) break;
+                            $target = $real . ' #' . $k; $k++;
+                        }
+                        try {
+                            dbRetryOnLock(function () use ($pdo, $target, $c, $userId) {
+                                $pdo->prepare("UPDATE cloudflare_credentials SET email = ? WHERE id = ? AND user_id = ?")->execute([$target, $c['id'], $userId]);
+                            });
+                            $row['renamed_to'] = $target; $renamed++;
+                        } catch (Exception $e) { /* коллизия — оставляем как есть */ }
+                    }
+                }
+                $report[] = $row;
             }
-            logAction($pdo, $userId, 'Импорт доменов в пустые аккаунты', 'аккаунтов обработано: ' . count($creds));
-            echo json_encode(['success' => true, 'report' => $report]);
+            logAction($pdo, $userId, 'Импорт доменов/имён (все аккаунты)', 'аккаунтов: ' . count($creds) . ', переименовано: ' . $renamed);
+            echo json_encode(['success' => true, 'report' => $report, 'renamed' => $renamed]);
             break;
 
         case 'save_as_account':
@@ -519,12 +554,21 @@ try {
             $label = trim($_POST['label'] ?? '');
             if ($tok === '') throw new Exception('Нет токена для сохранения');
 
-            // Имя и UID аккаунта из CF (нужны Account Settings:Read).
+            // Имя и UID аккаунта из CF. /accounts требует Account Settings:Read; если его нет —
+            // берём имя/uid из первой зоны (zone.account.{name,id} доступны без этого права),
+            // чтобы аккаунт не сохранялся с заглушкой «token-XXXX».
             $name = ''; $uid = '';
             $acc = cfMasterApi($tok, 'GET', 'accounts?per_page=1');
             if (!empty($acc['success']) && !empty($acc['result'][0])) {
                 $name = $acc['result'][0]['name'] ?? '';
                 $uid  = $acc['result'][0]['id'] ?? '';
+            }
+            if ($name === '' || $uid === '') {
+                $z = cfMasterApi($tok, 'GET', 'zones?per_page=1');
+                if (!empty($z['success']) && !empty($z['result'][0]['account'])) {
+                    if ($name === '') $name = $z['result'][0]['account']['name'] ?? '';
+                    if ($uid  === '') $uid  = $z['result'][0]['account']['id'] ?? '';
+                }
             }
             $grp = $pdo->query("SELECT id FROM groups WHERE user_id = $userId ORDER BY id LIMIT 1")->fetchColumn();
 

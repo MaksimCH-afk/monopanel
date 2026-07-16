@@ -266,10 +266,13 @@ function importEmpty() {
     .done(function(r) {
         if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
         if (!r.report.length) { $('#addDomainsOut').html('<span class="text-muted small">Пустых токен-аккаунтов нет.</span>'); return; }
-        let html = '<ul class="mb-0 ps-3 small">';
+        let html = '';
+        if (r.renamed) html += '<div class="small text-info mb-1"><i class="fas fa-pen me-1"></i>Обновлены имена аккаунтов: ' + r.renamed + ' (заглушки «token-…» → реальное имя).</div>';
+        html += '<ul class="mb-0 ps-3 small">';
         r.report.forEach(function(x) {
-            if (x.ok) html += '<li class="text-success">' + $('<div>').text(x.account).html() + ' — импортировано: ' + x.count + '</li>';
-            else html += '<li class="text-danger">' + $('<div>').text(x.account).html() + ' — ' + $('<div>').text(x.error || 'ошибка').html() + '</li>';
+            const rn = x.renamed_to ? (' <span class="text-info">→ ' + $('<div>').text(x.renamed_to).html() + '</span>') : '';
+            if (x.ok) html += '<li class="text-success">' + $('<div>').text(x.account).html() + ' — импортировано: ' + x.count + rn + '</li>';
+            else html += '<li class="text-danger">' + $('<div>').text(x.account).html() + ' — ' + $('<div>').text(x.error || 'ошибка').html() + rn + '</li>';
         });
         html += '</ul>';
         $('#addDomainsOut').html(html);
