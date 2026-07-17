@@ -261,25 +261,48 @@ function createToken() {
         $btn.prop('disabled', false).html('<i class="fas fa-key me-2"></i>Создать токен');
     });
 }
+// Импорт БАТЧАМИ: каждый запрос обрабатывает несколько аккаунтов (offset/batch),
+// крутим до next_offset === null. Так не упираемся в таймаут Cloudflare/PHP.
 function importEmpty() {
-    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Импортирую домены…</div>');
-    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000, data: { action: 'import_empty' } })
+    const acc = { report: [], renamed: 0, uid: 0, errors: [] };
+    runImportBatch(0, acc);
+}
+function runImportBatch(offset, acc) {
+    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Импортирую аккаунты…' + (offset ? ' (' + offset + '+)' : '') + '</div>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 90000,
+        data: { action: 'import_empty', offset: offset, batch: 3 } })
     .done(function(r) {
         if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
-        let html = '';
-        if (r.renamed || r.uid_filled) html += '<div class="small text-info mb-1"><i class="fas fa-id-card me-1"></i>Идентичность: uid проставлено ' + (r.uid_filled || 0) + ', имён обновлено ' + (r.renamed || 0) + ' (заглушки «token-…» → реальное имя).</div>';
-        html += '<div class="small text-muted mb-1"><i class="fas fa-info-circle me-1"></i>Привязку доменов к правильным аккаунтам — кнопкой «Проверить и переклеить домены».</div>';
-        if (!r.report.length) { $('#addDomainsOut').html(html || '<span class="text-muted small">Токен-аккаунтов нет.</span>'); showToast('Готово', 'success'); return; }
-        html += '<ul class="mb-0 ps-3 small">';
-        r.report.forEach(function(x) {
+        acc.report = acc.report.concat(r.report || []);
+        acc.renamed += (r.renamed || 0);
+        acc.uid += (r.uid_filled || 0);
+        if (r.phase_errors && r.phase_errors.length) acc.errors = acc.errors.concat(r.phase_errors);
+        const done = Math.min((r.offset || 0) + (r.processed || 0), r.total || 0);
+        if (r.next_offset !== null && r.next_offset !== undefined) {
+            $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Импортирую аккаунты: ' + done + ' / ' + (r.total || '?') + '…</div>');
+            runImportBatch(r.next_offset, acc);
+            return;
+        }
+        renderImportDone(acc, r.total || done);
+    })
+    .fail(function(x, st) {
+        $('#addDomainsOut').html('<div class="text-danger small">' + (st === 'timeout' ? 'Таймаут батча на offset ' + offset + ' — нажмите ещё раз, продолжит с обработанных.' : 'Ошибка соединения') + '</div>');
+    });
+}
+function renderImportDone(acc, total) {
+    let html = '<div class="small text-success mb-1"><i class="fas fa-circle-check me-1"></i>Импорт завершён. Аккаунтов: ' + total + '.</div>';
+    if (acc.renamed || acc.uid) html += '<div class="small text-info mb-1"><i class="fas fa-id-card me-1"></i>Идентичность: uid проставлено ' + acc.uid + ', имён обновлено ' + acc.renamed + '.</div>';
+    html += '<div class="small text-muted mb-1"><i class="fas fa-info-circle me-1"></i>Привязку доменов к правильным аккаунтам — кнопкой «Проверить и переклеить домены».</div>';
+    if (acc.report.length) {
+        html += '<ul class="mb-0 ps-3 small" style="max-height:320px; overflow-y:auto;">';
+        acc.report.forEach(function(x) {
             if (x.ok) html += '<li class="text-success">' + $('<div>').text(x.account).html() + ' — импортировано: ' + x.count + '</li>';
             else html += '<li class="text-danger">' + $('<div>').text(x.account).html() + ' — ' + $('<div>').text(x.error || 'ошибка').html() + '</li>';
         });
         html += '</ul>';
-        $('#addDomainsOut').html(html);
-        showToast('Импорт завершён', 'success');
-    })
-    .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут' : 'Ошибка соединения') + '</span>'); });
+    }
+    $('#addDomainsOut').html(html);
+    showToast('Импорт завершён', 'success');
 }
 function relinkDomains() {
     if (!confirm('Проверить все домены и переклеить каждый на аккаунт, чей токен реально владеет зоной в Cloudflare? Меняется только привязка в панели (account_id/zone_id), Cloudflare не затрагивается.')) return;
