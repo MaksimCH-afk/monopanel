@@ -125,17 +125,34 @@ function mtImportZones($pdo, $userId, $credId, $email, $token, $groupId = null) 
     $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
     $zr = cfFetchAllZones($pdo, $email, $token, $proxies, $userId, 'token');
     if (empty($zr['success'])) return ['ok' => false, 'error' => $zr['error'] ?? 'не удалось получить зоны', 'count' => 0];
-    $ins = $pdo->prepare("INSERT OR IGNORE INTO cloudflare_accounts (user_id, account_id, group_id, domain, server_ip, ssl_mode, zone_id) VALUES (?, ?, ?, ?, '0.0.0.0', NULL, ?)");
-    $n = 0;
+
+    // Сеть уже завершена — собираем строки БЕЗ сети, затем пишем ОДНОЙ короткой транзакцией
+    // (BEGIN IMMEDIATE берёт write-лок один раз). Построчный dbRetryOnLock под фоновыми
+    // писателями давал шторм блокировок → таймауты и «bad parameter or other API misuse».
+    $rows = [];
     foreach ($zr['zones'] as $zone) {
-        $zn = is_object($zone) ? ($zone->name ?? null) : ($zone['name'] ?? null);
-        $zid = is_object($zone) ? ($zone->id ?? '') : ($zone['id'] ?? '');
+        $zn  = is_object($zone) ? ($zone->name ?? null) : ($zone['name'] ?? null);
+        $zid = is_object($zone) ? ($zone->id ?? '')   : ($zone['id'] ?? '');
         if (!$zn) continue;
-        dbRetryOnLock(function () use ($ins, $userId, $credId, $groupId, $zn, $zid) {
-            $ins->execute([$userId, $credId, $groupId, $zn, $zid]);
-        });
-        $n++;
+        $rows[] = [$zn, $zid];
     }
+    if (!$rows) return ['ok' => true, 'count' => 0];
+
+    $n = 0;
+    dbRetryOnLock(function () use ($pdo, $userId, $credId, $groupId, $rows, &$n) {
+        $pdo->exec('PRAGMA busy_timeout = 60000');
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $ins = $pdo->prepare("INSERT OR IGNORE INTO cloudflare_accounts (user_id, account_id, group_id, domain, server_ip, ssl_mode, zone_id) VALUES (?, ?, ?, ?, '0.0.0.0', NULL, ?)");
+            $n = 0;
+            foreach ($rows as $r) { $ins->execute([$userId, $credId, $groupId, $r[0], $r[1]]); $n++; }
+            $ins->closeCursor();
+            $pdo->exec('COMMIT');
+        } catch (Throwable $e) {
+            try { $pdo->exec('ROLLBACK'); } catch (Throwable $ignore) {}
+            throw $e;
+        }
+    });
     return ['ok' => true, 'count' => $n];
 }
 
@@ -467,17 +484,16 @@ try {
 
             // Авто-сохранение токена как аккаунта панели — чтобы он не потерялся
             // (CF показывает значение один раз) и сразу был доступен для добавления доменов.
+            // ВАЖНО: НЕ импортируем домены здесь — импорт зон (mtImportZones) под нагрузкой
+            // долгий и роняет создание токена по таймауту. Только лёгкая привязка токена к
+            // аккаунту (upsert по uid). Домены подтянутся кнопкой «Импортировать/обновить».
             $savedAs = null;
             if ($newToken) {
                 try {
-                    // Каноническая привязка (upsert по uid) — не плодит дубль, если аккаунт уже в панели.
-                    $up  = cfUpsertAccountByToken($pdo, $userId, $newToken, 'token');
-                    $grp = mtFirstGroupId($pdo, $userId);
-                    $imp = mtImportZones($pdo, $userId, $up['id'], $up['email'], $newToken, $grp ?: null);
-                    $importedCount = $imp['count'] ?? 0;
+                    $up = cfUpsertAccountByToken($pdo, $userId, $newToken, 'token');
                     logAction($pdo, $userId, 'Аккаунт добавлен/обновлён в панели',
-                        ($up['created'] ? 'авто после создания токена: ' : 'обновление аккаунта: ') . "{$up['email']}, доменов: {$importedCount}");
-                    $savedAs = $up['email'] . ' (импортировано доменов: ' . $importedCount . ')';
+                        ($up['created'] ? 'авто после создания токена: ' : 'обновление аккаунта: ') . $up['email']);
+                    $savedAs = $up['email'] . ' (домены — по кнопке «Импортировать/обновить»)';
                 } catch (Exception $e) { /* не критично */ }
             }
 
@@ -684,23 +700,14 @@ try {
                 }
             } catch (Throwable $e) { $phaseErrors[] = 'backfill: ' . $e->getMessage(); }
 
-            // 3) Авто-переклейка доменов по факту владения зоной (шаг 5 «моста»).
-            $relink = ['relinked' => 0, 'orphan' => 0, 'dead_creds' => 0];
-            try { $relink = mtRelinkDomains($pdo, $userId, $proxies); }
-            catch (Throwable $e) { $phaseErrors[] = 'relink: ' . $e->getMessage(); }
-
-            // 4) Синхронизация нормализованной модели cf_account/cf_token (шаг 8, аддитивно, без сети).
-            $sync = ['accounts' => 0, 'tokens' => 0];
-            try { if (function_exists('cfSyncCanonicalTables')) $sync = cfSyncCanonicalTables($pdo, $userId); }
-            catch (Throwable $e) { $phaseErrors[] = 'sync: ' . $e->getMessage(); }
-
-            logActionSafe($pdo, $userId, 'Импорт + бэкфилл + переклейка + синхронизация',
+            // Переклейка доменов и синхронизация cf_account/cf_token — ТЯЖЁЛЫЕ (переклейка
+            // заново тянет все зоны каждого кредентала). Убраны из авто-импорта, чтобы не
+            // создавать шторм блокировок. Запускаются отдельной кнопкой «Проверить и
+            // переклеить домены» (она же синхронизирует нормализованные таблицы).
+            logActionSafe($pdo, $userId, 'Импорт доменов + бэкфилл идентичности',
                 'токен: ' . count($tokenCreds) . ', uid: ' . $uidFilled . ', переим.: ' . $renamed
-                . ', переклеено: ' . $relink['relinked'] . ', cf_account: ' . $sync['accounts']
                 . ($phaseErrors ? ' | ОШИБКИ: ' . implode(' ; ', $phaseErrors) : ''));
             echo json_encode(['success' => true, 'report' => $report, 'renamed' => $renamed, 'uid_filled' => $uidFilled,
-                'relinked' => $relink['relinked'], 'orphan' => $relink['orphan'], 'dead_creds' => $relink['dead_creds'],
-                'canonical_accounts' => $sync['accounts'], 'canonical_tokens' => $sync['tokens'],
                 'phase_errors' => $phaseErrors]);
             break;
 
@@ -941,10 +948,15 @@ try {
             // домена находим кредентал, чей токен РЕАЛЬНО владеет зоной в Cloudflare.
             $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
             $res = mtRelinkDomains($pdo, $userId, $proxies);
+            // Синхронизация нормализованной модели (шаг 8) — здесь, а не в авто-импорте.
+            $sync = ['accounts' => 0, 'tokens' => 0];
+            try { if (function_exists('cfSyncCanonicalTables')) $sync = cfSyncCanonicalTables($pdo, $userId); }
+            catch (Throwable $e) { /* не критично для переклейки */ }
             logActionSafe($pdo, $userId, 'Проверка и переклейка доменов',
-                "переклеено: {$res['relinked']}, уже верно: {$res['ok']}, без владельца: {$res['orphan']}, мёртвых токенов: {$res['dead_creds']}");
+                "переклеено: {$res['relinked']}, уже верно: {$res['ok']}, без владельца: {$res['orphan']}, мёртвых токенов: {$res['dead_creds']}, cf_account: {$sync['accounts']}");
             echo json_encode(['success' => true, 'relinked' => $res['relinked'], 'ok' => $res['ok'],
                 'orphan' => $res['orphan'], 'dead_creds' => $res['dead_creds'],
+                'canonical_accounts' => $sync['accounts'], 'canonical_tokens' => $sync['tokens'],
                 'report' => array_slice($res['report'], 0, 200)]);
             break;
 
