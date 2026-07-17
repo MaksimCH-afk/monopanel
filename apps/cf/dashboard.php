@@ -340,8 +340,13 @@ function getDomainStatusInfo($status, $httpCode = null) {
                         </option>
                     <?php endforeach; ?>
                 </select>
-                <input type="text" id="searchInput" class="form-control form-control-sm" style="width: 200px;"
-                       placeholder="Поиск по домену или аккаунту…" value="<?php echo htmlspecialchars($search); ?>" onkeyup="searchDomains(event)">
+                <div class="position-relative" style="width: 220px;">
+                    <input type="text" id="searchInput" class="form-control form-control-sm" autocomplete="off"
+                           role="combobox" aria-autocomplete="list" aria-expanded="false"
+                           placeholder="Поиск по домену или аккаунту…" value="<?php echo htmlspecialchars($search); ?>">
+                    <div id="searchDropdown" class="list-group position-absolute w-100 shadow"
+                         style="z-index:1080; max-height:320px; overflow-y:auto; display:none;"></div>
+                </div>
             </div>
         </div>
         
@@ -826,15 +831,88 @@ function applyFilters() {
     params.set('page', 1);
     window.location.search = params.toString();
 }
-// Живой поиск по ВСЕМ доменам (не только по текущей странице): поиск серверный
-// (SQL LIKE по всем записям), поэтому перезагружаем с ?search= с дебаунсом, чтобы
-// не дёргать сервер на каждый символ. Enter — сразу.
-let _searchTimer = null;
-function searchDomains(e) {
-    if (e.key === 'Enter') { clearTimeout(_searchTimer); applyFilters(); return; }
-    clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(applyFilters, 500);
+// --- Поиск доменов: тайпхед как на «Деплой». Фильтр САМ НЕ срабатывает — показываем
+//     выпадающий список подсказок (сервер, LIKE), а фильтруем только по выбору или Enter.
+const _searchInput = document.getElementById('searchInput');
+const _searchDropdown = document.getElementById('searchDropdown');
+let _sugItems = [];        // текущие подсказки
+let _sugActive = -1;       // подсвеченная строка
+let _sugTimer = null;
+let _sugSeq = 0;           // защита от гонки ответов
+
+function _sugEsc(s) { const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
+function _sugClose() { if (_searchDropdown) { _searchDropdown.style.display = 'none'; _searchDropdown.innerHTML = ''; } _sugActive = -1; if (_searchInput) _searchInput.setAttribute('aria-expanded', 'false'); }
+function _sugRender(items) {
+    if (!items.length) { _sugClose(); return; }
+    let html = '';
+    items.forEach(function (it, i) {
+        html += '<button type="button" class="list-group-item list-group-item-action py-2 sug-opt" data-i="' + i + '">'
+              + '<div class="fw-semibold text-truncate">' + _sugEsc(it.d) + '</div>'
+              + '<div class="small text-muted text-truncate">' + _sugEsc(it.a) + '</div>'
+              + '</button>';
+    });
+    _searchDropdown.innerHTML = html;
+    _searchDropdown.style.display = 'block';
+    _searchInput.setAttribute('aria-expanded', 'true');
+    _sugActive = -1;
 }
+function _sugFetch(q) {
+    const seq = ++_sugSeq;
+    fetch('domain_suggest_api.php?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (items) { if (seq !== _sugSeq) return; _sugItems = Array.isArray(items) ? items : []; _sugRender(_sugItems); })
+        .catch(function () { /* тихо */ });
+}
+function _sugPick(item) {
+    if (!item) return;
+    _searchInput.value = item.d;
+    _sugClose();
+    applyFilters();        // серверный фильтр к выбранному домену, сохраняя группу/IP
+}
+if (_searchInput) {
+    _searchInput.addEventListener('input', function () {
+        const q = _searchInput.value.trim();
+        clearTimeout(_sugTimer);
+        if (q.length < 1) { _sugClose(); return; }
+        _sugTimer = setTimeout(function () { _sugFetch(q); }, 200);
+    });
+    _searchInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); if (_sugActive >= 0 && _sugItems[_sugActive]) _sugPick(_sugItems[_sugActive]); else { _sugClose(); applyFilters(); } return; }
+        if (_searchDropdown.style.display === 'none') return;
+        const opts = Array.prototype.slice.call(_searchDropdown.querySelectorAll('.sug-opt'));
+        if (e.key === 'ArrowDown') { e.preventDefault(); _sugActive = Math.min(_sugActive + 1, opts.length - 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); _sugActive = Math.max(_sugActive - 1, 0); }
+        else if (e.key === 'Escape') { _sugClose(); return; }
+        else return;
+        opts.forEach(function (o, i) { o.classList.toggle('active', i === _sugActive); });
+        if (opts[_sugActive]) opts[_sugActive].scrollIntoView({ block: 'nearest' });
+    });
+    _searchDropdown.addEventListener('mousedown', function (e) {
+        const btn = e.target.closest('.sug-opt'); if (!btn) return; e.preventDefault();
+        _sugPick(_sugItems[parseInt(btn.dataset.i, 10)]);
+    });
+    document.addEventListener('click', function (e) { if (e.target !== _searchInput && !_searchDropdown.contains(e.target)) _sugClose(); });
+}
+
+// --- Фикс обрезки меню «Управление» (⋮) у нижних строк: dropdown внутри .table-responsive
+//     клиппится overflow'ом. На показе делаем меню position:fixed (fixed НЕ обрезается
+//     overflow-предком) и ставим под кнопкой (с флипом вверх, если снизу нет места);
+//     на скрытии — сбрасываем инлайн-стили, чтобы Bootstrap/Popper переиспользовал меню.
+document.addEventListener('shown.bs.dropdown', function (e) {
+    const tgl = e.target; if (!tgl.closest || !tgl.closest('.table-responsive')) return;
+    const menu = tgl.parentElement && tgl.parentElement.querySelector('.dropdown-menu.show'); if (!menu) return;
+    const r = tgl.getBoundingClientRect();
+    menu.style.position = 'fixed'; menu.style.margin = '0'; menu.style.transform = 'none'; menu.style.inset = 'auto'; menu.style.zIndex = '2000';
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let left = r.right - mw; if (left < 8) left = 8;
+    let top = r.bottom + 2; if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 2);
+    menu.style.top = top + 'px'; menu.style.left = left + 'px';
+});
+document.addEventListener('hide.bs.dropdown', function (e) {
+    const tgl = e.target; if (!tgl.closest || !tgl.closest('.table-responsive')) return;
+    const menu = tgl.parentElement && tgl.parentElement.querySelector('.dropdown-menu'); if (!menu) return;
+    ['position', 'margin', 'transform', 'inset', 'zIndex', 'top', 'left'].forEach(function (p) { menu.style[p] = ''; });
+});
 
 // Bulk Actions
 function getSelectedDomains() {
