@@ -462,7 +462,9 @@ function cfSyncCanonicalTables($pdo, $userId) {
     $accById = function ($uid) use ($pdo, $userId) {
         $q = $pdo->prepare("SELECT id FROM cf_account WHERE user_id = ? AND cf_uid = ?");
         $q->execute([$userId, $uid]);
-        return (int)($q->fetchColumn() ?: 0);
+        $id = (int)($q->fetchColumn() ?: 0);
+        $q->closeCursor();   // pdo_sqlite: закрываем курсор до следующих записей (защита от MISUSE)
+        return $id;
     };
     $accounts = 0; $tokens = 0;
 
