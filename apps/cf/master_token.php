@@ -191,14 +191,28 @@ function saveMaster() {
         else showToast('Ошибка: ' + (r.error || ''), 'error');
     }, 'json').fail(function(){ showToast('Ошибка соединения', 'error'); });
 }
+// Полное удаление токена «отовсюду»: мастер + кредентал аккаунта + scoped-токены.
+// Домены (сайты) НЕ удаляются — отвязываются и переклеятся кнопкой «Проверить и переклеить».
+function doDeleteMaster(id, btn, onDone) {
+    if (!id || id === '__new__') return;
+    if (!confirm('Удалить этот токен полностью из панели?\n\nБудут удалены: запись мастер-токена, кредентал(ы) этого аккаунта и его scoped-токены (со всех вкладок). Домены-сайты останутся, но станут непривязанными — переклейте их кнопкой «Проверить и переклеить домены». В Cloudflare ничего не трогается.')) return;
+    if (btn) { $(btn).prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>'); }
+    $.post('master_token_api.php', { action: 'delete_master', id: id }, function(r) {
+        if (r.success) {
+            let msg = 'Удалено';
+            if (r.deleted_creds || r.unlinked_domains) msg += ' (кредеталов: ' + (r.deleted_creds || 0) + ', доменов отвязано: ' + (r.unlinked_domains || 0) + ')';
+            showToast(msg, 'success');
+            loadMasters();
+            if (typeof onDone === 'function') onDone();
+        } else { showToast(r.error || 'Ошибка', 'error'); if (btn) $(btn).prop('disabled', false).html('<i class="fas fa-trash"></i>'); }
+    }, 'json').fail(function() { showToast('Ошибка соединения', 'error'); if (btn) $(btn).prop('disabled', false).html('<i class="fas fa-trash"></i>'); });
+}
 function deleteMaster() {
-    const v = $('#masterSelect').val();
-    if (!v || v === '__new__') return;
-    if (!confirm('Удалить сохранённый мастер-токен из панели? (в Cloudflare он не трогается)')) return;
-    $.post('master_token_api.php', { action: 'delete_master', id: v }, function(r) {
-        if (r.success) { showToast('Удалён', 'success'); loadMasters(); }
-        else showToast('Ошибка', 'error');
-    }, 'json');
+    doDeleteMaster($('#masterSelect').val(), null, null);
+}
+// Удаление конкретного мастера из таблицы «Здоровье мастер-токенов».
+function deleteMasterRow(id, btn) {
+    doDeleteMaster(id, btn, function() { checkMastersHealth(); });
 }
 function loadPerms() {
     $.get('master_token_api.php', { action: 'list_permissions' }, function(r) {
@@ -468,7 +482,7 @@ function checkMastersHealth() {
     .done(function(r) {
         if (!r.success || !r.masters) { $('#mastersHealth').html('<div class="text-danger small">' + ((r && r.error) || 'Ошибка') + '</div>'); return; }
         if (!r.masters.length) { $('#mastersHealth').html('<div class="text-muted small">Сохранённых мастер-токенов нет.</div>'); return; }
-        let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Метка</th><th>Аккаунт</th><th>Домены</th><th>Токен</th><th>Статус</th></tr></thead><tbody>';
+        let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Метка</th><th>Аккаунт</th><th>Домены</th><th>Токен</th><th>Статус</th><th></th></tr></thead><tbody>';
         r.masters.forEach(function(m) {
             const ok = m.ok;
             const badge = ok ? 'success' : 'danger';
@@ -479,6 +493,7 @@ function checkMastersHealth() {
                 <td class="small text-muted">${$('<div>').text(m.domains_hint || '—').html()}</td>
                 <td class="font-monospace small">${$('<div>').text(m.masked || '').html()}</td>
                 <td><span class="badge bg-${badge}">${stTxt}</span></td>
+                <td class="text-end"><button class="btn btn-outline-danger btn-sm" onclick="deleteMasterRow(${parseInt(m.id, 10)}, this)" title="Удалить токен полностью из панели (домены останутся)"><i class="fas fa-trash"></i></button></td>
             </tr>`;
         });
         html += '</tbody></table></div>';
