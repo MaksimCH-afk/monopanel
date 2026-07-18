@@ -1053,10 +1053,11 @@ try {
 
         case 'relink_domains':
             // Массовая починка привязки доменов, ОБРАБОТКА БАТЧАМИ (как импорт) — обход таймаута
-            // CF/PHP при опросе многих аккаунтов. Карту владения зонами копим В СЕССИИ, без
-            // записей в БД между батчами (раньше накопитель-таблица сама добавляла lock-контеншн
-            // → «database is locked»). Фаза «done» (последний батч): переклейка доменов по
-            // накопленной карте (единственные записи в БД — сама переклейка) + синхронизация.
+            // CF/PHP при опросе многих аккаунтов. Карту владения зонами копим МЕЖДУ БАТЧАМИ во
+            // ВРЕМЕННОМ ФАЙЛЕ (JSON) на пользователя — не в БД (иначе lock-контеншн) и не в
+            // сессии (config.php для API-эндпоинтов сразу делает session_write_close(), поэтому
+            // записи в $_SESSION НЕ сохраняются между запросами). Фаза «done» (последний батч):
+            // переклейка доменов по накопленной карте (единственные записи в БД — сама переклейка).
             $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
             $offset  = max(0, (int)($_POST['offset'] ?? 0));
             $batch   = (int)($_POST['batch'] ?? 3);
@@ -1067,45 +1068,53 @@ try {
                 FROM cloudflare_credentials WHERE user_id = $uid ORDER BY id")->fetchAll();
             $total = count($creds);
 
-            // Накопитель в сессии: zone_name => [cred_id => zone_id]. На offset 0 — сбрасываем.
-            if ($offset === 0 || !isset($_SESSION['mt_relink_scan'])) $_SESSION['mt_relink_scan'] = [];
+            // Файл-накопитель карты владения: zone_name => { cred_id => zone_id }.
+            $scanFile = rtrim(sys_get_temp_dir(), '/') . '/mt_relink_scan_u' . $uid . '.json';
+            if ($offset === 0) { @unlink($scanFile); }
+            $zoneOwners = [];
+            if (is_file($scanFile)) {
+                $raw = @file_get_contents($scanFile);
+                if ($raw !== false && $raw !== '') { $tmp = json_decode($raw, true); if (is_array($tmp)) $zoneOwners = $tmp; }
+            }
 
-            // Скан среза кредеталов — только сеть, БЕЗ записей в БД.
+            // Скан среза кредеталов — только сеть, БЕЗ записей в БД. Учитываем и «мёртвых»
+            // (токен не отдал зоны) накопительно, чтобы итог был по ВСЕМ батчам, а не по последнему.
+            $deadList = isset($zoneOwners['__dead__']) && is_array($zoneOwners['__dead__']) ? $zoneOwners['__dead__'] : [];
             $slice = array_slice($creds, $offset, $batch);
             foreach ($slice as $c) {
                 $cid = (int)$c['id'];
                 $zr = cfFetchAllZones($pdo, $c['email'], $c['api_key'], $proxies, null, $c['auth_type']);
-                if (empty($zr['success'])) continue;
+                if (empty($zr['success'])) { $deadList[$cid] = $c['email']; continue; }
                 foreach ($zr['zones'] as $zone) {
                     $zn  = is_object($zone) ? ($zone->name ?? '') : ($zone['name'] ?? '');
                     $zid = is_object($zone) ? ($zone->id ?? '')   : ($zone['id'] ?? '');
                     if ($zn === '') continue;
-                    $_SESSION['mt_relink_scan'][mb_strtolower($zn)][$cid] = (string)$zid;
+                    $zoneOwners[mb_strtolower($zn)][$cid] = (string)$zid;
                 }
             }
+            $zoneOwners['__dead__'] = $deadList;
 
             $processed = min($offset + $batch, $total);
             $nextOffset = ($offset + $batch < $total) ? ($offset + $batch) : null;
 
             if ($nextOffset !== null) {
-                // Освобождаем файл сессии, иначе следующий батч ждёт блокировку сессии.
-                session_write_close();
+                @file_put_contents($scanFile, json_encode($zoneOwners));
                 echo json_encode(['success' => true, 'phase' => 'scan', 'total' => $total,
                     'offset' => $offset, 'processed' => $processed, 'next_offset' => $nextOffset]);
                 break;
             }
 
             // Последний батч → финальный проход по накопленной карте владения.
-            $zoneOwners = $_SESSION['mt_relink_scan'] ?? [];
-            unset($_SESSION['mt_relink_scan']);
-            $credPref = []; $emailById = []; $aliveCreds = [];
+            @unlink($scanFile);
+            $deadList = $zoneOwners['__dead__'] ?? [];
+            unset($zoneOwners['__dead__']);
+            $credPref = []; $emailById = [];
             foreach ($creds as $c) {
                 $cid = (int)$c['id'];
                 $credPref[$cid]  = (($c['auth_type'] === 'token') ? 1000000 : 0) - $cid;
                 $emailById[$cid] = $c['email'];
             }
-            foreach ($zoneOwners as $owners) { foreach ($owners as $ownId => $z) $aliveCreds[(int)$ownId] = true; }
-            $deadCreds = max(0, $total - count($aliveCreds));
+            $deadCreds = count($deadList);
 
             $res = mtRelinkApply($pdo, $uid, $zoneOwners, $credPref, $emailById);
 
@@ -1117,6 +1126,7 @@ try {
                 "переклеено: {$res['relinked']}, уже верно: {$res['ok']}, без владельца: {$res['orphan']}, мёртвых токенов: {$deadCreds}, cf_account: {$sync['accounts']}");
             echo json_encode(['success' => true, 'phase' => 'done', 'relinked' => $res['relinked'], 'ok' => $res['ok'],
                 'orphan' => $res['orphan'], 'dead_creds' => $deadCreds,
+                'dead_list' => array_values(array_slice(array_values($deadList), 0, 50)),
                 'canonical_accounts' => $sync['accounts'], 'canonical_tokens' => $sync['tokens'],
                 'report' => array_slice($res['report'], 0, 200)]);
             break;

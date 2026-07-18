@@ -211,8 +211,18 @@ function deleteMaster() {
     doDeleteMaster($('#masterSelect').val(), null, null);
 }
 // Удаление конкретного мастера из таблицы «Здоровье мастер-токенов».
+// НЕ перезапускаем медленную «Проверить все» — просто убираем строку(и) этого токена.
 function deleteMasterRow(id, btn) {
-    doDeleteMaster(id, btn, function() { checkMastersHealth(); });
+    const $tr = $(btn).closest('tr');
+    const tokTxt = $tr.find('td.font-monospace').text();
+    doDeleteMaster(id, btn, function() {
+        const $tbody = $tr.closest('tbody');
+        // Тот же запрос снёс и дубли по значению токена — убираем все строки с этим токеном.
+        $tbody.find('tr').each(function() {
+            if ($(this).find('td.font-monospace').text() === tokTxt) $(this).remove();
+        });
+        if (!$tbody.find('tr').length) $('#mastersHealth').html('<div class="text-muted small">Сохранённых мастер-токенов нет.</div>');
+    });
 }
 function loadPerms() {
     $.get('master_token_api.php', { action: 'list_permissions' }, function(r) {
@@ -355,7 +365,13 @@ function runRelinkBatch(offset) {
         // phase === 'done'
         let html = '<div class="alert alert-success small mb-2"><i class="fas fa-circle-check me-1"></i>Готово. Переклеено: <b>' + r.relinked + '</b>, уже верно: <b>' + r.ok + '</b>, без владельца: <b>' + r.orphan + '</b>'
                  + (r.dead_creds ? ', мёртвых токенов: <b>' + r.dead_creds + '</b>' : '') + '.</div>';
-        if (r.orphan) html += '<div class="small text-warning mb-2"><i class="fas fa-triangle-exclamation me-1"></i>«Без владельца» — зону не отдал ни один токен панели. Добавьте токен нужного аккаунта в «Мастер-токен» и повторите.</div>';
+        if (r.orphan) html += '<div class="small text-warning mb-2"><i class="fas fa-triangle-exclamation me-1"></i>«Без владельца» — зону не отдал ни один <b>живой</b> токен панели. Обычно это домены аккаунтов с мёртвым токеном (см. ниже): перевыпустите их токен в разделе «Аккаунты панели» и повторите.</div>';
+        if (r.dead_list && r.dead_list.length) {
+            html += '<div class="small text-danger mb-1"><i class="fas fa-skull-crossbones me-1"></i>Мёртвые токены (' + r.dead_creds + ') — аккаунты, чей токен не отдал зоны (401/403/пусто):</div>';
+            html += '<ul class="mb-2 ps-3 small text-muted">';
+            r.dead_list.forEach(function(e) { html += '<li>' + $('<div>').text(e).html() + '</li>'; });
+            html += '</ul>';
+        }
         if (r.report && r.report.length) {
             html += '<div class="small mb-1">Переклеены:</div><ul class="mb-0 ps-3 small">';
             r.report.forEach(function(x) {
