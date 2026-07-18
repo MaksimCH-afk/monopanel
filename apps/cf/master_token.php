@@ -126,6 +126,18 @@ include 'sidebar.php';
             <div id="mastersHealth"><div class="text-muted small">Нажмите «Проверить все» — панель опросит каждый токен в Cloudflare.</div></div>
         </div>
     </div>
+
+    <!-- [monopanel] Перевыпуск токена на уровне АККАУНТА (а не одного домена) -->
+    <div class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-user-shield me-2"></i>Аккаунты панели — перевыпуск токена</span>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadAccounts()"><i class="fas fa-rotate me-1"></i>Загрузить</button>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Перевыпуск на уровне <b>аккаунта</b>: выбранным <b>сверху</b> мастер-токеном создаётся новый токен и заменяет токен у аккаунта — <b>все его домены</b> сразу работают с новым токеном (перевыпускать по одному домену не нужно). Панель проверяет, что мастер от того же аккаунта (по uid или по тому, что новый токен видит домен аккаунта).</p>
+            <div id="accountsList"><div class="text-muted small">Нажмите «Загрузить», чтобы увидеть аккаунты панели.</div></div>
+        </div>
+    </div>
 </div>
 
 <!-- jQuery нужен для AJAX (как в Security Manager); footer.php грузит только Bootstrap -->
@@ -456,6 +468,41 @@ function checkMastersHealth() {
         $('#mastersHealth').html(html);
     })
     .fail(function(x, st) { $('#mastersHealth').html('<div class="text-danger small">' + (st === 'timeout' ? 'Таймаут (много токенов — попробуйте ещё раз)' : 'Ошибка соединения') + '</div>'); });
+}
+// Аккаунты панели: список + перевыпуск токена на уровне аккаунта.
+function loadAccounts() {
+    $('#accountsList').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Загрузка…</div>');
+    $.get('master_token_api.php', { action: 'list_accounts' }, function(r) {
+        if (!r.success) { $('#accountsList').html('<div class="text-danger small">' + (r.error || 'Ошибка') + '</div>'); return; }
+        if (!r.accounts.length) { $('#accountsList').html('<div class="text-muted small">Аккаунтов нет.</div>'); return; }
+        let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Аккаунт</th><th>Тип</th><th>Доменов</th><th>Токен</th><th></th></tr></thead><tbody>';
+        r.accounts.forEach(function(a) {
+            html += `<tr>
+                <td class="small">${$('<div>').text(a.email).html()}</td>
+                <td><span class="badge bg-light text-dark">${a.auth_type}</span>${a.has_uid ? '' : ' <span class="badge bg-warning text-dark" title="uid не определён — проверка по домену">без uid</span>'}</td>
+                <td>${a.domains}</td>
+                <td class="font-monospace small text-muted">${$('<div>').text(a.masked).html()}</td>
+                <td class="text-end"><button class="btn btn-outline-primary btn-sm" onclick="reissueAccountToken(${a.id}, this)" data-email="${$('<div>').text(a.email).html()}"><i class="fas fa-key me-1"></i>Перевыпустить токен</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        $('#accountsList').html(html);
+    }, 'json').fail(function(){ $('#accountsList').html('<div class="text-danger small">Ошибка соединения</div>'); });
+}
+function reissueAccountToken(accId, btn) {
+    const v = $('#masterSelect').val();
+    if (!v || v === '__new__') { showToast('Выберите СВЕРХУ сохранённый мастер-токен нужного аккаунта', 'warning'); return; }
+    const email = $(btn).data('email') || 'аккаунта';
+    if (!confirm('Перевыпустить токен для «' + email + '»?\n\nВыбранным сверху мастером будет создан новый токен и привязан КО ВСЕМ доменам этого аккаунта. Панель проверит, что мастер от того же аккаунта.')) return;
+    $(btn).prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 60000,
+        data: { action: 'reissue_account_token', account_id: accId, master_id: v } })
+    .done(function(r) {
+        if (!r.success) { showToast('Ошибка: ' + (r.error || 'unknown'), 'error'); $(btn).prop('disabled', false).html('<i class="fas fa-key me-1"></i>Перевыпустить токен'); return; }
+        showToast('Токен перевыпущен — доменов затронуто: ' + r.domains, 'success');
+        loadAccounts();
+    })
+    .fail(function(x, st) { showToast(st === 'timeout' ? 'Таймаут запроса к Cloudflare' : 'Ошибка соединения', 'error'); $(btn).prop('disabled', false).html('<i class="fas fa-key me-1"></i>Перевыпустить токен'); });
 }
 $(document).ready(function(){ loadPerms(); loadMasters(); });
 </script>
