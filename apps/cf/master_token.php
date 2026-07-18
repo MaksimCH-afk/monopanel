@@ -324,10 +324,21 @@ function renderImportDone(acc, total) {
 }
 function relinkDomains() {
     if (!confirm('Проверить все домены и переклеить каждый на аккаунт, чей токен реально владеет зоной в Cloudflare? Меняется только привязка в панели (account_id/zone_id), Cloudflare не затрагивается.')) return;
-    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Опрашиваю токены и сверяю зоны (это может занять время)…</div>');
-    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 300000, data: { action: 'relink_domains' } })
+    // Обработка батчами (как импорт): опрос токенов идёт срезами, чтобы не ловить таймаут CF.
+    runRelinkBatch(0);
+}
+function runRelinkBatch(offset) {
+    $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Опрашиваю токены и сверяю зоны' + (offset ? ' (аккаунты: ' + offset + '…)' : '') + '…</div>');
+    $.ajax({ url: 'master_token_api.php', method: 'POST', dataType: 'json', timeout: 120000,
+             data: { action: 'relink_domains', offset: offset, batch: 3 } })
     .done(function(r) {
         if (!r.success) { $('#addDomainsOut').html('<span class="text-danger small">' + (r.error || 'ошибка') + '</span>'); return; }
+        if (r.phase === 'scan' && r.next_offset !== null && r.next_offset !== undefined) {
+            $('#addDomainsOut').html('<div class="text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Опрашиваю токены и сверяю зоны: ' + r.processed + ' / ' + r.total + '…</div>');
+            runRelinkBatch(r.next_offset);
+            return;
+        }
+        // phase === 'done'
         let html = '<div class="alert alert-success small mb-2"><i class="fas fa-circle-check me-1"></i>Готово. Переклеено: <b>' + r.relinked + '</b>, уже верно: <b>' + r.ok + '</b>, без владельца: <b>' + r.orphan + '</b>'
                  + (r.dead_creds ? ', мёртвых токенов: <b>' + r.dead_creds + '</b>' : '') + '.</div>';
         if (r.orphan) html += '<div class="small text-warning mb-2"><i class="fas fa-triangle-exclamation me-1"></i>«Без владельца» — зону не отдал ни один токен панели. Добавьте токен нужного аккаунта в «Мастер-токен» и повторите.</div>';
@@ -341,7 +352,7 @@ function relinkDomains() {
         $('#addDomainsOut').html(html);
         showToast('Переклейка завершена', 'success');
     })
-    .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут (много аккаунтов — попробуйте ещё раз)' : 'Ошибка соединения') + '</span>'); });
+    .fail(function(x, st) { $('#addDomainsOut').html('<span class="text-danger small">' + (st === 'timeout' ? 'Таймаут на батче (попробуйте ещё раз — прогресс по аккаунтам сохранён)' : 'Ошибка соединения') + '</span>'); });
 }
 // Шаг 1 — превью: показать план (кого оставить, во что переименовать, кого удалить)
 // без изменений в БД. Применение — отдельной кнопкой (applyDedup).
