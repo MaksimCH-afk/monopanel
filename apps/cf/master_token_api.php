@@ -540,17 +540,36 @@ try {
             echo json_encode(['success' => true, 'masters' => $out]);
             break;
 
-        // [monopanel] Живой статус каждого сохранённого мастер-токена (Cloudflare verify).
+        // [monopanel] Живой статус каждого сохранённого мастер-токена (Cloudflare verify) +
+        // определение и СОХРАНЕНИЕ аккаунта мастера (чтобы было видно в выпадашке, какой мастер
+        // к какому аккаунту). Мастер-токен часто не читает аккаунт — тогда пробуем его
+        // working_token (15-прав child). Результат кэшируется в account_email.
         case 'masters_status':
-            $rows = $pdo->query("SELECT id, label, account_email, domains_hint, token FROM master_tokens ORDER BY id DESC")->fetchAll();
+            $rows = $pdo->query("SELECT id, label, account_email, domains_hint, token, working_token FROM master_tokens ORDER BY id DESC")->fetchAll();
             $out = [];
             foreach ($rows as $r) {
                 $v = cfMasterApi($r['token'], 'GET', 'user/tokens/verify');
                 $status = !empty($v['success']) ? ($v['result']['status'] ?? 'active') : 'invalid';
+                $email = (string)($r['account_email'] ?? '');
+                if ($email === '') {
+                    $name = '';
+                    $a1 = cfMasterApi($r['token'], 'GET', 'accounts?per_page=1');
+                    if (!empty($a1['success']) && !empty($a1['result'][0]['name'])) $name = $a1['result'][0]['name'];
+                    if ($name === '' && !empty($r['working_token'])) {
+                        $a2 = cfMasterApi($r['working_token'], 'GET', 'accounts?per_page=1');
+                        if (!empty($a2['success']) && !empty($a2['result'][0]['name'])) $name = $a2['result'][0]['name'];
+                    }
+                    if ($name !== '') {
+                        $email = $name;
+                        dbRetryOnLock(function () use ($pdo, $name, $r) {
+                            $pdo->prepare("UPDATE master_tokens SET account_email = ? WHERE id = ?")->execute([$name, $r['id']]);
+                        });
+                    }
+                }
                 $out[] = [
                     'id' => $r['id'],
                     'label' => $r['label'],
-                    'email' => $r['account_email'],
+                    'email' => $email,
                     'domains_hint' => $r['domains_hint'],
                     'masked' => mb_substr($r['token'], 0, 10) . '…' . mb_substr($r['token'], -4),
                     'status' => $status,
