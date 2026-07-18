@@ -960,6 +960,92 @@ try {
                 'report' => array_slice($res['report'], 0, 200)]);
             break;
 
+        case 'list_accounts':
+            // Аккаунты панели (кредентала) + число доменов и маскированный токен — для секции
+            // «Перевыпуск токена аккаунта». Без сети.
+            $rows = $pdo->query("SELECT cc.id, cc.email, COALESCE(cc.auth_type,'global') AS auth_type, cc.api_key, cc.cf_account_uid,
+                (SELECT COUNT(*) FROM cloudflare_accounts ca WHERE ca.account_id = cc.id AND ca.user_id = $userId) AS domains
+                FROM cloudflare_credentials cc WHERE cc.user_id = $userId ORDER BY cc.email")->fetchAll();
+            $out = array_map(function ($r) {
+                $k = (string)($r['api_key'] ?? '');
+                return ['id' => (int)$r['id'], 'email' => $r['email'], 'auth_type' => $r['auth_type'],
+                        'domains' => (int)$r['domains'], 'has_uid' => !empty($r['cf_account_uid']),
+                        'masked' => $k !== '' ? (mb_substr($k, 0, 8) . '…' . mb_substr($k, -4)) : ''];
+            }, $rows);
+            echo json_encode(['success' => true, 'accounts' => $out]);
+            break;
+
+        case 'reissue_account_token':
+            // Перевыпуск токена на уровне АККАУНТА: выбранным мастером создаём новый child-токен
+            // и заменяем api_key у кредентала — все его домены (и все кредентала того же аккаунта
+            // по uid) сразу работают с новым токеном. Перевыпускать по одному домену не нужно.
+            $accId = (int)($_POST['account_id'] ?? 0);
+            $mid   = trim($_POST['master_id'] ?? '');
+            if ($accId <= 0) throw new Exception('Не указан аккаунт');
+            if ($mid === '' || !ctype_digit($mid)) throw new Exception('Выберите сохранённый мастер-токен сверху');
+
+            $st = $pdo->prepare("SELECT id, email, cf_account_uid FROM cloudflare_credentials WHERE id = ? AND user_id = ?");
+            $st->execute([$accId, $userId]);
+            $cred = $st->fetch();
+            if (!$cred) throw new Exception('Аккаунт не найден');
+
+            $mrow = $pdo->prepare("SELECT token FROM master_tokens WHERE id = ?");
+            $mrow->execute([$mid]);
+            $master = $mrow->fetchColumn();
+            if (!$master) throw new Exception('Мастер-токен не найден');
+
+            $allKeys = array_column(masterTokenPreset(), 'key');
+            $mk = mtCreateToken($master, 'panel-token-' . date('Ymd-His'), $allKeys);
+            if (empty($mk['ok']) || empty($mk['token'])) throw new Exception('Не удалось создать токен: ' . ($mk['error'] ?? 'неизвестно'));
+            $newTok = $mk['token'];
+
+            // Проверка: новый токен ИЗ ТОГО ЖЕ аккаунта. По uid, а если uid неизвестен — по тому,
+            // что новый токен видит существующий домен аккаунта. Иначе не трогаем (не ломаем).
+            $acc    = cfResolveAccount($pdo, '', $newTok, [], null, 'token');
+            $newUid = $acc ? (string)($acc['uid'] ?? '') : '';
+            $curUid = (string)($cred['cf_account_uid'] ?? '');
+            if ($curUid !== '' && $newUid !== '') {
+                if ($curUid !== $newUid) throw new Exception('Выбранный мастер-токен НЕ от этого аккаунта (uid не совпал). Выберите мастер нужного аккаунта.');
+            } else {
+                $dst = $pdo->prepare("SELECT domain FROM cloudflare_accounts WHERE account_id = ? AND user_id = ? AND domain IS NOT NULL AND domain <> '' LIMIT 1");
+                $dst->execute([$accId, $userId]);
+                $probe = $dst->fetchColumn();
+                if ($probe) {
+                    $z = cfMasterApi($newTok, 'GET', 'zones?name=' . rawurlencode($probe));
+                    if (empty($z['success']) || empty($z['result'][0]['id'])) {
+                        throw new Exception('Выбранный мастер-токен НЕ от этого аккаунта: новый токен не видит домен ' . $probe . '. Выберите мастер нужного аккаунта.');
+                    }
+                }
+            }
+            $uidToSet = $newUid !== '' ? $newUid : $curUid;
+
+            // Обновляем токен у целевого кредентала и у всех кредеталов того же аккаунта (по uid).
+            $ids = [];
+            dbRetryOnLock(function () use ($pdo, $userId, $accId, $uidToSet, $newTok, &$ids) {
+                $pdo->prepare("UPDATE cloudflare_credentials SET api_key = ?, auth_type = 'token',
+                    cf_account_uid = COALESCE(NULLIF(?, ''), cf_account_uid) WHERE id = ? AND user_id = ?")
+                    ->execute([$newTok, $uidToSet, $accId, $userId]);
+                $ids[$accId] = true;
+                if ($uidToSet !== '') {
+                    $sel = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND cf_account_uid = ? AND id <> ?");
+                    $sel->execute([$userId, $uidToSet, $accId]);
+                    foreach ($sel->fetchAll(PDO::FETCH_COLUMN) as $oid) {
+                        $pdo->prepare("UPDATE cloudflare_credentials SET api_key = ?, auth_type = 'token' WHERE id = ? AND user_id = ?")->execute([$newTok, (int)$oid, $userId]);
+                        $ids[(int)$oid] = true;
+                    }
+                }
+            });
+
+            $domCount = 0;
+            if ($ids) {
+                $in = implode(',', array_map('intval', array_keys($ids)));
+                $domCount = (int)$pdo->query("SELECT COUNT(*) FROM cloudflare_accounts WHERE user_id = $userId AND account_id IN ($in)")->fetchColumn();
+            }
+            logAction($pdo, $userId, 'Перевыпущен токен аккаунта', "{$cred['email']}: кредеталов " . count($ids) . ", доменов {$domCount}");
+            echo json_encode(['success' => true, 'email' => $cred['email'], 'creds' => count($ids), 'domains' => $domCount,
+                'masked' => mb_substr($newTok, 0, 10) . '…' . mb_substr($newTok, -4)]);
+            break;
+
         default:
             throw new Exception('Неизвестное действие');
     }
