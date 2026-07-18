@@ -855,10 +855,82 @@ try {
             break;
 
         case 'delete_master':
+            // Удаление мастер-токена «полностью отовсюду»: сама запись мастера (и её точные
+            // дубли по значению токена) + кредентал(ы) этого аккаунта + его scoped-токены и
+            // канонические записи (cf_account/cf_token). ДОМЕНЫ (сайты) НЕ удаляем — отвязываем
+            // (account_id=0), они переклеятся на другой токен кнопкой «Проверить и переклеить».
             $mid = trim($_POST['id'] ?? '');
             if ($mid === '' || !ctype_digit($mid)) throw new Exception('Не указан id');
-            $pdo->prepare("DELETE FROM master_tokens WHERE id = ?")->execute([$mid]);
-            echo json_encode(['success' => true]);
+            $uid = (int)$userId;
+
+            $mrow = $pdo->prepare("SELECT token, working_token FROM master_tokens WHERE id = ?");
+            $mrow->execute([$mid]);
+            $mst = $mrow->fetch();
+            if (!$mst) { echo json_encode(['success' => true, 'note' => 'уже удалён']); break; }
+            $mTok = (string)($mst['token'] ?? '');
+            $mWrk = (string)($mst['working_token'] ?? '');
+
+            // Резолвим аккаунт мастера (best-effort): по working_token, затем по самому мастеру.
+            $proxies = function_exists('getProxies') ? getProxies($pdo, $uid) : [];
+            $accUid = '';
+            foreach ([$mWrk, $mTok] as $t) {
+                if ($t === '') continue;
+                $acc = function_exists('cfResolveAccount') ? cfResolveAccount($pdo, '', $t, $proxies, $uid, 'token') : null;
+                if ($acc && !empty($acc['uid'])) { $accUid = (string)$acc['uid']; break; }
+            }
+
+            // Кредеталы к удалению: по uid аккаунта + по совпадению значения самого токена.
+            $credIds = [];
+            if ($accUid !== '') {
+                $q = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND cf_account_uid = ?");
+                $q->execute([$uid, $accUid]);
+                foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $cid) $credIds[(int)$cid] = true;
+            }
+            $tokVals = array_values(array_filter([$mTok, $mWrk], function ($x) { return $x !== ''; }));
+            if ($tokVals) {
+                $in = implode(',', array_fill(0, count($tokVals), '?'));
+                $q = $pdo->prepare("SELECT id FROM cloudflare_credentials WHERE user_id = ? AND api_key IN ($in)");
+                $q->execute(array_merge([$uid], $tokVals));
+                foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $cid) $credIds[(int)$cid] = true;
+            }
+            $credIds = array_keys($credIds);
+
+            $delCreds = 0; $delScoped = 0; $unlinked = 0; $delMasters = 0;
+            dbRetryOnLock(function () use ($pdo, $uid, $mid, $mTok, $credIds, &$delCreds, &$delScoped, &$unlinked, &$delMasters) {
+                $pdo->exec("BEGIN IMMEDIATE");
+                try {
+                    foreach ($credIds as $cid) {
+                        // Отвязать домены (оставить сайты), удалить scoped-токены, канонику, кредентал.
+                        $u = $pdo->prepare("UPDATE cloudflare_accounts SET account_id = 0 WHERE user_id = ? AND account_id = ?");
+                        $u->execute([$uid, $cid]); $unlinked += $u->rowCount();
+                        $s = $pdo->prepare("DELETE FROM cloudflare_api_tokens WHERE user_id = ? AND account_id = ?");
+                        $s->execute([$uid, $cid]); $delScoped += $s->rowCount();
+                        $accSel = $pdo->prepare("SELECT id FROM cf_account WHERE user_id = ? AND credential_id = ?");
+                        $accSel->execute([$uid, $cid]);
+                        $accIds = $accSel->fetchAll(PDO::FETCH_COLUMN);
+                        $accSel->closeCursor();
+                        foreach ($accIds as $aid) {
+                            $pdo->prepare("DELETE FROM cf_token WHERE user_id = ? AND cf_account_id = ?")->execute([$uid, (int)$aid]);
+                        }
+                        $pdo->prepare("DELETE FROM cf_account WHERE user_id = ? AND credential_id = ?")->execute([$uid, $cid]);
+                        $d = $pdo->prepare("DELETE FROM cloudflare_credentials WHERE user_id = ? AND id = ?");
+                        $d->execute([$uid, $cid]); $delCreds += $d->rowCount();
+                    }
+                    // Строка мастера + точные дубли по значению токена.
+                    $dm = $pdo->prepare("DELETE FROM master_tokens WHERE id = ?");
+                    $dm->execute([$mid]); $delMasters += $dm->rowCount();
+                    if ($mTok !== '') {
+                        $dm2 = $pdo->prepare("DELETE FROM master_tokens WHERE token = ?");
+                        $dm2->execute([$mTok]); $delMasters += $dm2->rowCount();
+                    }
+                    $pdo->exec("COMMIT");
+                } catch (Throwable $e) { $pdo->exec("ROLLBACK"); throw $e; }
+            });
+
+            logActionSafe($pdo, $uid, 'Master Token: удалён «отовсюду»',
+                "master id: {$mid}, кредеталов: {$delCreds}, scoped: {$delScoped}, доменов отвязано: {$unlinked}");
+            echo json_encode(['success' => true, 'deleted_creds' => $delCreds, 'deleted_scoped' => $delScoped,
+                'unlinked_domains' => $unlinked, 'deleted_masters' => $delMasters]);
             break;
 
         case 'create_zones':
@@ -981,78 +1053,61 @@ try {
 
         case 'relink_domains':
             // Массовая починка привязки доменов, ОБРАБОТКА БАТЧАМИ (как импорт) — обход таймаута
-            // CF/PHP при опросе многих аккаунтов. Фаза «scan»: батчами опрашиваем токены и
-            // копим карту владения зонами в mt_relink_scan. Фаза «done» (последний батч):
-            // переклеиваем домены по накопленной карте (только БД, без сети) + синхронизация.
+            // CF/PHP при опросе многих аккаунтов. Карту владения зонами копим В СЕССИИ, без
+            // записей в БД между батчами (раньше накопитель-таблица сама добавляла lock-контеншн
+            // → «database is locked»). Фаза «done» (последний батч): переклейка доменов по
+            // накопленной карте (единственные записи в БД — сама переклейка) + синхронизация.
             $proxies = function_exists('getProxies') ? getProxies($pdo, $userId) : [];
             $offset  = max(0, (int)($_POST['offset'] ?? 0));
             $batch   = (int)($_POST['batch'] ?? 3);
             if ($batch < 1) $batch = 1; if ($batch > 15) $batch = 15;
             $uid = (int)$userId;
 
-            // Временная таблица-накопитель (on-demand, без раздувания схемы config.php).
-            $pdo->exec("CREATE TABLE IF NOT EXISTS mt_relink_scan (user_id INTEGER, zone_name TEXT, cred_id INTEGER, zone_id TEXT)");
-
             $creds = $pdo->query("SELECT id, email, api_key, COALESCE(auth_type,'global') AS auth_type
                 FROM cloudflare_credentials WHERE user_id = $uid ORDER BY id")->fetchAll();
             $total = count($creds);
 
-            if ($offset === 0) {
-                dbRetryOnLock(function () use ($pdo, $uid) {
-                    $pdo->prepare("DELETE FROM mt_relink_scan WHERE user_id = ?")->execute([$uid]);
-                });
-            }
+            // Накопитель в сессии: zone_name => [cred_id => zone_id]. На offset 0 — сбрасываем.
+            if ($offset === 0 || !isset($_SESSION['mt_relink_scan'])) $_SESSION['mt_relink_scan'] = [];
 
-            // Скан среза кредеталов: сеть (fetch зон) вне транзакции, запись — одной транзакцией.
+            // Скан среза кредеталов — только сеть, БЕЗ записей в БД.
             $slice = array_slice($creds, $offset, $batch);
-            $dead = 0;
             foreach ($slice as $c) {
                 $cid = (int)$c['id'];
                 $zr = cfFetchAllZones($pdo, $c['email'], $c['api_key'], $proxies, null, $c['auth_type']);
-                if (empty($zr['success'])) { $dead++; continue; }
-                dbRetryOnLock(function () use ($pdo, $uid, $cid, $zr) {
-                    $pdo->exec("BEGIN IMMEDIATE");
-                    try {
-                        $ins = $pdo->prepare("INSERT INTO mt_relink_scan (user_id, zone_name, cred_id, zone_id) VALUES (?, ?, ?, ?)");
-                        foreach ($zr['zones'] as $zone) {
-                            $zn  = is_object($zone) ? ($zone->name ?? '') : ($zone['name'] ?? '');
-                            $zid = is_object($zone) ? ($zone->id ?? '')   : ($zone['id'] ?? '');
-                            if ($zn === '') continue;
-                            $ins->execute([$uid, mb_strtolower($zn), $cid, $zid]);
-                        }
-                        $ins->closeCursor();
-                        $pdo->exec("COMMIT");
-                    } catch (Throwable $e) { $pdo->exec("ROLLBACK"); throw $e; }
-                });
+                if (empty($zr['success'])) continue;
+                foreach ($zr['zones'] as $zone) {
+                    $zn  = is_object($zone) ? ($zone->name ?? '') : ($zone['name'] ?? '');
+                    $zid = is_object($zone) ? ($zone->id ?? '')   : ($zone['id'] ?? '');
+                    if ($zn === '') continue;
+                    $_SESSION['mt_relink_scan'][mb_strtolower($zn)][$cid] = (string)$zid;
+                }
             }
 
             $processed = min($offset + $batch, $total);
             $nextOffset = ($offset + $batch < $total) ? ($offset + $batch) : null;
 
             if ($nextOffset !== null) {
-                // Ещё есть кредеталы для опроса — вернём прогресс, клиент дозапросит.
+                // Освобождаем файл сессии, иначе следующий батч ждёт блокировку сессии.
+                session_write_close();
                 echo json_encode(['success' => true, 'phase' => 'scan', 'total' => $total,
-                    'offset' => $offset, 'processed' => $processed, 'next_offset' => $nextOffset,
-                    'dead_creds' => $dead]);
+                    'offset' => $offset, 'processed' => $processed, 'next_offset' => $nextOffset]);
                 break;
             }
 
             // Последний батч → финальный проход по накопленной карте владения.
-            $zoneOwners = []; $credPref = []; $emailById = [];
+            $zoneOwners = $_SESSION['mt_relink_scan'] ?? [];
+            unset($_SESSION['mt_relink_scan']);
+            $credPref = []; $emailById = []; $aliveCreds = [];
             foreach ($creds as $c) {
                 $cid = (int)$c['id'];
                 $credPref[$cid]  = (($c['auth_type'] === 'token') ? 1000000 : 0) - $cid;
                 $emailById[$cid] = $c['email'];
             }
-            $scan = $pdo->query("SELECT zone_name, cred_id, zone_id FROM mt_relink_scan WHERE user_id = $uid")->fetchAll();
-            $aliveCreds = [];
-            foreach ($scan as $z) { $zoneOwners[(string)$z['zone_name']][(int)$z['cred_id']] = (string)$z['zone_id']; $aliveCreds[(int)$z['cred_id']] = true; }
+            foreach ($zoneOwners as $owners) { foreach ($owners as $ownId => $z) $aliveCreds[(int)$ownId] = true; }
             $deadCreds = max(0, $total - count($aliveCreds));
 
             $res = mtRelinkApply($pdo, $uid, $zoneOwners, $credPref, $emailById);
-            dbRetryOnLock(function () use ($pdo, $uid) {
-                $pdo->prepare("DELETE FROM mt_relink_scan WHERE user_id = ?")->execute([$uid]);
-            });
 
             // Синхронизация нормализованной модели (шаг 8) — здесь, а не в авто-импорте.
             $sync = ['accounts' => 0, 'tokens' => 0];
