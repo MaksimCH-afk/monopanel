@@ -152,12 +152,18 @@ function loadMasters() {
         const cur = sel.val();
         let html = '';
         MASTERS.forEach(function(m){
-            const lbl = m.label + (m.email ? ' (' + m.email + ')' : '');
+            // В лейбле показываем АККАУНТ мастера: email/имя аккаунта, иначе — его домены
+            // (обе подсказки уже в БД; заполняются кнопкой «Проверить все» и после создания токена).
+            let acct = m.email || m.domains_hint || '';
+            if (acct.length > 48) acct = acct.slice(0, 48) + '…';
+            const lbl = m.label + (acct ? ' — ' + acct : '');
             html += `<option value="${m.id}">${$('<div>').text(lbl).html()}</option>`;
         });
         html += '<option value="__new__">➕ Добавить новый мастер-токен…</option>';
         sel.html(html);
-        if (MASTERS.length && (!cur || cur === '__new__')) sel.val(String(MASTERS[0].id));
+        // Сохраняем текущий выбор при перерисовке (напр. после «Проверить все»).
+        if (cur && cur !== '__new__' && MASTERS.some(m => String(m.id) === String(cur))) sel.val(cur);
+        else if (MASTERS.length && (!cur || cur === '__new__')) sel.val(String(MASTERS[0].id));
         onMasterChange();
     }, 'json');
 }
@@ -466,6 +472,8 @@ function checkMastersHealth() {
         });
         html += '</tbody></table></div>';
         $('#mastersHealth').html(html);
+        // «Проверить все» мог доопределить и сохранить аккаунт мастера — обновим лейблы выпадашки.
+        loadMasters();
     })
     .fail(function(x, st) { $('#mastersHealth').html('<div class="text-danger small">' + (st === 'timeout' ? 'Таймаут (много токенов — попробуйте ещё раз)' : 'Ошибка соединения') + '</div>'); });
 }
