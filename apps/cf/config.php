@@ -386,6 +386,26 @@ try {
         // Колонка уже существует
     }
 
+    // Пер-страничные SEO-переопределения (title/description/H1/canonical/robots),
+    // применяются при сборке сайта поверх исходника. path — относительный путь HTML
+    // в исходнике сайта (напр. 'index.html', 'about.html').
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS cf_deploy_page_meta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            title TEXT,
+            description TEXT,
+            h1 TEXT,
+            canonical TEXT,
+            robots TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(site_id, path),
+            FOREIGN KEY (site_id) REFERENCES cf_deploy_sites(id)
+        );
+    ");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_page_meta_site ON cf_deploy_page_meta(site_id)");
+
     try {
         $pdo->exec("ALTER TABLE cloudflare_accounts ADD COLUMN updated_at DATETIME");
     } catch (Exception $e) {

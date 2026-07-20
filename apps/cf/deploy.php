@@ -338,6 +338,60 @@ include 'sidebar.php';
     </div>
 </div>
 
+<!-- SEO/мета по страницам (FR-10.3) -->
+<div class="modal fade" id="pageMetaModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-tags me-2"></i>SEO-метатеги: <span id="pmDomain"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <div id="pmNoSource" class="alert alert-warning small d-none">
+                    <i class="fas fa-triangle-exclamation me-2"></i>Нет сохранённого исходника — загрузите ZIP для этого
+                    домена заново, тогда правки метатегов станут доступны.
+                </div>
+                <div id="pmBody" class="d-none">
+                    <div class="mb-3">
+                        <label class="form-label small mb-1">Страница</label>
+                        <select class="form-select form-select-sm" id="pmPage"></select>
+                        <div class="form-text">Пустое поле = не переопределять (останется как в исходнике). Placeholder показывает текущее значение.</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Title</label>
+                        <input type="text" class="form-control form-control-sm" id="pmTitle" maxlength="300">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Meta description</label>
+                        <textarea class="form-control form-control-sm" id="pmDesc" rows="2" maxlength="500"></textarea>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">H1 (первый на странице)</label>
+                        <input type="text" class="form-control form-control-sm" id="pmH1" maxlength="300">
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-sm-8 mb-2">
+                            <label class="form-label small mb-1">Canonical (URL)</label>
+                            <input type="text" class="form-control form-control-sm" id="pmCanonical" placeholder="https://…">
+                        </div>
+                        <div class="col-sm-4 mb-2">
+                            <label class="form-label small mb-1">Robots</label>
+                            <input type="text" class="form-control form-control-sm" id="pmRobots" placeholder="index,follow">
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <div class="form-text mb-0">Правки применяются точечно к тегам; остальной HTML не меняется. После сохранения сайт переиздаётся.</div>
+                        <button type="button" class="btn btn-success btn-sm" id="pmSave">
+                            <i class="fas fa-floppy-disk me-1"></i>Сохранить и переиздать
+                        </button>
+                    </div>
+                    <div id="pmStatus" class="small mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php
 $pageStyles = <<<CSS
 .deploy-dropzone {
@@ -847,6 +901,12 @@ $pageScripts = <<<'JS'
                     actions.innerHTML = '<button class="btn btn-sm btn-primary me-1" data-act="bind">Привязать + SSL</button>';
                     actions.querySelector('[data-act="bind"]').onclick = () => bindDomain(s.account_id, s.domain);
                 }
+                // SEO/мета по страницам (FR-10.3) — для всех сайтов.
+                const seoBtn = document.createElement('button');
+                seoBtn.className = 'btn btn-sm btn-outline-secondary me-1';
+                seoBtn.innerHTML = '<i class="fas fa-tags"></i> SEO';
+                seoBtn.onclick = () => openPageMeta(s.account_id, s.domain);
+                actions.appendChild(seoBtn);
                 // Версии/мета (FR-10) — для всех сайтов.
                 const verBtn = document.createElement('button');
                 verBtn.className = 'btn btn-sm btn-outline-dark';
@@ -1017,7 +1077,106 @@ $pageScripts = <<<'JS'
     document.getElementById('vmAdd').addEventListener('click', addSubfolder);
     document.getElementById('vmSaveMeta').addEventListener('click', saveMeta);
 
+    // ---- SEO/мета по страницам (FR-10.3) ----
+    const pmModalEl = document.getElementById('pageMetaModal');
+    const pmPage = document.getElementById('pmPage');
+    let pmCtx = null, pmPages = [], pmPrevIdx = '';
+
+    function pmStash(idx) {
+        if (idx === '' || idx == null || !pmPages[idx]) return;
+        const ov = pmPages[idx].override || (pmPages[idx].override = {});
+        ov.title = document.getElementById('pmTitle').value;
+        ov.description = document.getElementById('pmDesc').value;
+        ov.h1 = document.getElementById('pmH1').value;
+        ov.canonical = document.getElementById('pmCanonical').value;
+        ov.robots = document.getElementById('pmRobots').value;
+    }
+    function pmHasOverride(ov) {
+        return !!(ov && (ov.title || ov.description || ov.h1 || ov.canonical || ov.robots));
+    }
+    function pmFill(idx) {
+        const p = pmPages[idx]; if (!p) return;
+        const cur = p.current || {}, ov = p.override || {};
+        const set = (id, val, ph) => { const el = document.getElementById(id); el.value = val || ''; el.placeholder = ph ? ('текущее: ' + ph) : '—'; };
+        set('pmTitle', ov.title, cur.title);
+        set('pmDesc', ov.description, cur.description);
+        set('pmH1', ov.h1, cur.h1);
+        set('pmCanonical', ov.canonical, cur.canonical);
+        set('pmRobots', ov.robots, cur.robots || 'index,follow');
+        document.getElementById('pmStatus').textContent = '';
+    }
+    function pmOptLabel(p) { return (pmHasOverride(p.override) ? '✎ ' : '') + p.path; }
+
+    async function openPageMeta(accountId, domain) {
+        pmCtx = { accountId, domain };
+        document.getElementById('pmDomain').textContent = domain;
+        document.getElementById('pmStatus').textContent = '';
+        try {
+            const data = await apiPost({ action: 'list_pages', account_id: accountId, domain: domain });
+            if (!data.success) { showToast(data.error || 'Ошибка', 'error'); return; }
+            const noSrc = !data.has_source;
+            document.getElementById('pmNoSource').classList.toggle('d-none', !noSrc);
+            document.getElementById('pmBody').classList.toggle('d-none', noSrc);
+            pmPages = data.pages || [];
+            pmPage.innerHTML = '';
+            pmPages.forEach((p, i) => {
+                const o = document.createElement('option');
+                o.value = String(i); o.textContent = pmOptLabel(p);
+                pmPage.appendChild(o);
+            });
+            if (pmPages.length) { pmPage.value = '0'; pmPrevIdx = '0'; pmFill(0); }
+            new bootstrap.Modal(pmModalEl).show();
+        } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
+    }
+
+    pmPage.addEventListener('change', () => {
+        pmStash(pmPrevIdx);
+        const prevOpt = pmPage.querySelector('option[value="' + pmPrevIdx + '"]');
+        if (prevOpt && pmPages[pmPrevIdx]) prevOpt.textContent = pmOptLabel(pmPages[pmPrevIdx]);
+        pmPrevIdx = pmPage.value;
+        pmFill(pmPage.value);
+    });
+
+    async function savePageMeta() {
+        const idx = pmPage.value;
+        if (idx === '' || !pmPages[idx]) return;
+        pmStash(idx);
+        const p = pmPages[idx], ov = p.override || {};
+        document.getElementById('pmStatus').innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Сохраняю и переиздаю…</span>';
+        try {
+            const data = await apiPost({ action: 'save_page_meta', account_id: pmCtx.accountId, domain: pmCtx.domain,
+                path: p.path, title: ov.title || '', description: ov.description || '', h1: ov.h1 || '',
+                canonical: ov.canonical || '', robots: ov.robots || '' });
+            if (data.success) {
+                document.getElementById('pmStatus').innerHTML = '<span class="text-success">Сохранено и переиздано.</span>';
+                const opt = pmPage.querySelector('option[value="' + idx + '"]');
+                if (opt) opt.textContent = pmOptLabel(p);
+            } else {
+                document.getElementById('pmStatus').innerHTML = '<span class="text-danger">' + (data.error || 'Ошибка') + '</span>';
+            }
+        } catch (e) { document.getElementById('pmStatus').innerHTML = '<span class="text-danger">Ошибка сети: ' + e.message + '</span>'; }
+    }
+    document.getElementById('pmSave').addEventListener('click', savePageMeta);
+    window.openPageMeta = openPageMeta;
+
     document.getElementById('refreshSites').addEventListener('click', loadSites);
+
+    // Чистый старт: браузер восстанавливает значения полей при перезагрузке/возврате
+    // (bfcache), из-за чего аккаунт/домен «оставались выбраны» без действий пользователя.
+    // Явно сбрасываем ввод и производное состояние на инициализации и на pageshow.
+    function resetDeployForm() {
+        accountSearch.value = '';
+        accountSelect.value = '';
+        domainInput.value = '';
+        accountZones = [];
+        if (typeof loadedZonesAccountId !== 'undefined') loadedZonesAccountId = null;
+        if (accountDropdown) accountDropdown.style.display = 'none';
+        if (typeof updateDomainHint === 'function') updateDomainHint();
+        refreshButtons();
+    }
+    resetDeployForm();
+    window.addEventListener('pageshow', function (e) { if (e.persisted) resetDeployForm(); });
+
     loadSites();
 })();
 JS;

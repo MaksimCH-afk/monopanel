@@ -262,8 +262,12 @@ try {
                 break;
             }
 
-            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
-            $proxies = getProxies($pdo, $userId);
+            // Pre-flight чтения тоже под ретраем: под фоновой нагрузкой даже SELECT может
+            // ненадолго упереться в блокировку (чекпойнт WAL).
+            $credentials = dbRetryOnLock(function () use ($pdo, $userId, $accId) {
+                return cfDeployLoadCredentials($pdo, $userId, $accId);
+            });
+            $proxies = dbRetryOnLock(function () use ($pdo, $userId) { return getProxies($pdo, $userId); });
             $scriptName = cfWorkerScriptName($domain);
 
             $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
@@ -273,9 +277,10 @@ try {
             $accountCfId = $resolve['account_cf_id'];
 
             // Сайт заводим/находим ДО деплоя (нужен siteId для хранилища исходника).
-            // Всё одним ретрай-блоком: read→write под фоновой нагрузкой чувствителен к
-            // "database is locked" (BUSY_SNAPSHOT).
-            $siteId = dbRetryOnLock(function () use ($pdo, $userId, $accId, $domain, $scriptName, $resolve, $mode) {
+            // BEGIN IMMEDIATE: берём write-лок сразу, чтобы SELECT→INSERT не ловил
+            // SQLITE_BUSY_SNAPSHOT под непрерывными фоновыми записями (частая причина
+            // "database is locked" при публикации второго сайта).
+            $siteId = dbImmediateTxn($pdo, function () use ($pdo, $userId, $accId, $domain, $scriptName, $resolve, $mode) {
                 $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
                 $stmt->execute([$userId, $accId, $domain]);
                 $sid = $stmt->fetchColumn();
@@ -619,6 +624,65 @@ try {
             logAction($pdo, $userId, 'Deploy Meta Saved', "domain=$domain locales=" . count($clean));
             cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
                 'meta' => $meta, 'steps' => $deploy['steps'] ?? []]);
+            break;
+
+        case 'list_pages':
+            // FR-10.3: страницы сайта + текущие мета-значения + сохранённые переопределения.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+            if (!cfDeployHasSource($site['id'])) {
+                cfDeployRespond(['success' => true, 'has_source' => false, 'pages' => []]);
+                break;
+            }
+            $overrides = cfDeployLoadPageMeta($pdo, $site['id']);
+            $srcDir = cfDeploySiteSrcDir($site['id']);
+            $pages = [];
+            foreach (cfDeployListSitePages($site['id']) as $rel) {
+                $cur = cfDeployReadPageMetaFromHtml(@file_get_contents($srcDir . '/' . $rel));
+                $ov  = $overrides[$rel] ?? [];
+                $pages[] = [
+                    'path'     => $rel,
+                    'current'  => $cur,
+                    'override' => [
+                        'title'       => $ov['title'] ?? '',
+                        'description' => $ov['description'] ?? '',
+                        'h1'          => $ov['h1'] ?? '',
+                        'canonical'   => $ov['canonical'] ?? '',
+                        'robots'      => $ov['robots'] ?? '',
+                    ],
+                ];
+            }
+            cfDeployRespond(['success' => true, 'has_source' => true, 'pages' => $pages]);
+            break;
+
+        case 'save_page_meta':
+            // FR-10.3: сохранить переопределения одной страницы и переиздать сайт.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $path   = (string)($_POST['path'] ?? '');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+            if (!cfDeployHasSource($site['id'])) {
+                throw new Exception('Нет сохранённого исходника — загрузите ZIP заново, затем повторите правку меты.');
+            }
+            // Путь должен быть реальной страницей исходника (защита от произвольных путей).
+            if (!in_array($path, cfDeployListSitePages($site['id']), true)) {
+                throw new Exception('Неизвестная страница: ' . htmlspecialchars($path));
+            }
+            cfDeploySavePageMeta($pdo, $site['id'], $path, [
+                'title'       => $_POST['title'] ?? '',
+                'description' => $_POST['description'] ?? '',
+                'h1'          => $_POST['h1'] ?? '',
+                'canonical'   => $_POST['canonical'] ?? '',
+                'robots'      => $_POST['robots'] ?? '',
+            ]);
+
+            $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
+            logAction($pdo, $userId, 'Deploy Page Meta', "domain=$domain path=$path ok=" . ($deploy['success'] ? 1 : 0));
+            cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
+                'path' => $path, 'steps' => $deploy['steps'] ?? []]);
             break;
 
         default:
