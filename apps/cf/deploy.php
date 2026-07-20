@@ -864,7 +864,8 @@ $pageScripts = <<<'JS'
         if (!confirm('Привязать домен ' + domain + ' к этому сайту и включить SSL?\n\n'
             + 'Cloudflare создаст управляемую DNS-запись и выпустит сертификат. Если домен привязан к другому '
             + 'воркеру — он будет перепривязан на этот сайт. Если на апексе есть A/AAAA/CNAME-запись, '
-            + 'указывающая на прежний сервер, — она будет заменена (домен начнёт обслуживаться этим сайтом).')) return;
+            + 'указывающая на прежний сервер, — она будет заменена (домен начнёт обслуживаться этим сайтом). '
+            + 'Прежняя запись сохраняется и восстанавливается при «Отвязать». TXT/MX/CAA не трогаются.')) return;
         try {
             const data = await apiPost({ action: 'bind_domain', account_id: accountId, domain: domain, confirm: 1 });
             if (data.success) {
@@ -878,10 +879,16 @@ $pageScripts = <<<'JS'
     }
 
     async function unbindDomain(accountId, domain) {
-        if (!confirm('Отвязать домен ' + domain + '? Сайт останется доступен на *.workers.dev.')) return;
+        if (!confirm('Отвязать домен ' + domain + '? Сайт останется доступен на *.workers.dev.\n\n'
+            + 'Если при привязке заменялась DNS-запись апекса — она будет восстановлена '
+            + '(домен вернётся на прежний сервер).')) return;
         try {
             const data = await apiPost({ action: 'unbind_domain', account_id: accountId, domain: domain });
-            if (data.success) { showToast('Домен отвязан', 'success'); loadSites(); }
+            if (data.success) {
+                const r = Number(data.restored_dns || 0);
+                showToast('Домен отвязан' + (r > 0 ? ' (восстановлено DNS-записей: ' + r + ')' : ''), 'success');
+                loadSites();
+            }
             else showToast(data.error || 'Ошибка отвязки', 'error');
         } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
     }

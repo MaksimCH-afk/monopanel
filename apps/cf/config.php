@@ -378,6 +378,14 @@ try {
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_sites_user ON cf_deploy_sites(user_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_versions_site ON cf_deploy_versions(site_id)");
 
+    // Бэкап DNS-записей апекса, снятых при привязке Custom Domain (JSON) — для отката
+    // (вернуть домен на прежний сервер, если деплой пошёл не так). Аддитивно.
+    try {
+        $pdo->exec("ALTER TABLE cf_deploy_sites ADD COLUMN dns_backup TEXT");
+    } catch (Exception $e) {
+        // Колонка уже существует
+    }
+
     try {
         $pdo->exec("ALTER TABLE cloudflare_accounts ADD COLUMN updated_at DATETIME");
     } catch (Exception $e) {

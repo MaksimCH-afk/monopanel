@@ -401,9 +401,18 @@ try {
             $status = cfDeployBindingStatus($pdo, $credentials, $resolve['account_cf_id'],
                 $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
 
-            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
-                updated_at=datetime('now') WHERE id=?")
-                ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
+            // Сохраняем бэкап снятых DNS-записей (если были) — для отката при отвязке.
+            // Не затираем прежний бэкап, если в этот раз ничего не снимали.
+            $dnsBackup = $bind['dns_backup'] ?? [];
+            if (!empty($dnsBackup)) {
+                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                    dns_backup=?, updated_at=datetime('now') WHERE id=?")
+                    ->execute([$status['ssl_status'], $resolve['zone_id'], json_encode($dnsBackup), $siteId]);
+            } else {
+                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                    updated_at=datetime('now') WHERE id=?")
+                    ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
+            }
 
             $notes = $bind['notes'] ?? [];
             logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl="
@@ -426,12 +435,25 @@ try {
             $un = cfDeployUnbindDomain($pdo, $credentials, $resolve['account_cf_id'], $domain, $proxies, $userId);
             if (!$un['success']) throw new Exception($un['error']);
 
-            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL,
+            // Откат: если при привязке мы снимали DNS-записи апекса — восстанавливаем их,
+            // чтобы домен вернулся на прежний сервер, а не «завис» без записи.
+            $restored = 0;
+            $stmt = $pdo->prepare("SELECT dns_backup FROM cf_deploy_sites WHERE user_id=? AND account_id=? AND domain=?");
+            $stmt->execute([$userId, $accId, $domain]);
+            $backupJson = $stmt->fetchColumn();
+            if ($backupJson) {
+                $backup = json_decode($backupJson, true);
+                if (is_array($backup) && $backup && !empty($resolve['zone_id'])) {
+                    $restored = cfDeployRecreateDnsRecords($pdo, $credentials, $resolve['zone_id'], $backup, $proxies, $userId);
+                }
+            }
+
+            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL, dns_backup=NULL,
                 updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
                 ->execute([$userId, $accId, $domain]);
 
-            logAction($pdo, $userId, 'Deploy Unbind', "domain=$domain");
-            cfDeployRespond(['success' => true, 'domain' => $domain]);
+            logAction($pdo, $userId, 'Deploy Unbind', "domain=$domain restored_dns=$restored");
+            cfDeployRespond(['success' => true, 'domain' => $domain, 'restored_dns' => $restored]);
             break;
 
         case 'binding_status':
