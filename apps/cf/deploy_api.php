@@ -160,7 +160,8 @@ function cfDeployRebuildSite($pdo, $userId, $accId, $domain) {
         $scriptName, $site['id'], $domain, $mode, $proxies, $userId);
 
     if ($deploy['success']) {
-        dbRetryOnLock(function () use ($pdo, $deploy, $site) {
+        // BEGIN IMMEDIATE: после долгой пересборки/публикации обычный UPDATE ловит BUSY_SNAPSHOT.
+        dbImmediateTxn($pdo, function () use ($pdo, $deploy, $site) {
             $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, files_count=?,
                 last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
                 ->execute([$deploy['workers_dev_url'] ?? $site['workers_dev_url'], $deploy['files_count'] ?? 0, $site['id']]);
@@ -334,13 +335,25 @@ try {
             $deploy = cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptName,
                 $siteId, $domain, $mode, $proxies, $userId);
 
+            $statusWarning = null;
             if ($deploy['success']) {
                 cfDeployPhase('сохранение статуса сайта');
-                dbRetryOnLock(function () use ($pdo, $deploy, $siteId) {
-                    $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, status='deployed',
-                        files_count=?, last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
-                        ->execute([$deploy['workers_dev_url'] ?? null, $deploy['files_count'] ?? 0, $siteId]);
-                });
+                // BEGIN IMMEDIATE (как upsert): после долгой публикации обычный UPDATE ловил
+                // BUSY_SNAPSHOT (устаревший read-снапшот), который busy_timeout не ждёт.
+                // Файлы УЖЕ на Cloudflare — если запись метаданных всё же не удалась, НЕ рушим
+                // успешный деплой: помечаем предупреждением, строка добьётся при повторе/списке.
+                try {
+                    dbImmediateTxn($pdo, function () use ($pdo, $deploy, $siteId) {
+                        $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, status='deployed',
+                            files_count=?, last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+                            ->execute([$deploy['workers_dev_url'] ?? null, $deploy['files_count'] ?? 0, $siteId]);
+                    });
+                } catch (Throwable $e) {
+                    $statusWarning = 'Сайт опубликован на Cloudflare, но статус в панели не сохранился '
+                        . '(БД была занята). Он обновится при следующей публикации/обновлении списка.';
+                    logActionSafe($pdo, $userId, 'Deploy Status Save Failed',
+                        "domain=$domain err=" . substr($e->getMessage(), 0, 200));
+                }
                 logActionSafe($pdo, $userId, 'Deploy Success',
                     "domain=$domain worker=$scriptName mode=$mode url=" . ($deploy['workers_dev_url'] ?? '?'));
             } else {
@@ -350,6 +363,7 @@ try {
             cfDeployRespond([
                 'success'         => (bool)$deploy['success'],
                 'error'           => $deploy['error'] ?? null,
+                'warning'         => $statusWarning,
                 'worker_name'     => $scriptName,
                 'workers_dev_url' => $deploy['workers_dev_url'] ?? null,
                 'zone_in_account' => $resolve['zone_in_account'],
@@ -455,7 +469,7 @@ try {
             // Сохраняем бэкап снятых DNS-записей (если были) — для отката при отвязке.
             // Не затираем прежний бэкап, если в этот раз ничего не снимали.
             $dnsBackup = $bind['dns_backup'] ?? [];
-            dbRetryOnLock(function () use ($pdo, $status, $resolve, $dnsBackup, $siteId) {
+            dbImmediateTxn($pdo, function () use ($pdo, $status, $resolve, $dnsBackup, $siteId) {
                 if (!empty($dnsBackup)) {
                     $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
                         dns_backup=?, updated_at=datetime('now') WHERE id=?")
@@ -505,7 +519,7 @@ try {
                 }
             }
 
-            dbRetryOnLock(function () use ($pdo, $userId, $accId, $domain) {
+            dbImmediateTxn($pdo, function () use ($pdo, $userId, $accId, $domain) {
                 $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL, dns_backup=NULL,
                     updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
                     ->execute([$userId, $accId, $domain]);
@@ -534,7 +548,7 @@ try {
                 $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
 
             if ($status['bound']) {
-                dbRetryOnLock(function () use ($pdo, $status, $userId, $accId, $domain) {
+                dbImmediateTxn($pdo, function () use ($pdo, $status, $userId, $accId, $domain) {
                     $pdo->prepare("UPDATE cf_deploy_sites SET ssl_status=?, custom_domain_bound=1,
                         updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
                         ->execute([$status['ssl_status'], $userId, $accId, $domain]);
