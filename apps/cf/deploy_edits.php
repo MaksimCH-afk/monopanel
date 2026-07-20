@@ -144,100 +144,6 @@ function cfDeployBuildSubfolder($srcRoot, $assembleDir, $prefix, $share) {
 }
 
 /* =========================================================================
- *  FR-10.2. Мета-теги: canonical / hreflang / x-default
- * ========================================================================= */
-
-/** Конфиг меты сайта (дефолт — пустой). */
-function cfDeployLoadMeta($pdo, $siteId) {
-    $stmt = $pdo->prepare("SELECT config_json FROM cf_deploy_meta WHERE site_id = ?");
-    $stmt->execute([$siteId]);
-    $json = $stmt->fetchColumn();
-    $cfg = $json ? json_decode($json, true) : null;
-    if (!is_array($cfg)) $cfg = [];
-    $cfg += ['enabled' => false, 'x_default' => '', 'locales' => []];
-    if (!is_array($cfg['locales'])) $cfg['locales'] = [];
-    return $cfg;
-}
-
-function cfDeploySaveMeta($pdo, $siteId, $config) {
-    $json = json_encode($config, JSON_UNESCAPED_UNICODE);
-    dbRetryOnLock(function () use ($pdo, $siteId, $json) {
-        $pdo->prepare("INSERT INTO cf_deploy_meta (site_id, config_json, updated_at)
-            VALUES (?, ?, datetime('now'))
-            ON CONFLICT(site_id) DO UPDATE SET config_json = excluded.config_json, updated_at = datetime('now')")
-            ->execute([$siteId, $json]);
-    });
-}
-
-/** URL страницы с учётом чистых URL (index.html -> /, page.html -> /page). */
-function cfDeployPageUrl($domain, $prefix, $relPath) {
-    $clean = preg_replace('/(^|\/)index\.html?$/i', '$1', $relPath);
-    $clean = preg_replace('/\.html?$/i', '', $clean);
-    $base = 'https://' . $domain . '/';
-    if ($prefix !== '') $base .= trim($prefix, '/') . '/';
-    return $base . $clean;
-}
-
-/** Реципрокные hreflang-ссылки кластера (одинаковы для всех версий). */
-function cfDeployHreflangLinks($domain, $config) {
-    if (empty($config['locales'])) return '';
-    $links = '';
-    foreach ($config['locales'] as $pfx => $loc) {
-        if (!$loc) continue;
-        $u = 'https://' . $domain . '/' . ($pfx !== '' ? trim($pfx, '/') . '/' : '');
-        $links .= '<link rel="alternate" hreflang="' . htmlspecialchars($loc, ENT_QUOTES) . '" href="' . $u . '">' . "\n";
-    }
-    $xd = $config['x_default'] ?? '';
-    $xu = 'https://' . $domain . '/' . ($xd !== '' ? trim($xd, '/') . '/' : '');
-    $links .= '<link rel="alternate" hreflang="x-default" href="' . $xu . '">' . "\n";
-    return $links;
-}
-
-/** Удаляет ранее вставленный managed-блок и разрозненные canonical/hreflang. */
-function cfDeployStripManagedMeta($html) {
-    $html = preg_replace('/<!-- monopanel:meta start -->.*?<!-- monopanel:meta end -->\s*/si', '', $html);
-    $html = preg_replace('/<link[^>]+rel=["\']canonical["\'][^>]*>\s*/i', '', $html);
-    $html = preg_replace('/<link[^>]+hreflang=["\'][^"\']*["\'][^>]*>\s*/i', '', $html);
-    return $html;
-}
-
-/** Вставляет managed-блок меты перед </head>. */
-function cfDeployInjectMeta($html, $selfUrl, $hreflangLinks) {
-    $block = "<!-- monopanel:meta start -->\n";
-    if ($selfUrl) $block .= '<link rel="canonical" href="' . $selfUrl . '">' . "\n";
-    $block .= $hreflangLinks;
-    $block .= "<!-- monopanel:meta end -->\n";
-
-    $html = cfDeployStripManagedMeta($html);
-    if (stripos($html, '</head>') !== false) {
-        return preg_replace('/<\/head>/i', $block . '</head>', $html, 1);
-    }
-    return $block . $html;
-}
-
-/**
- * Применяет мету ко всем HTML одной версии.
- * @param array $skipTop верхние сегменты-подпапки, которые пропустить (для корня).
- */
-function cfDeployApplyMetaToVersion($assembleDir, $prefix, $domain, $hreflangLinks, $selfCanonical, $skipTop = []) {
-    $verDir = $prefix === '' ? $assembleDir : $assembleDir . '/' . trim($prefix, '/');
-    foreach (cfDeployListFiles($verDir) as $rel) {
-        $ext = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
-        if ($ext !== 'html' && $ext !== 'htm') continue;
-        // Для корня не заходим в директории других версий.
-        if ($prefix === '' && $skipTop) {
-            $top = explode('/', $rel)[0];
-            if (in_array($top, $skipTop, true)) continue;
-        }
-        if (!$selfCanonical && $hreflangLinks === '') continue;
-        $abs = $verDir . '/' . $rel;
-        $html = file_get_contents($abs);
-        $selfUrl = $selfCanonical ? cfDeployPageUrl($domain, $prefix, $rel) : null;
-        file_put_contents($abs, cfDeployInjectMeta($html, $selfUrl, $hreflangLinks));
-    }
-}
-
-/* =========================================================================
  *  FR-10.3. Пер-страничные SEO-переопределения (title/description/H1/canonical/robots)
  *
  *  Читаем текущие значения через DOMDocument (надёжно на разной вёрстке), а ПРИМЕНЯЕМ
@@ -433,20 +339,8 @@ function cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptNam
             cfDeployBuildSubfolder($srcRoot, $assemble, $pfx, (int)$v['share_root_assets'] === 1);
         }
 
-        // 3) Мета (canonical/hreflang/x-default), реципрокно по всем версиям.
-        $meta = cfDeployLoadMeta($pdo, $siteId);
-        $hreflang = cfDeployHreflangLinks($domain, $meta);
-        $multiVersion = count($subPrefixes) > 0;
-        $selfCanonical = $meta['enabled'] || $multiVersion; // при >1 версии — self-canonical против дублей
-        if ($selfCanonical || $hreflang !== '') {
-            cfDeployApplyMetaToVersion($assemble, '', $domain, $hreflang, $selfCanonical, $subPrefixes);
-            foreach ($subPrefixes as $pfx) {
-                cfDeployApplyMetaToVersion($assemble, $pfx, $domain, $hreflang, $selfCanonical);
-            }
-        }
-
-        // 3b) Пер-страничные SEO-переопределения (title/description/H1/canonical/robots).
-        //     После managed-меты — чтобы пер-страничный canonical перебивал self-canonical.
+        // 3) Пер-страничные SEO-переопределения (title/description/H1/canonical/robots/hreflang)
+        //    — единый механизм меты (старый формат «локали по подпапкам» удалён).
         $pageMeta = cfDeployLoadPageMeta($pdo, $siteId);
         if (!empty($pageMeta)) {
             cfDeployApplyPageMetaOverrides($assemble, $pageMeta);
