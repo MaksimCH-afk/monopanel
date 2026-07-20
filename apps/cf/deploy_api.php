@@ -149,9 +149,11 @@ function cfDeployRebuildSite($pdo, $userId, $accId, $domain) {
         $scriptName, $site['id'], $domain, $mode, $proxies, $userId);
 
     if ($deploy['success']) {
-        $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, files_count=?,
-            last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
-            ->execute([$deploy['workers_dev_url'] ?? $site['workers_dev_url'], $deploy['files_count'] ?? 0, $site['id']]);
+        dbRetryOnLock(function () use ($pdo, $deploy, $site) {
+            $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, files_count=?,
+                last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+                ->execute([$deploy['workers_dev_url'] ?? $site['workers_dev_url'], $deploy['files_count'] ?? 0, $site['id']]);
+        });
     }
     return $deploy;
 }
@@ -420,15 +422,17 @@ try {
             // Сохраняем бэкап снятых DNS-записей (если были) — для отката при отвязке.
             // Не затираем прежний бэкап, если в этот раз ничего не снимали.
             $dnsBackup = $bind['dns_backup'] ?? [];
-            if (!empty($dnsBackup)) {
-                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
-                    dns_backup=?, updated_at=datetime('now') WHERE id=?")
-                    ->execute([$status['ssl_status'], $resolve['zone_id'], json_encode($dnsBackup), $siteId]);
-            } else {
-                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
-                    updated_at=datetime('now') WHERE id=?")
-                    ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
-            }
+            dbRetryOnLock(function () use ($pdo, $status, $resolve, $dnsBackup, $siteId) {
+                if (!empty($dnsBackup)) {
+                    $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                        dns_backup=?, updated_at=datetime('now') WHERE id=?")
+                        ->execute([$status['ssl_status'], $resolve['zone_id'], json_encode($dnsBackup), $siteId]);
+                } else {
+                    $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                        updated_at=datetime('now') WHERE id=?")
+                        ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
+                }
+            });
 
             // Мост: домен ушёл на воркер CF — синхронизируем общее состояние (домены/дашборд),
             // чтобы они не показывали IP «прежнего сервера».
@@ -468,9 +472,11 @@ try {
                 }
             }
 
-            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL, dns_backup=NULL,
-                updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
-                ->execute([$userId, $accId, $domain]);
+            dbRetryOnLock(function () use ($pdo, $userId, $accId, $domain) {
+                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL, dns_backup=NULL,
+                    updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
+                    ->execute([$userId, $accId, $domain]);
+            });
 
             // Мост: домен вернулся с воркера — перечитываем апекс и синхронизируем общее
             // состояние (домены/дашборд), чтобы показать восстановленный IP, а не маркер.
@@ -495,9 +501,11 @@ try {
                 $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
 
             if ($status['bound']) {
-                $pdo->prepare("UPDATE cf_deploy_sites SET ssl_status=?, custom_domain_bound=1,
-                    updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
-                    ->execute([$status['ssl_status'], $userId, $accId, $domain]);
+                dbRetryOnLock(function () use ($pdo, $status, $userId, $accId, $domain) {
+                    $pdo->prepare("UPDATE cf_deploy_sites SET ssl_status=?, custom_domain_bound=1,
+                        updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
+                        ->execute([$status['ssl_status'], $userId, $accId, $domain]);
+                });
             }
             cfDeployRespond(['success' => true, 'domain' => $domain,
                 'bound' => $status['bound'], 'bound_to' => $status['bound_to'], 'ssl_status' => $status['ssl_status']]);
@@ -536,11 +544,13 @@ try {
             if (!$site) throw new Exception('Сайт не найден — сначала опубликуйте его.');
             if ($prefix === '') throw new Exception('Не указан префикс подпапки.');
 
-            $pdo->prepare("INSERT INTO cf_deploy_versions (site_id, prefix, source_prefix, share_root_assets)
-                VALUES (?, ?, '', ?)
-                ON CONFLICT(site_id, prefix) DO UPDATE SET share_root_assets = excluded.share_root_assets,
-                    updated_at = datetime('now')")
-                ->execute([$site['id'], $prefix, $share]);
+            dbRetryOnLock(function () use ($pdo, $site, $prefix, $share) {
+                $pdo->prepare("INSERT INTO cf_deploy_versions (site_id, prefix, source_prefix, share_root_assets)
+                    VALUES (?, ?, '', ?)
+                    ON CONFLICT(site_id, prefix) DO UPDATE SET share_root_assets = excluded.share_root_assets,
+                        updated_at = datetime('now')")
+                    ->execute([$site['id'], $prefix, $share]);
+            });
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
             logAction($pdo, $userId, 'Deploy Subfolder', "domain=$domain prefix=$prefix share=$share ok=" . ($deploy['success'] ? 1 : 0));
@@ -556,8 +566,10 @@ try {
             $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
             if (!$site) throw new Exception('Сайт не найден.');
 
-            $pdo->prepare("DELETE FROM cf_deploy_versions WHERE site_id = ? AND prefix = ?")
-                ->execute([$site['id'], $prefix]);
+            dbRetryOnLock(function () use ($pdo, $site, $prefix) {
+                $pdo->prepare("DELETE FROM cf_deploy_versions WHERE site_id = ? AND prefix = ?")
+                    ->execute([$site['id'], $prefix]);
+            });
             // Убираем удалённую версию из мета-локалей.
             $meta = cfDeployLoadMeta($pdo, $site['id']);
             if (isset($meta['locales'][$prefix])) { unset($meta['locales'][$prefix]); }
