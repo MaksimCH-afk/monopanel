@@ -127,7 +127,7 @@ function cfDeployLoadCredentials($pdo, $userId, $accountId) {
 
 /**
  * Пересобирает и переиздаёт сайт (корень + подпапки + мета) из постоянного исходника.
- * Общая точка для add_subfolder / remove_subfolder / save_meta.
+ * Общая точка для add_subfolder / remove_subfolder / save_page_meta.
  */
 function cfDeployRebuildSite($pdo, $userId, $accId, $domain) {
     $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
@@ -366,11 +366,17 @@ try {
             break;
 
         case 'list_sites':
-            // FR-9: список опубликованных сайтов для управления и обновления.
+            // FR-9: список ОПУБЛИКОВАННЫХ сайтов. Строка сайта создаётся ('draft') ДО
+            // фактической публикации (нужен siteId для хранилища исходника), поэтому при
+            // неудачном деплое остаётся «черновик». Показываем только реально задеплоенные
+            // (status='deployed' или уже есть workers_dev_url / привязка) — иначе в списке
+            // висит домен без воркера, и «Привязать» по нему падает.
             $stmt = $pdo->prepare("SELECT s.*, c.email AS account_email
                 FROM cf_deploy_sites s
                 JOIN cloudflare_credentials c ON c.id = s.account_id
-                WHERE s.user_id = ? ORDER BY s.updated_at DESC");
+                WHERE s.user_id = ?
+                  AND (s.status = 'deployed' OR s.workers_dev_url IS NOT NULL OR s.custom_domain_bound = 1)
+                ORDER BY s.updated_at DESC");
             $stmt->execute([$userId]);
             cfDeployRespond(['success' => true, 'sites' => $stmt->fetchAll()]);
             break;
@@ -517,7 +523,7 @@ try {
             break;
 
         case 'list_versions':
-            // FR-10: версии сайта (корень + подпапки) и текущий мета-конфиг.
+            // FR-10: версии сайта (корень + подпапки-копии).
             $accId  = (int)($_POST['account_id'] ?? 0);
             $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
             $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
@@ -527,14 +533,12 @@ try {
                 WHERE site_id = ? ORDER BY prefix");
             $stmt->execute([$site['id']]);
             $versions = $stmt->fetchAll();
-            $meta = cfDeployLoadMeta($pdo, $site['id']);
 
             cfDeployRespond([
                 'success'  => true,
                 'domain'   => $domain,
                 'has_source' => cfDeployHasSource($site['id']),
                 'versions' => $versions,
-                'meta'     => $meta,
             ]);
             break;
 
@@ -575,55 +579,10 @@ try {
                 $pdo->prepare("DELETE FROM cf_deploy_versions WHERE site_id = ? AND prefix = ?")
                     ->execute([$site['id'], $prefix]);
             });
-            // Убираем удалённую версию из мета-локалей.
-            $meta = cfDeployLoadMeta($pdo, $site['id']);
-            if (isset($meta['locales'][$prefix])) { unset($meta['locales'][$prefix]); }
-            if (($meta['x_default'] ?? '') === $prefix) { $meta['x_default'] = ''; }
-            cfDeploySaveMeta($pdo, $site['id'], $meta);
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
             logAction($pdo, $userId, 'Deploy Subfolder Removed', "domain=$domain prefix=$prefix");
             cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null, 'steps' => $deploy['steps'] ?? []]);
-            break;
-
-        case 'save_meta':
-            // FR-10.2: canonical/hreflang/x-default. Конфиг хранится в модуле и переприменяется.
-            $accId  = (int)($_POST['account_id'] ?? 0);
-            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
-            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
-            if (!$site) throw new Exception('Сайт не найден.');
-
-            $localesIn = $_POST['locales'] ?? '{}';
-            $locales = is_array($localesIn) ? $localesIn : json_decode($localesIn, true);
-            if (!is_array($locales)) $locales = [];
-            // Санитизация: ключ — известный префикс версии, значение — код локали.
-            $stmt = $pdo->prepare("SELECT prefix FROM cf_deploy_versions WHERE site_id = ?");
-            $stmt->execute([$site['id']]);
-            $known = array_column($stmt->fetchAll(), 'prefix');
-            $clean = [];
-            foreach ($locales as $pfx => $loc) {
-                $pfx = trim((string)$pfx, '/');
-                if (!in_array($pfx, $known, true)) continue;
-                $loc = trim((string)$loc);
-                if ($loc !== '' && !preg_match('/^[a-zA-Z]{2}(-[a-zA-Z0-9]{2,8})?$/', $loc)) {
-                    throw new Exception('Некорректный код локали: ' . htmlspecialchars($loc));
-                }
-                if ($loc !== '') $clean[$pfx] = $loc;
-            }
-            $xDefault = trim((string)($_POST['x_default'] ?? ''), '/');
-            if ($xDefault !== '' && !in_array($xDefault, $known, true)) $xDefault = '';
-
-            $meta = [
-                'enabled'   => !empty($_POST['enabled']) || !empty($clean),
-                'x_default' => $xDefault,
-                'locales'   => $clean,
-            ];
-            cfDeploySaveMeta($pdo, $site['id'], $meta);
-
-            $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
-            logAction($pdo, $userId, 'Deploy Meta Saved', "domain=$domain locales=" . count($clean));
-            cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
-                'meta' => $meta, 'steps' => $deploy['steps'] ?? []]);
             break;
 
         case 'list_pages':
@@ -651,6 +610,7 @@ try {
                         'h1'          => $ov['h1'] ?? '',
                         'canonical'   => $ov['canonical'] ?? '',
                         'robots'      => $ov['robots'] ?? '',
+                        'hreflang'    => $ov['hreflang'] ?? '',
                     ],
                 ];
             }
@@ -677,6 +637,7 @@ try {
                 'h1'          => $_POST['h1'] ?? '',
                 'canonical'   => $_POST['canonical'] ?? '',
                 'robots'      => $_POST['robots'] ?? '',
+                'hreflang'    => $_POST['hreflang'] ?? '',
             ]);
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);

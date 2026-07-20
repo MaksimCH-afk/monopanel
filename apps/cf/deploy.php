@@ -286,7 +286,7 @@ include 'sidebar.php';
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="fas fa-sitemap me-2"></i>Версии и мета: <span id="vmDomain"></span></h5>
+                <h5 class="modal-title"><i class="fas fa-sitemap me-2"></i>Версии: <span id="vmDomain"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>
             <div class="modal-body">
@@ -295,17 +295,17 @@ include 'sidebar.php';
                     домена заново, тогда правки версий/меты станут доступны.
                 </div>
 
-                <h6 class="mb-2">Версии сайта</h6>
+                <h6 class="mb-2">Версии сайта (копии в подпапках)</h6>
                 <div class="table-responsive mb-2">
                     <table class="table table-sm align-middle mb-0">
                         <thead><tr>
-                            <th>Версия</th><th>hreflang-локаль</th><th class="text-center">x-default</th><th></th>
+                            <th>Версия</th><th></th>
                         </tr></thead>
                         <tbody id="vmVersions"></tbody>
                     </table>
                 </div>
 
-                <div class="row g-2 align-items-end mb-3">
+                <div class="row g-2 align-items-end mb-2">
                     <div class="col-sm-4">
                         <label class="form-label small mb-1">Новая подпапка</label>
                         <input type="text" class="form-control form-control-sm" id="vmNewPrefix" placeholder="en, es-cl">
@@ -323,14 +323,9 @@ include 'sidebar.php';
                     </div>
                 </div>
 
-                <div class="d-flex justify-content-between align-items-center">
-                    <div class="form-text mb-0">
-                        canonical проставляется автоматически (каждая версия — на себя). Локаль пуста → версия не входит
-                        в hreflang-кластер.
-                    </div>
-                    <button type="button" class="btn btn-success btn-sm" id="vmSaveMeta">
-                        <i class="fas fa-floppy-disk me-1"></i>Сохранить мету и переиздать
-                    </button>
+                <div class="form-text mb-0">
+                    Метатеги (title / description / H1 / canonical / hreflang) настраиваются по каждой странице
+                    в разделе «SEO».
                 </div>
                 <div id="vmStatus" class="small mt-2"></div>
             </div>
@@ -378,6 +373,13 @@ include 'sidebar.php';
                             <label class="form-label small mb-1">Robots</label>
                             <input type="text" class="form-control form-control-sm" id="pmRobots" placeholder="index,follow">
                         </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">hreflang (свой код в &lt;head&gt;)</label>
+                        <textarea class="form-control form-control-sm font-monospace" id="pmHreflang" rows="4" spellcheck="false"
+                            placeholder='&lt;link rel="alternate" hreflang="en" href="https://example.com/"&gt;
+&lt;link rel="alternate" hreflang="x-default" href="https://example.com/"&gt;'></textarea>
+                        <div class="form-text">Вставляется как есть в &lt;head&gt; (настройка hreflang вариативна — задаёте своим кодом). Можно любой head-HTML. Пусто = не добавлять.</div>
                     </div>
                     <div class="d-flex justify-content-between align-items-center mt-2">
                         <div class="form-text mb-0">Правки применяются точечно к тегам; остальной HTML не меняется. После сохранения сайт переиздаётся.</div>
@@ -988,20 +990,13 @@ $pageScripts = <<<'JS'
     function renderVersions(data) {
         document.getElementById('vmDomain').textContent = data.domain;
         document.getElementById('vmNoSource').classList.toggle('d-none', !!data.has_source);
-        const meta = data.meta || { locales: {}, x_default: '' };
-        const locales = meta.locales || {};
         vmVersions.innerHTML = '';
         (data.versions || []).forEach(v => {
             const prefix = (v.prefix || '').replace(/\/+$/,'');
             const tr = document.createElement('tr');
-            const loc = locales[prefix] || '';
-            const isXd = (meta.x_default || '') === prefix;
             tr.innerHTML =
                 '<td class="fw-semibold">' + vmLabel(prefix)
                     + (Number(v.share_root_assets) === 1 ? ' <span class="badge bg-light text-dark">общие ассеты</span>' : '') + '</td>'
-                + '<td><input type="text" class="form-control form-control-sm vm-loc" data-prefix="' + prefix
-                    + '" value="' + loc + '" placeholder="ru, en, es-CL" style="max-width:120px"></td>'
-                + '<td class="text-center"><input type="radio" name="vmxd" class="vm-xd" data-prefix="' + prefix + '"' + (isXd ? ' checked' : '') + '></td>'
                 + '<td class="text-end"></td>';
             if (prefix !== '') {
                 const rm = document.createElement('button');
@@ -1057,25 +1052,7 @@ $pageScripts = <<<'JS'
         } catch (e) { vmSetStatus('<span class="text-danger">Ошибка сети: ' + e.message + '</span>'); }
     }
 
-    async function saveMeta() {
-        const locales = {};
-        document.querySelectorAll('.vm-loc').forEach(i => {
-            const v = i.value.trim();
-            if (v) locales[i.dataset.prefix] = v;
-        });
-        const xd = document.querySelector('.vm-xd:checked');
-        const xDefault = xd ? xd.dataset.prefix : '';
-        vmSetStatus('<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Сохраняю и переиздаю…</span>');
-        try {
-            const data = await apiPost({ action: 'save_meta', account_id: vmCtx.accountId, domain: vmCtx.domain,
-                locales: JSON.stringify(locales), x_default: xDefault, enabled: 1 });
-            if (data.success) { vmSetStatus('<span class="text-success">Мета сохранена и переиздана.</span>'); loadSites(); }
-            else vmSetStatus('<span class="text-danger">' + (data.error || 'Ошибка') + '</span>');
-        } catch (e) { vmSetStatus('<span class="text-danger">Ошибка сети: ' + e.message + '</span>'); }
-    }
-
     document.getElementById('vmAdd').addEventListener('click', addSubfolder);
-    document.getElementById('vmSaveMeta').addEventListener('click', saveMeta);
 
     // ---- SEO/мета по страницам (FR-10.3) ----
     const pmModalEl = document.getElementById('pageMetaModal');
@@ -1090,9 +1067,10 @@ $pageScripts = <<<'JS'
         ov.h1 = document.getElementById('pmH1').value;
         ov.canonical = document.getElementById('pmCanonical').value;
         ov.robots = document.getElementById('pmRobots').value;
+        ov.hreflang = document.getElementById('pmHreflang').value;
     }
     function pmHasOverride(ov) {
-        return !!(ov && (ov.title || ov.description || ov.h1 || ov.canonical || ov.robots));
+        return !!(ov && (ov.title || ov.description || ov.h1 || ov.canonical || ov.robots || ov.hreflang));
     }
     function pmFill(idx) {
         const p = pmPages[idx]; if (!p) return;
@@ -1103,6 +1081,7 @@ $pageScripts = <<<'JS'
         set('pmH1', ov.h1, cur.h1);
         set('pmCanonical', ov.canonical, cur.canonical);
         set('pmRobots', ov.robots, cur.robots || 'index,follow');
+        document.getElementById('pmHreflang').value = ov.hreflang || '';
         document.getElementById('pmStatus').textContent = '';
     }
     function pmOptLabel(p) { return (pmHasOverride(p.override) ? '✎ ' : '') + p.path; }
@@ -1146,7 +1125,7 @@ $pageScripts = <<<'JS'
         try {
             const data = await apiPost({ action: 'save_page_meta', account_id: pmCtx.accountId, domain: pmCtx.domain,
                 path: p.path, title: ov.title || '', description: ov.description || '', h1: ov.h1 || '',
-                canonical: ov.canonical || '', robots: ov.robots || '' });
+                canonical: ov.canonical || '', robots: ov.robots || '', hreflang: ov.hreflang || '' });
             if (data.success) {
                 document.getElementById('pmStatus').innerHTML = '<span class="text-success">Сохранено и переиздано.</span>';
                 const opt = pmPage.querySelector('option[value="' + idx + '"]');
