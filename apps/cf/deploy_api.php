@@ -391,8 +391,24 @@ try {
                     . 'Перенесите зону в аккаунт или деплойте в аккаунт-владелец зоны.');
             }
 
+            // Второе явное подтверждение на замену DNS-записей апекса (confirm_dns_replace=1).
+            $allowDnsReplace = !empty($_POST['confirm_dns_replace']);
             $bind = cfDeployBindDomain($pdo, $credentials, $resolve['account_cf_id'],
-                $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
+                $resolve['zone_id'], $scriptName, $domain, $proxies, $userId, $allowDnsReplace);
+
+            // Нужно второе подтверждение: на апексе есть A/AAAA/CNAME «прежнего сервера».
+            // Ничего не меняли — возвращаем список записей, фронт спросит и повторит запрос.
+            if (!empty($bind['needs_dns_confirm'])) {
+                cfDeployRespond([
+                    'success'           => false,
+                    'needs_dns_confirm' => true,
+                    'domain'            => $domain,
+                    'other_worker'      => $bind['other_worker'] ?? null,
+                    'conflict_records'  => $bind['conflict_records'] ?? [],
+                ]);
+                break;
+            }
+
             if (!$bind['success']) {
                 logAction($pdo, $userId, 'Deploy Bind Failed', "domain=$domain err=" . $bind['error']);
                 throw new Exception($bind['error']);
@@ -401,13 +417,29 @@ try {
             $status = cfDeployBindingStatus($pdo, $credentials, $resolve['account_cf_id'],
                 $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
 
-            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
-                updated_at=datetime('now') WHERE id=?")
-                ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
+            // Сохраняем бэкап снятых DNS-записей (если были) — для отката при отвязке.
+            // Не затираем прежний бэкап, если в этот раз ничего не снимали.
+            $dnsBackup = $bind['dns_backup'] ?? [];
+            if (!empty($dnsBackup)) {
+                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                    dns_backup=?, updated_at=datetime('now') WHERE id=?")
+                    ->execute([$status['ssl_status'], $resolve['zone_id'], json_encode($dnsBackup), $siteId]);
+            } else {
+                $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                    updated_at=datetime('now') WHERE id=?")
+                    ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
+            }
 
-            logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl=" . $status['ssl_status']);
+            // Мост: домен ушёл на воркер CF — синхронизируем общее состояние (домены/дашборд),
+            // чтобы они не показывали IP «прежнего сервера».
+            cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $resolve['zone_id'], $proxies, true);
+
+            $notes = $bind['notes'] ?? [];
+            logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl="
+                . $status['ssl_status'] . ($notes ? ' notes=' . implode('; ', $notes) : ''));
             cfDeployRespond(['success' => true, 'domain' => $domain,
-                'site_url' => 'https://' . $domain, 'ssl_status' => $status['ssl_status']]);
+                'site_url' => 'https://' . $domain, 'ssl_status' => $status['ssl_status'],
+                'notes' => $notes]);
             break;
 
         case 'unbind_domain':
@@ -423,12 +455,29 @@ try {
             $un = cfDeployUnbindDomain($pdo, $credentials, $resolve['account_cf_id'], $domain, $proxies, $userId);
             if (!$un['success']) throw new Exception($un['error']);
 
-            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL,
+            // Откат: если при привязке мы снимали DNS-записи апекса — восстанавливаем их,
+            // чтобы домен вернулся на прежний сервер, а не «завис» без записи.
+            $restored = 0;
+            $stmt = $pdo->prepare("SELECT dns_backup FROM cf_deploy_sites WHERE user_id=? AND account_id=? AND domain=?");
+            $stmt->execute([$userId, $accId, $domain]);
+            $backupJson = $stmt->fetchColumn();
+            if ($backupJson) {
+                $backup = json_decode($backupJson, true);
+                if (is_array($backup) && $backup && !empty($resolve['zone_id'])) {
+                    $restored = cfDeployRecreateDnsRecords($pdo, $credentials, $resolve['zone_id'], $backup, $proxies, $userId);
+                }
+            }
+
+            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=0, ssl_status=NULL, dns_backup=NULL,
                 updated_at=datetime('now') WHERE user_id=? AND account_id=? AND domain=?")
                 ->execute([$userId, $accId, $domain]);
 
-            logAction($pdo, $userId, 'Deploy Unbind', "domain=$domain");
-            cfDeployRespond(['success' => true, 'domain' => $domain]);
+            // Мост: домен вернулся с воркера — перечитываем апекс и синхронизируем общее
+            // состояние (домены/дашборд), чтобы показать восстановленный IP, а не маркер.
+            cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $resolve['zone_id'], $proxies, false);
+
+            logAction($pdo, $userId, 'Deploy Unbind', "domain=$domain restored_dns=$restored");
+            cfDeployRespond(['success' => true, 'domain' => $domain, 'restored_dns' => $restored]);
             break;
 
         case 'binding_status':
