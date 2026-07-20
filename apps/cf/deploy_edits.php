@@ -161,10 +161,12 @@ function cfDeployLoadMeta($pdo, $siteId) {
 
 function cfDeploySaveMeta($pdo, $siteId, $config) {
     $json = json_encode($config, JSON_UNESCAPED_UNICODE);
-    $stmt = $pdo->prepare("INSERT INTO cf_deploy_meta (site_id, config_json, updated_at)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(site_id) DO UPDATE SET config_json = excluded.config_json, updated_at = datetime('now')");
-    $stmt->execute([$siteId, $json]);
+    dbRetryOnLock(function () use ($pdo, $siteId, $json) {
+        $pdo->prepare("INSERT INTO cf_deploy_meta (site_id, config_json, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(site_id) DO UPDATE SET config_json = excluded.config_json, updated_at = datetime('now')")
+            ->execute([$siteId, $json]);
+    });
 }
 
 /** URL страницы с учётом чистых URL (index.html -> /, page.html -> /page). */
