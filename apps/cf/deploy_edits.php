@@ -287,7 +287,7 @@ function cfDeployReadPageMetaFromHtml($html) {
 
 /** Сохранённые переопределения сайта: [path => ['title'=>..,'description'=>..,...]]. */
 function cfDeployLoadPageMeta($pdo, $siteId) {
-    $stmt = $pdo->prepare("SELECT path, title, description, h1, canonical, robots
+    $stmt = $pdo->prepare("SELECT path, title, description, h1, canonical, robots, hreflang
         FROM cf_deploy_page_meta WHERE site_id = ?");
     $stmt->execute([$siteId]);
     $out = [];
@@ -300,7 +300,7 @@ function cfDeploySavePageMeta($pdo, $siteId, $path, $fields) {
     $norm = function ($v) { $v = trim((string)$v); return $v === '' ? null : $v; };
     $vals = [];
     $has = false;
-    foreach (['title', 'description', 'h1', 'canonical', 'robots'] as $k) {
+    foreach (['title', 'description', 'h1', 'canonical', 'robots', 'hreflang'] as $k) {
         $vals[$k] = $norm($fields[$k] ?? '');
         if ($vals[$k] !== null) $has = true;
     }
@@ -309,11 +309,13 @@ function cfDeploySavePageMeta($pdo, $siteId, $path, $fields) {
             $pdo->prepare("DELETE FROM cf_deploy_page_meta WHERE site_id=? AND path=?")->execute([$siteId, $path]);
             return;
         }
-        $pdo->prepare("INSERT INTO cf_deploy_page_meta (site_id, path, title, description, h1, canonical, robots, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        $pdo->prepare("INSERT INTO cf_deploy_page_meta (site_id, path, title, description, h1, canonical, robots, hreflang, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(site_id, path) DO UPDATE SET title=excluded.title, description=excluded.description,
-                h1=excluded.h1, canonical=excluded.canonical, robots=excluded.robots, updated_at=datetime('now')")
-            ->execute([$siteId, $path, $vals['title'], $vals['description'], $vals['h1'], $vals['canonical'], $vals['robots']]);
+                h1=excluded.h1, canonical=excluded.canonical, robots=excluded.robots, hreflang=excluded.hreflang,
+                updated_at=datetime('now')")
+            ->execute([$siteId, $path, $vals['title'], $vals['description'], $vals['h1'], $vals['canonical'],
+                $vals['robots'], $vals['hreflang']]);
     });
 }
 
@@ -359,6 +361,15 @@ function cfDeployApplyMetaToHtml($html, $ov) {
         $h1 = htmlspecialchars($ov['h1'], ENT_QUOTES);
         $html = preg_replace_callback('/(<h1\b[^>]*>)(.*?)(<\/h1>)/is',
             function ($m) use ($h1) { return $m[1] . $h1 . $m[3]; }, $html, 1);
+    }
+
+    // hreflang: пользователь вставляет ГОТОВЫЙ код (настройка hreflang слишком вариативна,
+    // чтобы генерировать её из шаблона). Вставляем как есть в управляемый блок перед </head>,
+    // предыдущий такой блок убираем — переприменение идемпотентно.
+    $html = preg_replace('/<!-- monopanel:hreflang start -->.*?<!-- monopanel:hreflang end -->\s*/si', '', $html);
+    if (!empty($ov['hreflang'])) {
+        $block = "<!-- monopanel:hreflang start -->\n" . trim($ov['hreflang']) . "\n<!-- monopanel:hreflang end -->\n";
+        $html = cfDeployInsertIntoHead($html, $block);
     }
     return $html;
 }

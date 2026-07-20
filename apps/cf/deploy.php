@@ -379,6 +379,13 @@ include 'sidebar.php';
                             <input type="text" class="form-control form-control-sm" id="pmRobots" placeholder="index,follow">
                         </div>
                     </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">hreflang (свой код в &lt;head&gt;)</label>
+                        <textarea class="form-control form-control-sm font-monospace" id="pmHreflang" rows="4" spellcheck="false"
+                            placeholder='&lt;link rel="alternate" hreflang="en" href="https://example.com/"&gt;
+&lt;link rel="alternate" hreflang="x-default" href="https://example.com/"&gt;'></textarea>
+                        <div class="form-text">Вставляется как есть в &lt;head&gt; (настройка hreflang вариативна — задаёте своим кодом). Можно любой head-HTML. Пусто = не добавлять.</div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center mt-2">
                         <div class="form-text mb-0">Правки применяются точечно к тегам; остальной HTML не меняется. После сохранения сайт переиздаётся.</div>
                         <button type="button" class="btn btn-success btn-sm" id="pmSave">
@@ -1090,9 +1097,10 @@ $pageScripts = <<<'JS'
         ov.h1 = document.getElementById('pmH1').value;
         ov.canonical = document.getElementById('pmCanonical').value;
         ov.robots = document.getElementById('pmRobots').value;
+        ov.hreflang = document.getElementById('pmHreflang').value;
     }
     function pmHasOverride(ov) {
-        return !!(ov && (ov.title || ov.description || ov.h1 || ov.canonical || ov.robots));
+        return !!(ov && (ov.title || ov.description || ov.h1 || ov.canonical || ov.robots || ov.hreflang));
     }
     function pmFill(idx) {
         const p = pmPages[idx]; if (!p) return;
@@ -1103,6 +1111,7 @@ $pageScripts = <<<'JS'
         set('pmH1', ov.h1, cur.h1);
         set('pmCanonical', ov.canonical, cur.canonical);
         set('pmRobots', ov.robots, cur.robots || 'index,follow');
+        document.getElementById('pmHreflang').value = ov.hreflang || '';
         document.getElementById('pmStatus').textContent = '';
     }
     function pmOptLabel(p) { return (pmHasOverride(p.override) ? '✎ ' : '') + p.path; }
@@ -1146,7 +1155,7 @@ $pageScripts = <<<'JS'
         try {
             const data = await apiPost({ action: 'save_page_meta', account_id: pmCtx.accountId, domain: pmCtx.domain,
                 path: p.path, title: ov.title || '', description: ov.description || '', h1: ov.h1 || '',
-                canonical: ov.canonical || '', robots: ov.robots || '' });
+                canonical: ov.canonical || '', robots: ov.robots || '', hreflang: ov.hreflang || '' });
             if (data.success) {
                 document.getElementById('pmStatus').innerHTML = '<span class="text-success">Сохранено и переиздано.</span>';
                 const opt = pmPage.querySelector('option[value="' + idx + '"]');

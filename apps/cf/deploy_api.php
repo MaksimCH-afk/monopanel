@@ -366,11 +366,17 @@ try {
             break;
 
         case 'list_sites':
-            // FR-9: список опубликованных сайтов для управления и обновления.
+            // FR-9: список ОПУБЛИКОВАННЫХ сайтов. Строка сайта создаётся ('draft') ДО
+            // фактической публикации (нужен siteId для хранилища исходника), поэтому при
+            // неудачном деплое остаётся «черновик». Показываем только реально задеплоенные
+            // (status='deployed' или уже есть workers_dev_url / привязка) — иначе в списке
+            // висит домен без воркера, и «Привязать» по нему падает.
             $stmt = $pdo->prepare("SELECT s.*, c.email AS account_email
                 FROM cf_deploy_sites s
                 JOIN cloudflare_credentials c ON c.id = s.account_id
-                WHERE s.user_id = ? ORDER BY s.updated_at DESC");
+                WHERE s.user_id = ?
+                  AND (s.status = 'deployed' OR s.workers_dev_url IS NOT NULL OR s.custom_domain_bound = 1)
+                ORDER BY s.updated_at DESC");
             $stmt->execute([$userId]);
             cfDeployRespond(['success' => true, 'sites' => $stmt->fetchAll()]);
             break;
@@ -651,6 +657,7 @@ try {
                         'h1'          => $ov['h1'] ?? '',
                         'canonical'   => $ov['canonical'] ?? '',
                         'robots'      => $ov['robots'] ?? '',
+                        'hreflang'    => $ov['hreflang'] ?? '',
                     ],
                 ];
             }
@@ -677,6 +684,7 @@ try {
                 'h1'          => $_POST['h1'] ?? '',
                 'canonical'   => $_POST['canonical'] ?? '',
                 'robots'      => $_POST['robots'] ?? '',
+                'hreflang'    => $_POST['hreflang'] ?? '',
             ]);
 
             $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);

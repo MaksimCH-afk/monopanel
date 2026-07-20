@@ -405,6 +405,13 @@ try {
         );
     ");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_deploy_page_meta_site ON cf_deploy_page_meta(site_id)");
+    // Кастомный hreflang-блок (произвольный HTML в <head>): настройка hreflang вариативна,
+    // поэтому даём вставлять готовый код. Аддитивно (для уже созданной таблицы).
+    try {
+        $pdo->exec("ALTER TABLE cf_deploy_page_meta ADD COLUMN hreflang TEXT");
+    } catch (Exception $e) {
+        // Колонка уже существует
+    }
 
     try {
         $pdo->exec("ALTER TABLE cloudflare_accounts ADD COLUMN updated_at DATETIME");
