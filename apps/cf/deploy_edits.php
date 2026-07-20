@@ -326,11 +326,14 @@ function cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptNam
             copy($srcRoot . '/' . $rel, $to);
         }
 
-        // 2) Подпапки-версии (источник — корень).
-        $stmt = $pdo->prepare("SELECT prefix, source_prefix, share_root_assets FROM cf_deploy_versions
-            WHERE site_id = ? AND prefix != '' ORDER BY prefix");
-        $stmt->execute([$siteId]);
-        $versions = $stmt->fetchAll();
+        // 2) Подпапки-версии (источник — корень). Чтение под ретраем — публикация долгая,
+        //    фоновая запись может ненадолго заблокировать БД.
+        $versions = dbRetryOnLock(function () use ($pdo, $siteId) {
+            $stmt = $pdo->prepare("SELECT prefix, source_prefix, share_root_assets FROM cf_deploy_versions
+                WHERE site_id = ? AND prefix != '' ORDER BY prefix");
+            $stmt->execute([$siteId]);
+            return $stmt->fetchAll();
+        });
         $subPrefixes = [];
         foreach ($versions as $v) {
             $pfx = trim($v['prefix'], '/');
@@ -341,7 +344,7 @@ function cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptNam
 
         // 3) Пер-страничные SEO-переопределения (title/description/H1/canonical/robots/hreflang)
         //    — единый механизм меты (старый формат «локали по подпапкам» удалён).
-        $pageMeta = cfDeployLoadPageMeta($pdo, $siteId);
+        $pageMeta = dbRetryOnLock(function () use ($pdo, $siteId) { return cfDeployLoadPageMeta($pdo, $siteId); });
         if (!empty($pageMeta)) {
             cfDeployApplyPageMetaOverrides($assemble, $pageMeta);
         }
