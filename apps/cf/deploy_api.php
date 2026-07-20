@@ -621,6 +621,65 @@ try {
                 'meta' => $meta, 'steps' => $deploy['steps'] ?? []]);
             break;
 
+        case 'list_pages':
+            // FR-10.3: страницы сайта + текущие мета-значения + сохранённые переопределения.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+            if (!cfDeployHasSource($site['id'])) {
+                cfDeployRespond(['success' => true, 'has_source' => false, 'pages' => []]);
+                break;
+            }
+            $overrides = cfDeployLoadPageMeta($pdo, $site['id']);
+            $srcDir = cfDeploySiteSrcDir($site['id']);
+            $pages = [];
+            foreach (cfDeployListSitePages($site['id']) as $rel) {
+                $cur = cfDeployReadPageMetaFromHtml(@file_get_contents($srcDir . '/' . $rel));
+                $ov  = $overrides[$rel] ?? [];
+                $pages[] = [
+                    'path'     => $rel,
+                    'current'  => $cur,
+                    'override' => [
+                        'title'       => $ov['title'] ?? '',
+                        'description' => $ov['description'] ?? '',
+                        'h1'          => $ov['h1'] ?? '',
+                        'canonical'   => $ov['canonical'] ?? '',
+                        'robots'      => $ov['robots'] ?? '',
+                    ],
+                ];
+            }
+            cfDeployRespond(['success' => true, 'has_source' => true, 'pages' => $pages]);
+            break;
+
+        case 'save_page_meta':
+            // FR-10.3: сохранить переопределения одной страницы и переиздать сайт.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            $path   = (string)($_POST['path'] ?? '');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+            if (!cfDeployHasSource($site['id'])) {
+                throw new Exception('Нет сохранённого исходника — загрузите ZIP заново, затем повторите правку меты.');
+            }
+            // Путь должен быть реальной страницей исходника (защита от произвольных путей).
+            if (!in_array($path, cfDeployListSitePages($site['id']), true)) {
+                throw new Exception('Неизвестная страница: ' . htmlspecialchars($path));
+            }
+            cfDeploySavePageMeta($pdo, $site['id'], $path, [
+                'title'       => $_POST['title'] ?? '',
+                'description' => $_POST['description'] ?? '',
+                'h1'          => $_POST['h1'] ?? '',
+                'canonical'   => $_POST['canonical'] ?? '',
+                'robots'      => $_POST['robots'] ?? '',
+            ]);
+
+            $deploy = cfDeployRebuildSite($pdo, $userId, $accId, $domain);
+            logAction($pdo, $userId, 'Deploy Page Meta', "domain=$domain path=$path ok=" . ($deploy['success'] ? 1 : 0));
+            cfDeployRespond(['success' => (bool)$deploy['success'], 'error' => $deploy['error'] ?? null,
+                'path' => $path, 'steps' => $deploy['steps'] ?? []]);
+            break;
+
         default:
             throw new Exception('Неизвестное действие');
     }

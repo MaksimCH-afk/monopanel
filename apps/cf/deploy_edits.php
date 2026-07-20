@@ -238,6 +238,146 @@ function cfDeployApplyMetaToVersion($assembleDir, $prefix, $domain, $hreflangLin
 }
 
 /* =========================================================================
+ *  FR-10.3. Пер-страничные SEO-переопределения (title/description/H1/canonical/robots)
+ *
+ *  Читаем текущие значения через DOMDocument (надёжно на разной вёрстке), а ПРИМЕНЯЕМ
+ *  точечной заменой конкретных тегов — остальной HTML остаётся байт-в-байт (чтобы не
+ *  «перекроить» тяжёлые лендинги с инлайновым JS). Применяется при сборке из исходника.
+ * ========================================================================= */
+
+/** Список HTML-страниц исходника сайта (относительные пути). */
+function cfDeployListSitePages($siteId) {
+    $srcDir = cfDeploySiteSrcDir($siteId);
+    $pages = [];
+    foreach (cfDeployListFiles($srcDir) as $rel) {
+        $ext = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
+        if ($ext === 'html' || $ext === 'htm') $pages[] = $rel;
+    }
+    sort($pages);
+    return $pages;
+}
+
+/** Читает текущие title/description/H1/canonical/robots из HTML (только чтение). */
+function cfDeployReadPageMetaFromHtml($html) {
+    $out = ['title' => '', 'description' => '', 'h1' => '', 'canonical' => '', 'robots' => ''];
+    if (trim((string)$html) === '') return $out;
+
+    $prev = libxml_use_internal_errors(true);
+    $doc = new DOMDocument();
+    // Подсказка кодировки — иначе кириллица в title/H1 «поедет».
+    $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
+    libxml_clear_errors();
+    libxml_use_internal_errors($prev);
+
+    $titles = $doc->getElementsByTagName('title');
+    if ($titles->length) $out['title'] = trim($titles->item(0)->textContent);
+    $h1s = $doc->getElementsByTagName('h1');
+    if ($h1s->length) $out['h1'] = trim($h1s->item(0)->textContent);
+
+    foreach ($doc->getElementsByTagName('meta') as $m) {
+        $name = strtolower($m->getAttribute('name'));
+        if ($name === 'description' && $out['description'] === '') $out['description'] = trim($m->getAttribute('content'));
+        if ($name === 'robots' && $out['robots'] === '') $out['robots'] = trim($m->getAttribute('content'));
+    }
+    foreach ($doc->getElementsByTagName('link') as $l) {
+        if (strtolower($l->getAttribute('rel')) === 'canonical') { $out['canonical'] = trim($l->getAttribute('href')); break; }
+    }
+    return $out;
+}
+
+/** Сохранённые переопределения сайта: [path => ['title'=>..,'description'=>..,...]]. */
+function cfDeployLoadPageMeta($pdo, $siteId) {
+    $stmt = $pdo->prepare("SELECT path, title, description, h1, canonical, robots
+        FROM cf_deploy_page_meta WHERE site_id = ?");
+    $stmt->execute([$siteId]);
+    $out = [];
+    foreach ($stmt->fetchAll() as $r) { $out[$r['path']] = $r; }
+    return $out;
+}
+
+/** Сохраняет/удаляет переопределения одной страницы (пустые поля не переопределяют). */
+function cfDeploySavePageMeta($pdo, $siteId, $path, $fields) {
+    $norm = function ($v) { $v = trim((string)$v); return $v === '' ? null : $v; };
+    $vals = [];
+    $has = false;
+    foreach (['title', 'description', 'h1', 'canonical', 'robots'] as $k) {
+        $vals[$k] = $norm($fields[$k] ?? '');
+        if ($vals[$k] !== null) $has = true;
+    }
+    dbRetryOnLock(function () use ($pdo, $siteId, $path, $vals, $has) {
+        if (!$has) {
+            $pdo->prepare("DELETE FROM cf_deploy_page_meta WHERE site_id=? AND path=?")->execute([$siteId, $path]);
+            return;
+        }
+        $pdo->prepare("INSERT INTO cf_deploy_page_meta (site_id, path, title, description, h1, canonical, robots, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(site_id, path) DO UPDATE SET title=excluded.title, description=excluded.description,
+                h1=excluded.h1, canonical=excluded.canonical, robots=excluded.robots, updated_at=datetime('now')")
+            ->execute([$siteId, $path, $vals['title'], $vals['description'], $vals['h1'], $vals['canonical'], $vals['robots']]);
+    });
+}
+
+/** Вставляет тег перед </head> (или в начало, если head нет). */
+function cfDeployInsertIntoHead($html, $tag) {
+    if (stripos($html, '</head>') !== false) {
+        return preg_replace('/<\/head>/i', $tag . "\n</head>", $html, 1);
+    }
+    return $tag . "\n" . $html;
+}
+
+/** Заменяет/вставляет <meta name="X" content="…">. */
+function cfDeployUpsertMetaByName($html, $name, $content) {
+    $tag = '<meta name="' . $name . '" content="' . htmlspecialchars($content, ENT_QUOTES) . '">';
+    $re  = '/<meta\b[^>]*\bname=["\']' . preg_quote($name, '/') . '["\'][^>]*>/i';
+    if (preg_match($re, $html)) return preg_replace($re, $tag, $html, 1);
+    return cfDeployInsertIntoHead($html, $tag);
+}
+
+/** Применяет переопределения к одному HTML (точечная замена тегов). */
+function cfDeployApplyMetaToHtml($html, $ov) {
+    if (!empty($ov['title'])) {
+        $t = '<title>' . htmlspecialchars($ov['title'], ENT_QUOTES) . '</title>';
+        if (preg_match('/<title\b[^>]*>.*?<\/title>/is', $html)) {
+            $html = preg_replace('/<title\b[^>]*>.*?<\/title>/is', $t, $html, 1);
+        } else {
+            $html = cfDeployInsertIntoHead($html, $t);
+        }
+    }
+    if (!empty($ov['description'])) $html = cfDeployUpsertMetaByName($html, 'description', $ov['description']);
+    if (!empty($ov['robots']))      $html = cfDeployUpsertMetaByName($html, 'robots', $ov['robots']);
+
+    if (!empty($ov['canonical'])) {
+        $link = '<link rel="canonical" href="' . htmlspecialchars($ov['canonical'], ENT_QUOTES) . '">';
+        if (preg_match('/<link\b[^>]*rel=["\']canonical["\'][^>]*>/i', $html)) {
+            $html = preg_replace('/<link\b[^>]*rel=["\']canonical["\'][^>]*>/i', $link, $html, 1);
+        } else {
+            $html = cfDeployInsertIntoHead($html, $link);
+        }
+    }
+    // H1: заменяем внутреннее содержимое первого <h1>, атрибуты тега сохраняем.
+    if (!empty($ov['h1'])) {
+        $h1 = htmlspecialchars($ov['h1'], ENT_QUOTES);
+        $html = preg_replace_callback('/(<h1\b[^>]*>)(.*?)(<\/h1>)/is',
+            function ($m) use ($h1) { return $m[1] . $h1 . $m[3]; }, $html, 1);
+    }
+    return $html;
+}
+
+/** Применяет пер-страничные переопределения к собранному набору. Возвращает число правок. */
+function cfDeployApplyPageMetaOverrides($assembleDir, $overridesByPath) {
+    if (empty($overridesByPath)) return 0;
+    $applied = 0;
+    foreach ($overridesByPath as $path => $ov) {
+        $file = $assembleDir . '/' . ltrim(str_replace('\\', '/', $path), '/');
+        if (strpos($path, '..') !== false || !is_file($file)) continue;
+        $html = file_get_contents($file);
+        $new = cfDeployApplyMetaToHtml($html, $ov);
+        if ($new !== $html) { file_put_contents($file, $new); $applied++; }
+    }
+    return $applied;
+}
+
+/* =========================================================================
  *  Сборка финального набора и публикация (используется деплоем и правками)
  * ========================================================================= */
 
@@ -292,6 +432,13 @@ function cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptNam
             foreach ($subPrefixes as $pfx) {
                 cfDeployApplyMetaToVersion($assemble, $pfx, $domain, $hreflang, $selfCanonical);
             }
+        }
+
+        // 3b) Пер-страничные SEO-переопределения (title/description/H1/canonical/robots).
+        //     После managed-меты — чтобы пер-страничный canonical перебивал self-canonical.
+        $pageMeta = cfDeployLoadPageMeta($pdo, $siteId);
+        if (!empty($pageMeta)) {
+            cfDeployApplyPageMetaOverrides($assemble, $pageMeta);
         }
 
         // 4) Чистые URL/кэш (FR-3) на собранном наборе + публикация.
