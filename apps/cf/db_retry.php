@@ -34,6 +34,35 @@ if (!function_exists('dbRetryOnLock')) {
     }
 }
 
+if (!function_exists('dbImmediateTxn')) {
+    /**
+     * Короткая транзакция с write-локом сразу (BEGIN IMMEDIATE), в ретрае на блокировку.
+     *
+     * Зачем: паттерн «SELECT → потом INSERT/UPDATE» в одном соединении под непрерывными
+     * фоновыми записями даёт SQLITE_BUSY_SNAPSHOT (read-снапшот устарел к моменту записи),
+     * который busy_timeout НЕ ждёт — падает сразу. BEGIN IMMEDIATE берёт write-лок в начале
+     * (ждёт его до busy_timeout), поэтому окна устаревания снапшота нет. Для upsert’ов на
+     * горячих путях (деплой/привязка). $fn выполняет запись; commit/rollback — здесь.
+     */
+    function dbImmediateTxn($pdo, callable $fn) {
+        return dbRetryOnLock(function () use ($pdo, $fn) {
+            $started = false;
+            try {
+                $pdo->exec('BEGIN IMMEDIATE');
+                $started = true;
+                $result = $fn();
+                $pdo->exec('COMMIT');
+                $started = false;
+                return $result;
+            } catch (Throwable $e) {
+                // BEGIN мог не стартовать (лок) — тогда транзакции нет, ROLLBACK не нужен.
+                if ($started) { try { $pdo->exec('ROLLBACK'); } catch (Throwable $e2) {} }
+                throw $e;
+            }
+        });
+    }
+}
+
 if (!function_exists('logActionSafe')) {
     /**
      * Запись в журнал панели с повтором при блокировке БД — иначе сбой

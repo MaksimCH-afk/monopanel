@@ -262,8 +262,12 @@ try {
                 break;
             }
 
-            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
-            $proxies = getProxies($pdo, $userId);
+            // Pre-flight чтения тоже под ретраем: под фоновой нагрузкой даже SELECT может
+            // ненадолго упереться в блокировку (чекпойнт WAL).
+            $credentials = dbRetryOnLock(function () use ($pdo, $userId, $accId) {
+                return cfDeployLoadCredentials($pdo, $userId, $accId);
+            });
+            $proxies = dbRetryOnLock(function () use ($pdo, $userId) { return getProxies($pdo, $userId); });
             $scriptName = cfWorkerScriptName($domain);
 
             $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
@@ -273,9 +277,10 @@ try {
             $accountCfId = $resolve['account_cf_id'];
 
             // Сайт заводим/находим ДО деплоя (нужен siteId для хранилища исходника).
-            // Всё одним ретрай-блоком: read→write под фоновой нагрузкой чувствителен к
-            // "database is locked" (BUSY_SNAPSHOT).
-            $siteId = dbRetryOnLock(function () use ($pdo, $userId, $accId, $domain, $scriptName, $resolve, $mode) {
+            // BEGIN IMMEDIATE: берём write-лок сразу, чтобы SELECT→INSERT не ловил
+            // SQLITE_BUSY_SNAPSHOT под непрерывными фоновыми записями (частая причина
+            // "database is locked" при публикации второго сайта).
+            $siteId = dbImmediateTxn($pdo, function () use ($pdo, $userId, $accId, $domain, $scriptName, $resolve, $mode) {
                 $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
                 $stmt->execute([$userId, $accId, $domain]);
                 $sid = $stmt->fetchColumn();
