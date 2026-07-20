@@ -847,8 +847,15 @@ $pageScripts = <<<'JS'
                 if (data.report && data.report.oversized && data.report.oversized.length) {
                     showOversized(data.report.oversized);
                 }
+                const phase = data.phase
+                    ? '<div class="small mt-2"><i class="fas fa-diagram-project me-1"></i>Шаг: <span class="fw-semibold">' + esc(data.phase) + '</span></div>' : '';
+                const kind = data.error_kind === 'db_locked'
+                    ? '<div class="small mt-1"><i class="fas fa-database me-1"></i>Причина: конкурентная блокировка SQLite (одновременная фоновая запись). Публикация файлов могла пройти — повторите через несколько секунд.</div>' : '';
+                const detail = (data.detail && data.detail !== data.error)
+                    ? '<div class="small text-muted mt-1 font-monospace" style="word-break:break-word">' + esc(data.detail) + '</div>' : '';
                 finalEl.innerHTML = '<div class="alert alert-danger mb-0">'
-                    + '<i class="fas fa-circle-xmark me-2"></i>' + (data.error || 'Ошибка публикации') + '</div>';
+                    + '<i class="fas fa-circle-xmark me-2"></i>' + esc(data.error || 'Ошибка публикации')
+                    + phase + kind + detail + '</div>';
                 showToast(data.error || 'Ошибка публикации', 'error');
             }
         } catch (e) {

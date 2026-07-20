@@ -46,6 +46,17 @@ function cfDeployRespond($data) {
     exit;
 }
 
+/**
+ * Трекер текущего шага операции — для детального сообщения об ошибке. Вызов с аргументом
+ * ставит метку, без аргумента — читает. Так в catch мы знаем, ЧТО именно упало
+ * (напр. «database is locked» на шаге «создание записи сайта»).
+ */
+function cfDeployPhase($label = null) {
+    static $current = '';
+    if ($label !== null) $current = (string)$label;
+    return $current;
+}
+
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
     cfDeployRespond(['success' => false, 'error' => 'Не авторизован']);
@@ -244,6 +255,9 @@ try {
 
         case 'deploy':
             // FR-6: публикация сайта на Workers Static Assets (workers.dev). Домен/SSL — фаза 3.
+            // Публикация долгая (много сетевых вызовов CF) и конкурирует за запись с фоновыми
+            // процессами — даём БД-записям ждать дольше (как в тяжёлых операциях мастер-токена).
+            try { $pdo->exec('PRAGMA busy_timeout = 120000'); } catch (Throwable $e) { /* не критично */ }
             $accId  = (int)($_POST['account_id'] ?? 0);
             $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
             $mode   = ($_POST['mode'] ?? 'static-only') === 'worker-first' ? 'worker-first' : 'static-only';
@@ -255,6 +269,7 @@ try {
             }
 
             // Не доверяем клиенту — валидируем архив заново перед деплоем.
+            cfDeployPhase('проверка архива');
             $report = cfDeployValidateArchive($file['tmp_name']);
             if (!$report['valid']) {
                 cfDeployRespond(['success' => false, 'error' => $report['error'],
@@ -264,12 +279,15 @@ try {
 
             // Pre-flight чтения тоже под ретраем: под фоновой нагрузкой даже SELECT может
             // ненадолго упереться в блокировку (чекпойнт WAL).
+            cfDeployPhase('загрузка учётных данных аккаунта');
             $credentials = dbRetryOnLock(function () use ($pdo, $userId, $accId) {
                 return cfDeployLoadCredentials($pdo, $userId, $accId);
             });
+            cfDeployPhase('загрузка списка прокси');
             $proxies = dbRetryOnLock(function () use ($pdo, $userId) { return getProxies($pdo, $userId); });
             $scriptName = cfWorkerScriptName($domain);
 
+            cfDeployPhase('определение аккаунта и зоны Cloudflare');
             $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
             if (!$resolve['account_cf_id']) {
                 throw new Exception($resolve['error'] ?? 'Не удалось определить аккаунт Cloudflare.');
@@ -280,6 +298,7 @@ try {
             // BEGIN IMMEDIATE: берём write-лок сразу, чтобы SELECT→INSERT не ловил
             // SQLITE_BUSY_SNAPSHOT под непрерывными фоновыми записями (частая причина
             // "database is locked" при публикации второго сайта).
+            cfDeployPhase('создание записи сайта в БД');
             $siteId = dbImmediateTxn($pdo, function () use ($pdo, $userId, $accId, $domain, $scriptName, $resolve, $mode) {
                 $stmt = $pdo->prepare("SELECT id FROM cf_deploy_sites WHERE user_id = ? AND account_id = ? AND domain = ?");
                 $stmt->execute([$userId, $accId, $domain]);
@@ -301,6 +320,7 @@ try {
             });
 
             // Распаковка исходника в постоянное хранилище (для правок без re-upload — FR-10).
+            cfDeployPhase('сохранение исходника сайта');
             $extract = cfDeployExtractZip($file['tmp_name'], $report['root_prefix']);
             if (isset($extract['error'])) throw new Exception($extract['error']);
             try {
@@ -310,10 +330,12 @@ try {
             }
 
             // Сборка (корень + подпапки + мета) и публикация.
+            cfDeployPhase('сборка и публикация на Cloudflare');
             $deploy = cfDeployAssembleAndPublish($pdo, $credentials, $accountCfId, $scriptName,
                 $siteId, $domain, $mode, $proxies, $userId);
 
             if ($deploy['success']) {
+                cfDeployPhase('сохранение статуса сайта');
                 dbRetryOnLock(function () use ($pdo, $deploy, $siteId) {
                     $pdo->prepare("UPDATE cf_deploy_sites SET workers_dev_url=?, status='deployed',
                         files_count=?, last_deploy_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
@@ -652,5 +674,29 @@ try {
 } catch (Throwable $e) {
     // Throwable, а не Exception: ловим и Error/TypeError (иначе PHP отдаёт HTML).
     http_response_code(400);
-    cfDeployRespond(['success' => false, 'error' => $e->getMessage()]);
+    $raw   = $e->getMessage();
+    $phase = cfDeployPhase();
+    $isLock = (stripos($raw, 'database is locked') !== false
+            || stripos($raw, 'database is busy') !== false
+            || stripos($raw, 'database table is locked') !== false);
+
+    if ($isLock) {
+        // Детально: какой шаг + человекочитаемая причина + что делать.
+        $error = 'База данных заблокирована конкурентной записью'
+               . ($phase ? ' на шаге «' . $phase . '»' : '')
+               . ' — одновременно писали фоновые процессы (мониторинг/очередь/синхронизация). '
+               . 'Публикация файлов на Cloudflare могла пройти; повторите через несколько секунд.';
+        $payload = ['success' => false, 'error' => $error, 'error_kind' => 'db_locked',
+                    'phase' => $phase, 'detail' => $raw];
+    } else {
+        $error = ($phase ? 'Шаг «' . $phase . '»: ' : '') . $raw;
+        $payload = ['success' => false, 'error' => $error, 'phase' => $phase, 'detail' => $raw];
+    }
+
+    // Пишем в журнал панели (в ретрае — чтобы сам лок не помешал записи лога).
+    if (function_exists('logActionSafe')) {
+        logActionSafe($pdo ?? null, $userId ?? null, 'Deploy API Error',
+            'action=' . ($action ?? '?') . ' phase=' . $phase . ' err=' . substr($raw, 0, 300));
+    }
+    cfDeployRespond($payload);
 }
