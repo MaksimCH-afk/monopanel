@@ -862,12 +862,14 @@ $pageScripts = <<<'JS'
 
     async function bindDomain(accountId, domain) {
         if (!confirm('Привязать домен ' + domain + ' к этому сайту и включить SSL?\n\n'
-            + 'Cloudflare создаст DNS-запись и выпустит сертификат. Если домен привязан к другому '
-            + 'воркеру — он будет перепривязан на этот сайт.')) return;
+            + 'Cloudflare создаст управляемую DNS-запись и выпустит сертификат. Если домен привязан к другому '
+            + 'воркеру — он будет перепривязан на этот сайт. Если на апексе есть A/AAAA/CNAME-запись, '
+            + 'указывающая на прежний сервер, — она будет заменена (домен начнёт обслуживаться этим сайтом).')) return;
         try {
             const data = await apiPost({ action: 'bind_domain', account_id: accountId, domain: domain, confirm: 1 });
             if (data.success) {
-                showToast('Домен привязан. SSL: ' + (data.ssl_status || '—'), 'success');
+                const notes = (data.notes && data.notes.length) ? ' (' + data.notes.join('; ') + ')' : '';
+                showToast('Домен привязан. SSL: ' + (data.ssl_status || '—') + notes, 'success');
                 loadSites();
             } else {
                 showToast(data.error || 'Ошибка привязки', 'error');

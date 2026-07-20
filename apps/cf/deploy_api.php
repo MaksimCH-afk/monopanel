@@ -405,9 +405,12 @@ try {
                 updated_at=datetime('now') WHERE id=?")
                 ->execute([$status['ssl_status'], $resolve['zone_id'], $siteId]);
 
-            logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl=" . $status['ssl_status']);
+            $notes = $bind['notes'] ?? [];
+            logAction($pdo, $userId, 'Deploy Bind Success', "domain=$domain worker=$scriptName ssl="
+                . $status['ssl_status'] . ($notes ? ' notes=' . implode('; ', $notes) : ''));
             cfDeployRespond(['success' => true, 'domain' => $domain,
-                'site_url' => 'https://' . $domain, 'ssl_status' => $status['ssl_status']]);
+                'site_url' => 'https://' . $domain, 'ssl_status' => $status['ssl_status'],
+                'notes' => $notes]);
             break;
 
         case 'unbind_domain':
