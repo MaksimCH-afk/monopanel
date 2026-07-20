@@ -17,6 +17,11 @@ if (!defined('CF_DEPLOY_COMPAT_DATE')) {
     // compatibility_date воркера. Стабильная прошлая дата (CF принимает <= последней поддерживаемой).
     define('CF_DEPLOY_COMPAT_DATE', '2024-11-01');
 }
+if (!defined('CF_DEPLOY_WORKER_DNS_MARKER')) {
+    // Маркер в cloudflare_accounts.dns_ip, когда домен обслуживается воркером на edge CF
+    // (апексной A-записи origin больше нет). Чтобы дашборд/домены не показывали старый IP.
+    define('CF_DEPLOY_WORKER_DNS_MARKER', 'CF Worker (edge)');
+}
 
 /**
  * Человекочитаемое сообщение об ошибке из ответа cloudflareApiRequestDetailed.
@@ -173,7 +178,7 @@ function cfDeployCheckDomain($pdo, $credentials, $accountCfId, $domain, $scriptN
  *
  * @return array ['success'=>bool,'domain_id'=>?,'error'=>?]
  */
-function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptName, $domain, $proxies, $userId) {
+function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptName, $domain, $proxies, $userId, $allowDnsReplace = false) {
     if (!$zoneId) {
         return ['success' => false, 'error' => 'Нет зоны в аккаунте — привязка невозможна (§8).'];
     }
@@ -198,90 +203,114 @@ function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptNa
         return ['success' => true, 'domain_id' => $extractId($resp), 'notes' => $notes, 'dns_backup' => []];
     }
 
-    // HTTP 409 Conflict: PUT workers/domains НЕ перезаписывает молча. Разбираем причину,
-    // по возможности устраняем конфликт и повторяем PUT. Всё, что меняем, кладём в стек
-    // отката ($undo): если привязка в итоге не удалась — возвращаем прежнее состояние,
-    // чтобы домен не остался «подвешенным» (например, снятым с прежнего сервера).
-    if ((int)($resp['http_code'] ?? 0) === 409) {
-        $undo = [];        // список замыканий-восстановителей (применяются в обратном порядке)
-        $dnsBackup = [];   // снятые A/AAAA/CNAME апекса — под откат после успешной привязки
+    // Не 409 — сразу читаемая ошибка.
+    if ((int)($resp['http_code'] ?? 0) !== 409) {
+        return ['success' => false, 'error' => cfDeployApiError($resp, 'workers/domains PUT: '),
+                'notes' => $notes, 'dns_backup' => []];
+    }
 
-        // (а) Хост уже привязан как Custom Domain к другому воркеру — отвязываем его.
-        $wd = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
-            "accounts/$accountCfId/workers/domains?hostname=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
-        if (!empty($wd['success']) && !empty($wd['data'])) {
-            $rec  = is_array($wd['data']) ? reset($wd['data']) : $wd['data'];
-            $svc  = is_object($rec) ? ($rec->service ?? null)     : ($rec['service'] ?? null);
-            $rid  = is_object($rec) ? ($rec->id ?? null)          : ($rec['id'] ?? null);
-            $env  = is_object($rec) ? ($rec->environment ?? null) : ($rec['environment'] ?? null);
-            $rhn  = is_object($rec) ? ($rec->hostname ?? '')      : ($rec['hostname'] ?? '');
-            if ($rid && $svc && $svc !== $scriptName && strcasecmp($rhn, $domain) === 0) {
-                cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
-                    "accounts/$accountCfId/workers/domains/$rid", 'DELETE', [], $proxies, $userId, $credentials['auth_type'] ?? null);
-                $undo[] = function () use ($pdo, $credentials, $accountCfId, $zoneId, $domain, $svc, $env, $proxies, $userId) {
-                    cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
-                        "accounts/$accountCfId/workers/domains", 'PUT', [
-                            'hostname' => $domain, 'service' => $svc, 'zone_id' => $zoneId,
-                            'environment' => $env ?: 'production',
-                        ], $proxies, $userId, $credentials['auth_type'] ?? null);
-                };
-                $notes[] = "отвязан от воркера «$svc»";
-                $resp = $put();
-                if (!empty($resp['success'])) {
-                    return ['success' => true, 'domain_id' => $extractId($resp), 'notes' => $notes, 'dns_backup' => $dnsBackup];
-                }
-            }
-        }
+    // ── HTTP 409 Conflict: PUT workers/domains НЕ перезаписывает молча. ──
+    // Сначала ТОЛЬКО ЧИТАЕМ причины (ничего не меняем), чтобы при необходимости
+    // спросить второе подтверждение до любого разрушительного действия.
 
-        // (б) На апексе есть конфликтующая DNS-запись (A/AAAA/CNAME от «прежнего сервера»).
-        //     Custom Domain создаёт свою управляемую запись, поэтому снимаем ТОЛЬКО точные
-        //     A/AAAA/CNAME на этом хосте (TXT/MX/CAA/NS/SRV и любые др. имена НЕ трогаем —
-        //     напр. TXT-подтверждение Google Search Console остаётся), c бэкапом под откат.
-        if ((int)($resp['http_code'] ?? 0) === 409) {
-            $dns = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
-                "zones/$zoneId/dns_records?name=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
-            if (!empty($dns['success']) && !empty($dns['data'])) {
-                foreach ((array)$dns['data'] as $r) {
-                    $type = is_object($r) ? ($r->type ?? '')    : ($r['type'] ?? '');
-                    $name = is_object($r) ? ($r->name ?? '')    : ($r['name'] ?? '');
-                    $rid  = is_object($r) ? ($r->id ?? '')      : ($r['id'] ?? '');
-                    // Строгие фильтры: точное совпадение имени с апексом + только маршрутные типы.
-                    if (!$rid || strcasecmp($name, $domain) !== 0) continue;
-                    if (!in_array($type, ['A', 'AAAA', 'CNAME'], true)) continue;
-
-                    $backupRec = [
-                        'type'    => $type,
-                        'name'    => $name,
-                        'content' => is_object($r) ? ($r->content ?? '') : ($r['content'] ?? ''),
-                        'ttl'     => is_object($r) ? ($r->ttl ?? 1)      : ($r['ttl'] ?? 1),
-                        'proxied' => is_object($r) ? (bool)($r->proxied ?? false) : (bool)($r['proxied'] ?? false),
-                    ];
-                    $del = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
-                        "zones/$zoneId/dns_records/$rid", 'DELETE', [], $proxies, $userId, $credentials['auth_type'] ?? null);
-                    if (($del['http_code'] ?? 0) === 200 || !empty($del['success'])) {
-                        $dnsBackup[] = $backupRec;
-                    }
-                }
-            }
-            if (!empty($dnsBackup)) {
-                $undo[] = function () use ($pdo, $credentials, $zoneId, $dnsBackup, $proxies, $userId) {
-                    cfDeployRecreateDnsRecords($pdo, $credentials, $zoneId, $dnsBackup, $proxies, $userId);
-                };
-                $notes[] = 'заменена DNS-запись на апексе (' . count($dnsBackup) . ')';
-                $resp = $put();
-                if (!empty($resp['success'])) {
-                    return ['success' => true, 'domain_id' => $extractId($resp), 'notes' => $notes, 'dns_backup' => $dnsBackup];
-                }
-            }
-        }
-
-        // Привязка так и не удалась — откатываем все внесённые изменения (обратный порядок).
-        if (!empty($undo)) {
-            for ($i = count($undo) - 1; $i >= 0; $i--) { $undo[$i](); }
-            $notes[] = 'изменения отменены — домен возвращён в прежнее состояние';
+    // (а) Хост уже привязан как Custom Domain к другому воркеру?
+    $otherWorker = null; // ['id','service','environment']
+    $wd = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "accounts/$accountCfId/workers/domains?hostname=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+    if (!empty($wd['success']) && !empty($wd['data'])) {
+        $rec = is_array($wd['data']) ? reset($wd['data']) : $wd['data'];
+        $svc = is_object($rec) ? ($rec->service ?? null)     : ($rec['service'] ?? null);
+        $rid = is_object($rec) ? ($rec->id ?? null)          : ($rec['id'] ?? null);
+        $env = is_object($rec) ? ($rec->environment ?? null) : ($rec['environment'] ?? null);
+        $rhn = is_object($rec) ? ($rec->hostname ?? '')      : ($rec['hostname'] ?? '');
+        if ($rid && $svc && $svc !== $scriptName && strcasecmp($rhn, $domain) === 0) {
+            $otherWorker = ['id' => $rid, 'service' => $svc, 'environment' => $env ?: 'production'];
         }
     }
 
+    // (б) На апексе есть конфликтующая DNS-запись (A/AAAA/CNAME от «прежнего сервера»)?
+    //     ТОЛЬКО точное совпадение имени + маршрутные типы. TXT/MX/CAA/NS/SRV и любые
+    //     другие имена НЕ трогаются (напр. TXT-подтверждение Google Search Console).
+    $conflicts = []; // [['id','type','name','content','ttl','proxied'], ...]
+    $dns = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "zones/$zoneId/dns_records?name=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+    if (!empty($dns['success']) && !empty($dns['data'])) {
+        foreach ((array)$dns['data'] as $r) {
+            $type = is_object($r) ? ($r->type ?? '') : ($r['type'] ?? '');
+            $name = is_object($r) ? ($r->name ?? '') : ($r['name'] ?? '');
+            $rid  = is_object($r) ? ($r->id ?? '')   : ($r['id'] ?? '');
+            if (!$rid || strcasecmp($name, $domain) !== 0) continue;
+            if (!in_array($type, ['A', 'AAAA', 'CNAME'], true)) continue;
+            $conflicts[] = [
+                'id'      => $rid,
+                'type'    => $type,
+                'name'    => $name,
+                'content' => is_object($r) ? ($r->content ?? '') : ($r['content'] ?? ''),
+                'ttl'     => is_object($r) ? ($r->ttl ?? 1)      : ($r['ttl'] ?? 1),
+                'proxied' => is_object($r) ? (bool)($r->proxied ?? false) : (bool)($r['proxied'] ?? false),
+            ];
+        }
+    }
+
+    // Есть что удалять на апексе, но пользователь ещё не подтвердил замену DNS —
+    // возвращаем запрос второго подтверждения. Ничего не меняли — состояние чистое.
+    if (!empty($conflicts) && !$allowDnsReplace) {
+        return [
+            'success'          => false,
+            'needs_dns_confirm'=> true,
+            'other_worker'     => $otherWorker['service'] ?? null,
+            'conflict_records' => array_map(function ($c) {
+                return ['type' => $c['type'], 'name' => $c['name'],
+                        'content' => $c['content'], 'proxied' => $c['proxied']];
+            }, $conflicts),
+            'notes'            => $notes,
+            'dns_backup'       => [],
+        ];
+    }
+
+    // ── Разрешено действовать: устраняем конфликты, повторяем PUT. Всё, что меняем,
+    //    кладём в стек отката ($undo) — если привязка не удастся, вернём как было. ──
+    $undo = [];
+    $dnsBackup = [];
+
+    if ($otherWorker) {
+        cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+            "accounts/$accountCfId/workers/domains/{$otherWorker['id']}", 'DELETE', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+        $undo[] = function () use ($pdo, $credentials, $accountCfId, $zoneId, $domain, $otherWorker, $proxies, $userId) {
+            cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+                "accounts/$accountCfId/workers/domains", 'PUT', [
+                    'hostname' => $domain, 'service' => $otherWorker['service'],
+                    'zone_id' => $zoneId, 'environment' => $otherWorker['environment'],
+                ], $proxies, $userId, $credentials['auth_type'] ?? null);
+        };
+        $notes[] = "отвязан от воркера «{$otherWorker['service']}»";
+    }
+
+    foreach ($conflicts as $c) {
+        $del = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+            "zones/$zoneId/dns_records/{$c['id']}", 'DELETE', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+        if (($del['http_code'] ?? 0) === 200 || !empty($del['success'])) {
+            unset($c['id']);
+            $dnsBackup[] = $c;
+        }
+    }
+    if (!empty($dnsBackup)) {
+        $undo[] = function () use ($pdo, $credentials, $zoneId, $dnsBackup, $proxies, $userId) {
+            cfDeployRecreateDnsRecords($pdo, $credentials, $zoneId, $dnsBackup, $proxies, $userId);
+        };
+        $notes[] = 'заменена DNS-запись на апексе (' . count($dnsBackup) . ')';
+    }
+
+    $resp = $put();
+    if (!empty($resp['success'])) {
+        return ['success' => true, 'domain_id' => $extractId($resp), 'notes' => $notes, 'dns_backup' => $dnsBackup];
+    }
+
+    // Привязка так и не удалась — откатываем всё внесённое (в обратном порядке).
+    if (!empty($undo)) {
+        for ($i = count($undo) - 1; $i >= 0; $i--) { $undo[$i](); }
+        $notes[] = 'изменения отменены — домен возвращён в прежнее состояние';
+    }
     return ['success' => false, 'error' => cfDeployApiError($resp, 'workers/domains PUT: '),
             'notes' => $notes, 'dns_backup' => []];
 }
@@ -307,6 +336,78 @@ function cfDeployRecreateDnsRecords($pdo, $credentials, $zoneId, $records, $prox
         if (!empty($resp['success'])) $ok++;
     }
     return $ok;
+}
+
+/**
+ * «Мост»: приводит общее состояние домена в cloudflare_accounts (dns_ip/proxied/zone_id)
+ * к реальности после привязки/отвязки Custom Domain — чтобы дашборд и раздел доменов
+ * показывали то же, что и деплой (единая сущность домена).
+ *
+ * - $boundToWorker=true: домен ушёл на воркер CF (апексного origin A больше нет) →
+ *   dns_ip=маркер, proxied=1. Иначе дашборд остался бы со старым IP «прежнего сервера».
+ * - $boundToWorker=false (после отвязки): перечитываем апекс из CF и пишем фактический
+ *   IP/proxied; если апексных A/AAAA/CNAME нет — состояние не трогаем (не затираем).
+ *
+ * Обновляет ВСЕ строки домена этого пользователя (домен = одна сущность, на каком бы
+ * кредетале он ни висел). Пишет мягко, под dbRetryOnLock. Ошибки не роняют деплой.
+ */
+function cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $zoneId, $proxies, $boundToWorker) {
+    try {
+        $dnsIp = null; $proxied = null;
+
+        if ($boundToWorker) {
+            $dnsIp = CF_DEPLOY_WORKER_DNS_MARKER;
+            $proxied = 1;
+        } elseif ($zoneId) {
+            // Перечитываем апексные маршрутные записи (после отвязки/восстановления).
+            $resp = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+                "zones/$zoneId/dns_records?name=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+            if (!empty($resp['success']) && !empty($resp['data'])) {
+                $ips = [];
+                foreach ((array)$resp['data'] as $r) {
+                    $type = is_object($r) ? ($r->type ?? '') : ($r['type'] ?? '');
+                    $name = is_object($r) ? ($r->name ?? '') : ($r['name'] ?? '');
+                    if (strcasecmp($name, $domain) !== 0) continue;
+                    if (!in_array($type, ['A', 'AAAA', 'CNAME'], true)) continue;
+                    $ips[] = is_object($r) ? ($r->content ?? '') : ($r['content'] ?? '');
+                    if ($proxied === null) {
+                        $p = is_object($r) ? ($r->proxied ?? false) : ($r['proxied'] ?? false);
+                        $proxied = $p ? 1 : 0;
+                    }
+                }
+                $ips = array_values(array_filter(array_unique($ips)));
+                if ($ips) $dnsIp = implode(', ', $ips);
+            }
+        }
+
+        // После отвязки апекс пуст (нет origin-записи) — не показываем ложный маркер «на
+        // воркере»: сбрасываем dns_ip там, где стоит именно наш маркер. Прочее не трогаем.
+        if ($dnsIp === null && $proxied === null) {
+            if (!$boundToWorker) {
+                dbRetryOnLock(function () use ($pdo, $userId, $domain) {
+                    $pdo->prepare("UPDATE cloudflare_accounts
+                        SET dns_ip = NULL, proxied = 0, last_check = datetime('now'), updated_at = datetime('now')
+                        WHERE user_id = ? AND domain = ? AND dns_ip = ?")
+                        ->execute([$userId, $domain, CF_DEPLOY_WORKER_DNS_MARKER]);
+                });
+            }
+            return;
+        }
+
+        dbRetryOnLock(function () use ($pdo, $userId, $domain, $zoneId, $dnsIp, $proxied) {
+            $pdo->prepare("UPDATE cloudflare_accounts
+                SET dns_ip = COALESCE(?, dns_ip),
+                    proxied = COALESCE(?, proxied),
+                    zone_id = COALESCE(NULLIF(?, ''), zone_id),
+                    last_check = datetime('now'),
+                    updated_at = datetime('now')
+                WHERE user_id = ? AND domain = ?")
+                ->execute([$dnsIp, $proxied, $zoneId, $userId, $domain]);
+        });
+    } catch (Exception $e) {
+        // «Мост» — вспомогательная синхронизация: не должна ронять привязку/отвязку.
+        if ($userId) logActionSafe($pdo, $userId, 'Deploy Bridge Sync Failed', "domain=$domain err=" . $e->getMessage());
+    }
 }
 
 /**

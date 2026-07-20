@@ -860,21 +860,38 @@ $pageScripts = <<<'JS'
         }
     }
 
+    function bindResult(data) {
+        if (data.success) {
+            const notes = (data.notes && data.notes.length) ? ' (' + data.notes.join('; ') + ')' : '';
+            showToast('Домен привязан. SSL: ' + (data.ssl_status || '—') + notes, 'success');
+            loadSites();
+        } else {
+            showToast(data.error || 'Ошибка привязки', 'error');
+        }
+    }
+
     async function bindDomain(accountId, domain) {
         if (!confirm('Привязать домен ' + domain + ' к этому сайту и включить SSL?\n\n'
             + 'Cloudflare создаст управляемую DNS-запись и выпустит сертификат. Если домен привязан к другому '
-            + 'воркеру — он будет перепривязан на этот сайт. Если на апексе есть A/AAAA/CNAME-запись, '
-            + 'указывающая на прежний сервер, — она будет заменена (домен начнёт обслуживаться этим сайтом). '
-            + 'Прежняя запись сохраняется и восстанавливается при «Отвязать». TXT/MX/CAA не трогаются.')) return;
+            + 'воркеру — он будет перепривязан на этот сайт. TXT/MX/CAA не трогаются.')) return;
         try {
-            const data = await apiPost({ action: 'bind_domain', account_id: accountId, domain: domain, confirm: 1 });
-            if (data.success) {
-                const notes = (data.notes && data.notes.length) ? ' (' + data.notes.join('; ') + ')' : '';
-                showToast('Домен привязан. SSL: ' + (data.ssl_status || '—') + notes, 'success');
-                loadSites();
-            } else {
-                showToast(data.error || 'Ошибка привязки', 'error');
+            let data = await apiPost({ action: 'bind_domain', account_id: accountId, domain: domain, confirm: 1 });
+
+            // Второй барьер: на апексе есть A/AAAA/CNAME на прежний сервер — спрашиваем отдельно.
+            if (data && data.needs_dns_confirm) {
+                const recs = (data.conflict_records || [])
+                    .map(r => '  • ' + r.type + ' ' + r.name + ' → ' + r.content + (r.proxied ? ' (proxied)' : ''))
+                    .join('\n');
+                const msg = 'На апексе домена ' + domain + ' есть DNS-запись, указывающая на прежний сервер:\n\n'
+                    + recs + '\n\n'
+                    + 'Чтобы домен обслуживался этим сайтом на edge Cloudflare, эту запись нужно заменить '
+                    + 'на управляемую. Прежняя запись будет сохранена и восстановлена при «Отвязать». '
+                    + 'TXT/MX/CAA и другие записи не трогаются.\n\nЗаменить и привязать?';
+                if (!confirm(msg)) { showToast('Привязка отменена', 'info'); return; }
+                data = await apiPost({ action: 'bind_domain', account_id: accountId, domain: domain,
+                    confirm: 1, confirm_dns_replace: 1 });
             }
+            bindResult(data);
         } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
     }
 
