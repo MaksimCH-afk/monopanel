@@ -830,6 +830,10 @@ $pageScripts = <<<'JS'
                     + '<i class="fas fa-circle-check me-2"></i>Сайт опубликован. '
                     + (url ? ('<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>') : 'URL уточните в Cloudflare.')
                     + '</div>';
+                if (data.warning) {
+                    html += '<div class="alert alert-warning py-2 mb-2 small"><i class="fas fa-triangle-exclamation me-2"></i>'
+                        + esc(data.warning) + '</div>';
+                }
                 if (data.zone_in_account) {
                     html += '<button type="button" class="btn btn-primary btn-sm" id="bindAfterDeploy">'
                         + '<i class="fas fa-link me-2"></i>Привязать домен ' + domainInput.value.trim() + ' + SSL</button>';

@@ -384,7 +384,7 @@ function cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $zoneId,
         // воркере»: сбрасываем dns_ip там, где стоит именно наш маркер. Прочее не трогаем.
         if ($dnsIp === null && $proxied === null) {
             if (!$boundToWorker) {
-                dbRetryOnLock(function () use ($pdo, $userId, $domain) {
+                dbImmediateTxn($pdo, function () use ($pdo, $userId, $domain) {
                     $pdo->prepare("UPDATE cloudflare_accounts
                         SET dns_ip = NULL, proxied = 0, last_check = datetime('now'), updated_at = datetime('now')
                         WHERE user_id = ? AND domain = ? AND dns_ip = ?")
@@ -394,7 +394,7 @@ function cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $zoneId,
             return;
         }
 
-        dbRetryOnLock(function () use ($pdo, $userId, $domain, $zoneId, $dnsIp, $proxied) {
+        dbImmediateTxn($pdo, function () use ($pdo, $userId, $domain, $zoneId, $dnsIp, $proxied) {
             $pdo->prepare("UPDATE cloudflare_accounts
                 SET dns_ip = COALESCE(?, dns_ip),
                     proxied = COALESCE(?, proxied),
