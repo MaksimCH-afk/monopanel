@@ -70,6 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $userId = $_SESSION['user_id'];
+
+// Все действия модуля деплоя конкурируют за запись с фоновыми процессами
+// (мониторинг/очередь/синхронизация). Даём БД-записям ждать дольше (как в тяжёлых
+// операциях мастер-токена), чтобы не падать на «database is locked».
+try { $pdo->exec('PRAGMA busy_timeout = 120000'); } catch (Throwable $e) { /* не критично */ }
 // Для загрузки файла запрос идёт как multipart/form-data → action в $_POST.
 // Прочие (будущие) действия могут приходить JSON-ом.
 $action = $_POST['action'] ?? null;
@@ -255,10 +260,8 @@ try {
             break;
 
         case 'deploy':
-            // FR-6: публикация сайта на Workers Static Assets (workers.dev). Домен/SSL — фаза 3.
-            // Публикация долгая (много сетевых вызовов CF) и конкурирует за запись с фоновыми
-            // процессами — даём БД-записям ждать дольше (как в тяжёлых операциях мастер-токена).
-            try { $pdo->exec('PRAGMA busy_timeout = 120000'); } catch (Throwable $e) { /* не критично */ }
+            // FR-6: публикация сайта на Workers Static Assets. При наличии зоны в аккаунте —
+            // сразу привязываем домен (вариант 2: минуем «жизнь только на workers.dev»).
             $accId  = (int)($_POST['account_id'] ?? 0);
             $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
             $mode   = ($_POST['mode'] ?? 'static-only') === 'worker-first' ? 'worker-first' : 'static-only';
@@ -360,6 +363,39 @@ try {
                 logAction($pdo, $userId, 'Deploy Failed', "domain=$domain worker=$scriptName err=" . ($deploy['error'] ?? '?'));
             }
 
+            // ── Вариант 2: сразу привязываем домен, если его зона в аккаунте. Так сайт едет
+            //    прямо на домен, а не «живёт только на workers.dev». Замена апексной DNS —
+            //    автоматически (с бэкапом под откат при «Отвязать»). Не удалось привязать —
+            //    деплой всё равно успешен (сайт на workers.dev), сообщаем причину.
+            $bound = false; $sslStatus = null; $bindNotes = []; $bindError = null;
+            if ($deploy['success'] && $resolve['zone_in_account'] && !empty($resolve['zone_id'])) {
+                cfDeployPhase('привязка домена');
+                $bind = cfDeployBindDomain($pdo, $credentials, $resolve['account_cf_id'],
+                    $resolve['zone_id'], $scriptName, $domain, $proxies, $userId, true);
+                if (!empty($bind['success'])) {
+                    $bound = true;
+                    $bindNotes = $bind['notes'] ?? [];
+                    $status = cfDeployBindingStatus($pdo, $credentials, $resolve['account_cf_id'],
+                        $resolve['zone_id'], $scriptName, $domain, $proxies, $userId);
+                    $sslStatus = $status['ssl_status'];
+                    $dnsBackup = $bind['dns_backup'] ?? [];
+                    try {
+                        dbImmediateTxn($pdo, function () use ($pdo, $status, $resolve, $dnsBackup, $siteId) {
+                            $pdo->prepare("UPDATE cf_deploy_sites SET custom_domain_bound=1, ssl_status=?, zone_id=?,
+                                dns_backup=?, updated_at=datetime('now') WHERE id=?")
+                                ->execute([$status['ssl_status'], $resolve['zone_id'],
+                                    $dnsBackup ? json_encode($dnsBackup) : null, $siteId]);
+                        });
+                    } catch (Throwable $e) { /* привязка на CF прошла; статус добьётся списком */ }
+                    cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $resolve['zone_id'], $proxies, true);
+                    logActionSafe($pdo, $userId, 'Deploy Auto-Bind', "domain=$domain ssl=$sslStatus"
+                        . ($bindNotes ? ' notes=' . implode('; ', $bindNotes) : ''));
+                } else {
+                    $bindError = $bind['error'] ?? 'не удалось привязать домен';
+                    logAction($pdo, $userId, 'Deploy Auto-Bind Failed', "domain=$domain err=$bindError");
+                }
+            }
+
             cfDeployRespond([
                 'success'         => (bool)$deploy['success'],
                 'error'           => $deploy['error'] ?? null,
@@ -367,6 +403,11 @@ try {
                 'worker_name'     => $scriptName,
                 'workers_dev_url' => $deploy['workers_dev_url'] ?? null,
                 'zone_in_account' => $resolve['zone_in_account'],
+                'bound'           => $bound,
+                'ssl_status'      => $sslStatus,
+                'bind_notes'      => $bindNotes,
+                'bind_error'      => $bindError,
+                'site_url'        => $bound ? ('https://' . $domain) : null,
                 'steps'           => $deploy['steps'] ?? [],
             ]);
             break;
@@ -533,6 +574,55 @@ try {
             cfDeployRespond(['success' => true, 'domain' => $domain, 'restored_dns' => $restored]);
             break;
 
+        case 'delete_site':
+            // Полное удаление опубликованного сайта: отвязка домена (+ восстановление DNS),
+            // удаление воркера с Cloudflare и очистка записей/исходника в панели.
+            $accId  = (int)($_POST['account_id'] ?? 0);
+            $domain = cfDeployNormalizeDomain($_POST['domain'] ?? '');
+            if ($accId <= 0) throw new Exception('Не выбран аккаунт Cloudflare.');
+            $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
+            if (!$site) throw new Exception('Сайт не найден.');
+
+            $credentials = cfDeployLoadCredentials($pdo, $userId, $accId);
+            $proxies = getProxies($pdo, $userId);
+            $scriptName = $site['worker_name'] ?: cfWorkerScriptName($domain);
+            $resolve = cfDeployResolveAccount($pdo, $credentials, $domain, $proxies, $userId);
+
+            // 1) Привязан — отвязываем и восстанавливаем прежний DNS апекса (как в «Отвязать»).
+            $restored = 0;
+            if ((int)$site['custom_domain_bound'] === 1 && !empty($resolve['account_cf_id'])) {
+                cfDeployUnbindDomain($pdo, $credentials, $resolve['account_cf_id'], $domain, $proxies, $userId);
+                if (!empty($site['dns_backup']) && !empty($resolve['zone_id'])) {
+                    $backup = json_decode($site['dns_backup'], true);
+                    if (is_array($backup) && $backup) {
+                        $restored = cfDeployRecreateDnsRecords($pdo, $credentials, $resolve['zone_id'], $backup, $proxies, $userId);
+                    }
+                }
+                cfDeployBridgeSyncDomain($pdo, $userId, $domain, $credentials, $resolve['zone_id'] ?? null, $proxies, false);
+            }
+
+            // 2) Удаляем воркер с Cloudflare (404 = уже нет — ок).
+            $workerErr = null;
+            if (!empty($resolve['account_cf_id'])) {
+                $del = cfDeployDeleteWorker($pdo, $credentials, $resolve['account_cf_id'], $scriptName, $proxies, $userId);
+                if (empty($del['success'])) $workerErr = $del['error'];
+            }
+
+            // 3) Чистим записи панели и локальный исходник.
+            $siteId = (int)$site['id'];
+            dbImmediateTxn($pdo, function () use ($pdo, $siteId) {
+                $pdo->prepare("DELETE FROM cf_deploy_page_meta WHERE site_id=?")->execute([$siteId]);
+                $pdo->prepare("DELETE FROM cf_deploy_versions WHERE site_id=?")->execute([$siteId]);
+                $pdo->prepare("DELETE FROM cf_deploy_sites WHERE id=?")->execute([$siteId]);
+            });
+            cfDeployRmrf(cfDeploySiteSrcDir($siteId));
+
+            logAction($pdo, $userId, 'Deploy Site Deleted',
+                "domain=$domain worker=$scriptName restored_dns=$restored" . ($workerErr ? " worker_err=$workerErr" : ''));
+            cfDeployRespond(['success' => true, 'domain' => $domain, 'restored_dns' => $restored,
+                'worker_error' => $workerErr]);
+            break;
+
         case 'binding_status':
             // Перечитать статус привязки/SSL (кнопка «Проверить SSL»).
             $accId  = (int)($_POST['account_id'] ?? 0);
@@ -589,7 +679,7 @@ try {
             if (!$site) throw new Exception('Сайт не найден — сначала опубликуйте его.');
             if ($prefix === '') throw new Exception('Не указан префикс подпапки.');
 
-            dbRetryOnLock(function () use ($pdo, $site, $prefix, $share) {
+            dbImmediateTxn($pdo, function () use ($pdo, $site, $prefix, $share) {
                 $pdo->prepare("INSERT INTO cf_deploy_versions (site_id, prefix, source_prefix, share_root_assets)
                     VALUES (?, ?, '', ?)
                     ON CONFLICT(site_id, prefix) DO UPDATE SET share_root_assets = excluded.share_root_assets,
@@ -611,7 +701,7 @@ try {
             $site = cfDeployFindSite($pdo, $userId, $accId, $domain);
             if (!$site) throw new Exception('Сайт не найден.');
 
-            dbRetryOnLock(function () use ($pdo, $site, $prefix) {
+            dbImmediateTxn($pdo, function () use ($pdo, $site, $prefix) {
                 $pdo->prepare("DELETE FROM cf_deploy_versions WHERE site_id = ? AND prefix = ?")
                     ->execute([$site['id'], $prefix]);
             });

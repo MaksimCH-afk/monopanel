@@ -47,16 +47,6 @@ function cfDeployApiError($resp, $prefix = '') {
     return $prefix ? ($prefix . $msg) : $msg;
 }
 
-/** Числовой код первой ошибки CF из ответа (даже для не-200, из raw_response). */
-function cfDeployApiErrorCode($resp) {
-    if (!empty($resp['api_errors'][0]['code'])) return (int)$resp['api_errors'][0]['code'];
-    if (!empty($resp['raw_response'])) {
-        $j = json_decode((string)$resp['raw_response'], true);
-        if (isset($j['errors'][0]['code'])) return (int)$j['errors'][0]['code'];
-    }
-    return 0;
-}
-
 /**
  * Определяет CF account_id и статус зоны для домена.
  * Если зона есть в аккаунте — берём account_id из неё; иначе (деплой только на
@@ -213,7 +203,8 @@ function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptNa
     // Сначала ТОЛЬКО ЧИТАЕМ причины (ничего не меняем), чтобы при необходимости
     // спросить второе подтверждение до любого разрушительного действия.
 
-    // (а) Хост уже привязан как Custom Domain к другому воркеру?
+    // (а) Хост уже привязан как Custom Domain к другому воркеру? (а если к этому же —
+    //     привязка уже есть, считаем успехом: важно для идемпотентного re-deploy.)
     $otherWorker = null; // ['id','service','environment']
     $wd = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
         "accounts/$accountCfId/workers/domains?hostname=$domain", 'GET', [], $proxies, $userId, $credentials['auth_type'] ?? null);
@@ -223,7 +214,10 @@ function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptNa
         $rid = is_object($rec) ? ($rec->id ?? null)          : ($rec['id'] ?? null);
         $env = is_object($rec) ? ($rec->environment ?? null) : ($rec['environment'] ?? null);
         $rhn = is_object($rec) ? ($rec->hostname ?? '')      : ($rec['hostname'] ?? '');
-        if ($rid && $svc && $svc !== $scriptName && strcasecmp($rhn, $domain) === 0) {
+        if ($rid && $svc && strcasecmp($rhn, $domain) === 0) {
+            if ($svc === $scriptName) {
+                return ['success' => true, 'domain_id' => $rid, 'notes' => $notes, 'dns_backup' => []];
+            }
             $otherWorker = ['id' => $rid, 'service' => $svc, 'environment' => $env ?: 'production'];
         }
     }
@@ -313,6 +307,22 @@ function cfDeployBindDomain($pdo, $credentials, $accountCfId, $zoneId, $scriptNa
     }
     return ['success' => false, 'error' => cfDeployApiError($resp, 'workers/domains PUT: '),
             'notes' => $notes, 'dns_backup' => []];
+}
+
+/**
+ * Удаляет воркер-скрипт (сайт) с Cloudflare: DELETE /accounts/{id}/workers/scripts/{name}.
+ * 404 (уже нет) считаем успехом. Custom Domain/маршруты CF снимает сам при удалении скрипта.
+ *
+ * @return array ['success'=>bool,'error'=>?]
+ */
+function cfDeployDeleteWorker($pdo, $credentials, $accountCfId, $scriptName, $proxies, $userId) {
+    $resp = cloudflareApiRequestDetailed($pdo, $credentials['email'], $credentials['api_key'],
+        "accounts/$accountCfId/workers/scripts/$scriptName", 'DELETE', [], $proxies, $userId, $credentials['auth_type'] ?? null);
+    $code = (int)($resp['http_code'] ?? 0);
+    if ($code === 200 || $code === 404 || !empty($resp['success'])) {
+        return ['success' => true];
+    }
+    return ['success' => false, 'error' => cfDeployApiError($resp, 'workers/scripts DELETE: ')];
 }
 
 /**
