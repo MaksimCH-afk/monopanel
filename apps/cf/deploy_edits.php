@@ -4,9 +4,8 @@
  *
  *  - FR-10.1: копия сайта в подпапку (/en/, /es-cl/) — самодостаточная (переписывание
  *    корне-абсолютных путей) либо с общими ассетами корня.
- *  - FR-10.2: управление мета-тегами (canonical / hreflang / x-default) с авто-реципрокным
- *    кластером; конфиг хранится в модуле (cf_deploy_meta) и переприменяется при каждом
- *    деплое/пересборке (в т.ч. после re-upload — FR-9).
+ *  - FR-10.3: пер-страничные SEO-метатеги (title/description/H1/canonical/robots/hreflang)
+ *    в таблице cf_deploy_page_meta — переприменяются при каждой сборке/публикации.
  *
  * Чтобы править сайт БЕЗ повторной загрузки ZIP, модуль хранит исходник корня сайта в
  * постоянном хранилище (см. cfDeployStoreBase) и на каждую публикацию собирает финальный
@@ -210,7 +209,7 @@ function cfDeploySavePageMeta($pdo, $siteId, $path, $fields) {
         $vals[$k] = $norm($fields[$k] ?? '');
         if ($vals[$k] !== null) $has = true;
     }
-    dbRetryOnLock(function () use ($pdo, $siteId, $path, $vals, $has) {
+    dbImmediateTxn($pdo, function () use ($pdo, $siteId, $path, $vals, $has) {
         if (!$has) {
             $pdo->prepare("DELETE FROM cf_deploy_page_meta WHERE site_id=? AND path=?")->execute([$siteId, $path]);
             return;

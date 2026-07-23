@@ -336,16 +336,6 @@ try {
             UNIQUE(site_id, prefix),
             FOREIGN KEY (site_id) REFERENCES cf_deploy_sites(id)
         );
-
-        -- Мета/hreflang-конфиг сайта — хранится в модуле, переприменяется при re-upload (FR-10.2).
-        CREATE TABLE IF NOT EXISTS cf_deploy_meta (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            site_id INTEGER NOT NULL,
-            config_json TEXT,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(site_id),
-            FOREIGN KEY (site_id) REFERENCES cf_deploy_sites(id)
-        );
     ");
 
     // Добавляем индекс для оптимизации фильтра по group_id

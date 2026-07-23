@@ -43,10 +43,10 @@ include 'sidebar.php';
         <i class="fas fa-circle-info me-2 mt-1"></i>
         <div>
             <strong>Загрузите ZIP → проверьте архив → выберите аккаунт и домен → опубликуйте.</strong>
-            Лимит 25&nbsp;MiB <em>на каждый файл</em> (размер архива не ограничен). Публикация идёт на
-            служебный <code>*.workers.dev</code>; если домен в выбранном аккаунте — его можно привязать
-            (Custom Domain + SSL) в блоке «Мои сайты». Тогда воркер обслуживает домен на edge Cloudflare
-            с приоритетом над прежним сервером.
+            Лимит 25&nbsp;MiB <em>на каждый файл</em> (размер архива не ограничен). Если домен в выбранном
+            аккаунте — сайт <strong>сразу привязывается к домену</strong> (Custom Domain + SSL, edge Cloudflare
+            с приоритетом над прежним сервером; прежняя апексная DNS-запись сохраняется для отката). Если зоны
+            домена в аккаунте нет — сайт публикуется на служебный <code>*.workers.dev</code>.
         </div>
     </div>
 
@@ -825,28 +825,42 @@ $pageScripts = <<<'JS'
             });
 
             if (data.success) {
+                const dom = domainInput.value.trim();
                 const url = data.workers_dev_url;
-                let html = '<div class="alert alert-success mb-2">'
-                    + '<i class="fas fa-circle-check me-2"></i>Сайт опубликован. '
-                    + (url ? ('<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>') : 'URL уточните в Cloudflare.')
-                    + '</div>';
+                let html = '';
+                if (data.bound) {
+                    // Вариант 2: сайт сразу на домене.
+                    const notes = (data.bind_notes && data.bind_notes.length) ? ' (' + data.bind_notes.join('; ') + ')' : '';
+                    html += '<div class="alert alert-success mb-2">'
+                        + '<i class="fas fa-circle-check me-2"></i>Сайт опубликован и привязан к домену: '
+                        + '<a href="https://' + dom + '" target="_blank" rel="noopener">https://' + dom + '</a>'
+                        + ' — SSL: ' + esc(data.ssl_status || '—') + notes + '</div>';
+                } else {
+                    html += '<div class="alert alert-success mb-2">'
+                        + '<i class="fas fa-circle-check me-2"></i>Сайт опубликован. '
+                        + (url ? ('<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>') : 'URL уточните в Cloudflare.')
+                        + '</div>';
+                }
                 if (data.warning) {
                     html += '<div class="alert alert-warning py-2 mb-2 small"><i class="fas fa-triangle-exclamation me-2"></i>'
                         + esc(data.warning) + '</div>';
                 }
-                if (data.zone_in_account) {
+                if (!data.bound && data.bind_error) {
+                    html += '<div class="alert alert-warning py-2 mb-2 small"><i class="fas fa-triangle-exclamation me-2"></i>'
+                        + 'Домен не привязался автоматически: ' + esc(data.bind_error) + '</div>';
+                }
+                if (!data.bound && data.zone_in_account) {
                     html += '<button type="button" class="btn btn-primary btn-sm" id="bindAfterDeploy">'
-                        + '<i class="fas fa-link me-2"></i>Привязать домен ' + domainInput.value.trim() + ' + SSL</button>';
-                } else {
+                        + '<i class="fas fa-link me-2"></i>Привязать домен ' + dom + ' + SSL</button>';
+                } else if (!data.bound) {
                     html += '<div class="text-muted small"><i class="fas fa-circle-info me-1"></i>'
                         + 'Зоны домена нет в этом аккаунте — привязка недоступна (§8). Сайт живёт на workers.dev.</div>';
                 }
                 finalEl.innerHTML = html;
                 const bindBtn = document.getElementById('bindAfterDeploy');
-                if (bindBtn) bindBtn.addEventListener('click', () =>
-                    bindDomain(accountSelect.value, domainInput.value.trim()));
+                if (bindBtn) bindBtn.addEventListener('click', () => bindDomain(accountSelect.value, dom));
                 loadSites();
-                showToast('Сайт опубликован', 'success');
+                showToast(data.bound ? 'Сайт опубликован и привязан к домену' : 'Сайт опубликован', 'success');
             } else {
                 if (data.report && data.report.oversized && data.report.oversized.length) {
                     showOversized(data.report.oversized);
@@ -922,10 +936,16 @@ $pageScripts = <<<'JS'
                 actions.appendChild(seoBtn);
                 // Версии/мета (FR-10) — для всех сайтов.
                 const verBtn = document.createElement('button');
-                verBtn.className = 'btn btn-sm btn-outline-dark';
+                verBtn.className = 'btn btn-sm btn-outline-dark me-1';
                 verBtn.innerHTML = '<i class="fas fa-sitemap"></i> Версии';
                 verBtn.onclick = () => openVersions(s.account_id, s.domain);
                 actions.appendChild(verBtn);
+                // Полное удаление сайта (воркер + записи).
+                const delBtn = document.createElement('button');
+                delBtn.className = 'btn btn-sm btn-outline-danger';
+                delBtn.innerHTML = '<i class="fas fa-trash"></i> Удалить';
+                delBtn.onclick = () => deleteSite(s.account_id, s.domain, bound);
+                actions.appendChild(delBtn);
                 sitesBody.appendChild(tr);
             });
         } catch (e) {
@@ -988,6 +1008,24 @@ $pageScripts = <<<'JS'
             const data = await apiPost({ action: 'binding_status', account_id: accountId, domain: domain });
             if (data.success) { showToast('SSL: ' + (data.ssl_status || '—') + (data.bound ? '' : ' (не привязан)'), 'info'); loadSites(); }
             else showToast(data.error || 'Ошибка проверки', 'error');
+        } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
+    }
+
+    async function deleteSite(accountId, domain, bound) {
+        let msg = 'Удалить сайт ' + domain + ' полностью?\n\n'
+            + 'Будет удалён воркер с Cloudflare и все записи сайта в панели (версии, SEO-мета, исходник).';
+        if (bound) msg += '\n\nДомен сейчас привязан — он будет отвязан, а прежняя DNS-запись апекса восстановлена.';
+        msg += '\n\nДействие необратимо.';
+        if (!confirm(msg)) return;
+        try {
+            const data = await apiPost({ action: 'delete_site', account_id: accountId, domain: domain });
+            if (data.success) {
+                const r = Number(data.restored_dns || 0);
+                let t = 'Сайт ' + domain + ' удалён' + (r > 0 ? ' (восстановлено DNS-записей: ' + r + ')' : '');
+                showToast(t, 'success');
+                if (data.worker_error) showToast('Воркер: ' + data.worker_error, 'warning');
+                loadSites();
+            } else showToast(data.error || 'Ошибка удаления', 'error');
         } catch (e) { showToast('Ошибка сети: ' + e.message, 'error'); }
     }
 
